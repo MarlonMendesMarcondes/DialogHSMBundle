@@ -43,7 +43,6 @@ class WhatsAppNumber extends FormEntity
     {
         $metadata->addPropertyConstraint('name', new NotBlank(['message' => 'mautic.core.name.required']));
         $metadata->addPropertyConstraint('phoneNumber', new NotBlank(['message' => 'dialoghsm.number.phone.required']));
-        $metadata->addPropertyConstraint('apiKey', new NotBlank(['message' => 'dialoghsm.number.apikey.required']));
     }
 
     public function getId(): ?int

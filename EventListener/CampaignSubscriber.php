@@ -77,8 +77,15 @@ class CampaignSubscriber implements EventSubscriberInterface
             return;
         }
 
+        // Use only the API key stored in the selected WhatsApp number model.
+        // Do not fall back to any integration-level api_key to avoid exposing the key in the integration UI.
         $apiKey  = $whatsAppNumber->getApiKey();
         $baseUrl = $this->getBaseUrl();
+
+        if (empty($apiKey)) {
+            $event->failAll('dialoghsm.campaign.error.missing_api_key');
+            return;
+        }
 
         $contacts = $event->getContacts();
 
@@ -185,9 +192,9 @@ class CampaignSubscriber implements EventSubscriberInterface
             $integration = $this->integrationsHelper->getIntegration(DialogHSMIntegration::NAME);
             $apiKeys     = $integration->getIntegrationConfiguration()->getApiKeys() ?? [];
 
-            return $apiKeys['base_url'] ?? 'https://waba.360dialog.io/v1';
+            return $apiKeys['base_url'] ?? 'https://waba-v2.360dialog.io/messages';
         } catch (\Exception) {
-            return 'https://waba.360dialog.io/v1';
+            return 'https://waba-v2.360dialog.io/messages';
         }
     }
 
