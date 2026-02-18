@@ -25,7 +25,16 @@ class DialogHSMApi
      */
     public function sendMessage(string $apiKey, string $baseUrl, string $mobile, array $payloadData): array
     {
-        $url = rtrim($baseUrl, '/').'/messages';
+        $base = rtrim($baseUrl, '/');
+        $path = parse_url($base, PHP_URL_PATH) ?? '';
+
+        // If the configured base URL already points to an endpoint (eg. marketing_messages or messages),
+        // use it as-is. Otherwise append the legacy '/messages' path.
+        if (str_contains($path, 'marketing_messages') || str_contains($path, 'messages') || str_ends_with($base, 'marketing_messages') || str_ends_with($base, 'messages')) {
+            $url = $base;
+        } else {
+            $url = $base . '/messages';
+        }
 
         $payload = $this->buildPayload($mobile, $payloadData);
 
@@ -48,6 +57,9 @@ class DialogHSMApi
             $statusCode   = $response->getStatusCode();
             $responseBody = json_decode($response->getBody()->getContents(), true);
 
+
+                        // Log payload for debugging (plugin scope)
+                        $this->logger->debug('DialogHSM: sending payload to 360dialog', ['url' => $url, 'payload' => $payload]);
             if ($statusCode >= 200 && $statusCode < 300) {
                 $this->logger->info('DialogHSM: Mensagem enviada com sucesso', [
                     'mobile'      => $mobile,
@@ -115,7 +127,6 @@ class DialogHSMApi
             ];
         }
     }
-
     /**
      * Monta o payload no formato esperado pela 360dialog.
      * Replica a lógica do n8n: monta components a partir de vars, buttons, buttons_vars e url_arquivo.
@@ -188,10 +199,16 @@ class DialogHSMApi
         $payload = $data;
         $payload['recipient_type']    = 'individual';
         $payload['messaging_product'] = 'whatsapp';
-        $payload['components']        = $components;
+        $payload['type']              = 'template';
         $payload['to']                = $formattedmobile;
         $payload['receivers']         = $mobile;
-        $payload['template']          = $data['content'] ?? '';
+
+        // Montar objeto de template no formato esperado pela 360dialog
+        $payload['template'] = [
+            'name'       => $data['content'] ?? '',
+            'language'   => ['code' => $data['language'] ?? 'pt_BR'],
+            'components' => $components,
+        ];
 
         // Remover apenas url_arquivo (já foi processado no header component)
         unset($payload['url_arquivo']);
