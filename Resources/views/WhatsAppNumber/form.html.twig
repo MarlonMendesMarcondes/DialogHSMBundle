@@ -1,0 +1,31 @@
+{% extends '@MauticCore/FormTheme/form_simple.html.twig' %}
+
+{% block mauticContent %}dialoghsm_number{% endblock %}
+{% set isExisting      = entity.getId() %}
+{% set translationBase = 'dialoghsm.number' %}
+{% set mauticContent   = 'dialoghsm_number' %}
+
+{% block primaryFormContent %}
+<div class="row">
+    <div class="col-md-6">
+        {{ form_row(form.name) }}
+    </div>
+    <div class="col-md-6">
+        {{ form_row(form.phoneNumber) }}
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-12">
+        {{ form_row(form.apiKey) }}
+    </div>
+</div>
+{% endblock %}
+
+{% block rightFormContent %}
+{{ form_row(form.isPublished) }}
+
+<div class="hide">
+    {{ form_rest(form) }}
+</div>
+{% endblock %}
