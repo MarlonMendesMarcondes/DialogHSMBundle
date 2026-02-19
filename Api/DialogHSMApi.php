@@ -25,16 +25,7 @@ class DialogHSMApi
      */
     public function sendMessage(string $apiKey, string $baseUrl, string $mobile, array $payloadData): array
     {
-        $base = rtrim($baseUrl, '/');
-        $path = parse_url($base, PHP_URL_PATH) ?? '';
-
-        // If the configured base URL already points to an endpoint (eg. marketing_messages or messages),
-        // use it as-is. Otherwise append the legacy '/messages' path.
-        if (str_contains($path, 'marketing_messages') || str_contains($path, 'messages') || str_ends_with($base, 'marketing_messages') || str_ends_with($base, 'messages')) {
-            $url = $base;
-        } else {
-            $url = $base . '/messages';
-        }
+        $url = rtrim($baseUrl, '/');
 
         $payload = $this->buildPayload($mobile, $payloadData);
 

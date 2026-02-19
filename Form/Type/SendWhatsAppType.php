@@ -6,10 +6,12 @@ namespace MauticPlugin\DialogHSMBundle\Form\Type;
 
 use Mautic\CoreBundle\Form\Type\SortableListType;
 use Symfony\Component\Form\AbstractType;
+use Symfony\Component\Form\Extension\Core\Type\IntegerType;
 use Symfony\Component\Form\FormBuilderInterface;
 use Symfony\Component\Form\FormEvent;
 use Symfony\Component\Form\FormEvents;
 use Symfony\Component\Validator\Constraints\NotBlank;
+use Symfony\Component\Validator\Constraints\Range;
 
 class SendWhatsAppType extends AbstractType
 {
@@ -35,6 +37,46 @@ class SendWhatsAppType extends AbstractType
                 'label'           => 'dialoghsm.campaign.payload_data',
                 'option_required' => false,
                 'with_labels'     => true,
+            ]
+        );
+
+        $builder->add(
+            'send_delay',
+            IntegerType::class,
+            [
+                'label'      => 'dialoghsm.campaign.send_delay',
+                'label_attr' => ['class' => 'control-label'],
+                'attr'       => [
+                    'class'   => 'form-control',
+                    'min'     => 0,
+                    'max'     => 60000,
+                    'tooltip' => 'dialoghsm.campaign.send_delay.tooltip',
+                ],
+                'required'    => false,
+                'empty_data'  => 0,
+                'data'        => 0,
+                'constraints' => [new Range(['min' => 0, 'max' => 60000])],
+                'help'        => 'dialoghsm.campaign.send_delay.help',
+            ]
+        );
+
+        $builder->add(
+            'batch_limit',
+            IntegerType::class,
+            [
+                'label'      => 'dialoghsm.campaign.batch_limit',
+                'label_attr' => ['class' => 'control-label'],
+                'attr'       => [
+                    'class'   => 'form-control',
+                    'min'     => 0,
+                    'max'     => 10000,
+                    'tooltip' => 'dialoghsm.campaign.batch_limit.tooltip',
+                ],
+                'required'    => false,
+                'empty_data'  => 0,
+                'data'        => 0,
+                'constraints' => [new Range(['min' => 0, 'max' => 10000])],
+                'help'        => 'dialoghsm.campaign.batch_limit.help',
             ]
         );
 

@@ -16,6 +16,7 @@ class WhatsAppNumber extends FormEntity
     private ?string $name = null;
     private ?string $phoneNumber = null;
     private ?string $apiKey = null;
+    private ?string $baseUrl = null;
 
     public static function loadMetadata(ORM\ClassMetadata $metadata): void
     {
@@ -36,6 +37,13 @@ class WhatsAppNumber extends FormEntity
         $builder
             ->createField('apiKey', 'text')
             ->columnName('api_key')
+            ->build();
+
+        $builder
+            ->createField('baseUrl', 'string')
+            ->columnName('base_url')
+            ->length(500)
+            ->nullable()
             ->build();
     }
 
@@ -85,6 +93,19 @@ class WhatsAppNumber extends FormEntity
     {
         $this->isChanged('apiKey', $apiKey);
         $this->apiKey = $apiKey;
+
+        return $this;
+    }
+
+    public function getBaseUrl(): ?string
+    {
+        return $this->baseUrl;
+    }
+
+    public function setBaseUrl(?string $baseUrl): self
+    {
+        $this->isChanged('baseUrl', $baseUrl);
+        $this->baseUrl = $baseUrl ?: null;
 
         return $this;
     }
