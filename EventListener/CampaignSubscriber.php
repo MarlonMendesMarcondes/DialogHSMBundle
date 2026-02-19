@@ -80,16 +80,26 @@ class CampaignSubscriber implements EventSubscriberInterface
         // Use only the API key stored in the selected WhatsApp number model.
         // Do not fall back to any integration-level api_key to avoid exposing the key in the integration UI.
         $apiKey  = $whatsAppNumber->getApiKey();
-        $baseUrl = $this->getBaseUrl();
+        $baseUrl = $this->getBaseUrl($whatsAppNumber);
 
         if (empty($apiKey)) {
             $event->failAll('dialoghsm.campaign.error.missing_api_key');
             return;
         }
 
-        $contacts = $event->getContacts();
+        $contacts   = $event->getContacts();
+        $sendDelay  = (int) ($config['send_delay'] ?? 0);   // ms entre envios
+        $batchLimit = (int) ($config['batch_limit'] ?? 0);  // 0 = sem limite
+
+        $sentCount = 0;
 
         foreach ($contacts as $logId => $contact) {
+            // Respeitar batch_limit: se atingiu o limite, deixar os demais como pending
+            if ($batchLimit > 0 && $sentCount >= $batchLimit) {
+                // Não processa: ficam pendentes para o próximo cron
+                break;
+            }
+
             $phone = $contact->getLeadPhoneNumber();
 
             if (empty($phone)) {
@@ -107,6 +117,11 @@ class CampaignSubscriber implements EventSubscriberInterface
 
             $templateName = $payloadData['content'] ?? $payloadData['template'] ?? 'unknown';
 
+            // Delay antes de cada envio (exceto o primeiro)
+            if ($sendDelay > 0 && $sentCount > 0) {
+                usleep($sendDelay * 1000); // converter ms para µs
+            }
+
             $result = $this->api->sendMessage($apiKey, $baseUrl, $phone, $payloadData);
 
             $this->logMessage($contact->getId(), $templateName, $phone, $result);
@@ -119,6 +134,8 @@ class CampaignSubscriber implements EventSubscriberInterface
             } else {
                 $event->fail($pendingLog, $result['error'] ?? 'dialoghsm.campaign.error.send_failed');
             }
+
+            ++$sentCount;
         }
     }
 
@@ -186,13 +203,21 @@ class CampaignSubscriber implements EventSubscriberInterface
         return $number;
     }
 
-    private function getBaseUrl(): string
+    private function getBaseUrl(WhatsAppNumber $number): string
     {
+        // URL configurada no próprio número tem prioridade (MMlite vs convencional)
+        $numberUrl = $number->getBaseUrl();
+        if (!empty($numberUrl)) {
+            return rtrim($numberUrl, '/');
+        }
+
+        // Fallback: URL configurada nas configurações do plugin
         try {
             $integration = $this->integrationsHelper->getIntegration(DialogHSMIntegration::NAME);
             $apiKeys     = $integration->getIntegrationConfiguration()->getApiKeys() ?? [];
+            $pluginUrl   = $apiKeys['base_url'] ?? '';
 
-            return $apiKeys['base_url'] ?? 'https://waba-v2.360dialog.io/messages';
+            return !empty($pluginUrl) ? rtrim($pluginUrl, '/') : 'https://waba-v2.360dialog.io/messages';
         } catch (\Exception) {
             return 'https://waba-v2.360dialog.io/messages';
         }

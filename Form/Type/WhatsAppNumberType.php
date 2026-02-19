@@ -61,6 +61,20 @@ class WhatsAppNumberType extends AbstractType
             ]
         );
 
+        $builder->add(
+            'baseUrl',
+            TextType::class,
+            [
+                'label'      => 'dialoghsm.number.base_url',
+                'label_attr' => ['class' => 'control-label'],
+                'attr'       => [
+                    'class'       => 'form-control',
+                    'placeholder' => 'dialoghsm.number.base_url.placeholder',
+                ],
+                'required' => false,
+            ]
+        );
+
         $builder->add('isPublished', YesNoButtonGroupType::class);
 
         $builder->add('buttons', FormButtonsType::class);
