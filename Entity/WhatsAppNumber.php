@@ -7,6 +7,7 @@ namespace MauticPlugin\DialogHSMBundle\Entity;
 use Doctrine\ORM\Mapping as ORM;
 use Mautic\CoreBundle\Doctrine\Mapping\ClassMetadataBuilder;
 use Mautic\CoreBundle\Entity\FormEntity;
+use Symfony\Component\Validator\Constraints\Length;
 use Symfony\Component\Validator\Constraints\NotBlank;
 use Symfony\Component\Validator\Mapping\ClassMetadata;
 
@@ -51,6 +52,11 @@ class WhatsAppNumber extends FormEntity
     {
         $metadata->addPropertyConstraint('name', new NotBlank(['message' => 'mautic.core.name.required']));
         $metadata->addPropertyConstraint('phoneNumber', new NotBlank(['message' => 'dialoghsm.number.phone.required']));
+        $metadata->addPropertyConstraint('apiKey', new NotBlank(['message' => 'API Key is required.']));
+        $metadata->addPropertyConstraint('apiKey', new Length([
+            'min'        => 20,
+            'minMessage' => 'API Key is too short (minimum 20 characters). Please check and re-enter the key.',
+        ]));
     }
 
     public function getId(): ?int

@@ -18,6 +18,16 @@
 <div class="row">
     <div class="col-md-12">
         {{ form_row(form.apiKey) }}
+        {% if entity.id and entity.apiKey is not empty %}
+            <p class="help-block" style="margin-top:-10px">
+                <span class="label label-success"><i class="ri-shield-keyhole-line"></i> API Key configured</span>
+                &nbsp;Leave blank to keep the current key.
+            </p>
+        {% else %}
+            <p class="help-block" style="margin-top:-10px">
+                <span class="label label-warning"><i class="ri-key-line"></i> API Key not set</span>
+            </p>
+        {% endif %}
     </div>
 </div>
 
