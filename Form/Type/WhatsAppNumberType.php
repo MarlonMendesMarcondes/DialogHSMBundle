@@ -10,9 +10,11 @@ use Mautic\CoreBundle\Form\Type\FormButtonsType;
 use Mautic\CoreBundle\Form\Type\YesNoButtonGroupType;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
 use Symfony\Component\Form\AbstractType;
-use Symfony\Component\Form\Extension\Core\Type\TextareaType;
+use Symfony\Component\Form\Extension\Core\Type\PasswordType;
 use Symfony\Component\Form\Extension\Core\Type\TextType;
 use Symfony\Component\Form\FormBuilderInterface;
+use Symfony\Component\Form\FormEvent;
+use Symfony\Component\Form\FormEvents;
 use Symfony\Component\OptionsResolver\OptionsResolver;
 
 class WhatsAppNumberType extends AbstractType
@@ -49,17 +51,27 @@ class WhatsAppNumberType extends AbstractType
 
         $builder->add(
             'apiKey',
-            TextareaType::class,
+            PasswordType::class,
             [
-                'label'      => 'dialoghsm.number.apikey',
-                'label_attr' => ['class' => 'control-label'],
-                'attr'       => [
-                    'class' => 'form-control',
-                    'rows'  => 3,
-                ],
-                'required' => true,
+                'label'        => 'dialoghsm.number.apikey',
+                'label_attr'   => ['class' => 'control-label'],
+                'attr'         => ['class' => 'form-control'],
+                'required'     => false,
+                'always_empty' => false,
             ]
         );
+
+        // Se o campo apiKey for enviado vazio, manter o valor existente (não sobrescrever)
+        $builder->addEventListener(FormEvents::PRE_SUBMIT, function (FormEvent $event): void {
+            $data   = $event->getData();
+            $form   = $event->getForm();
+            $entity = $form->getData();
+
+            if (empty($data['apiKey']) && $entity instanceof WhatsAppNumber && !empty($entity->getApiKey())) {
+                $data['apiKey'] = $entity->getApiKey();
+                $event->setData($data);
+            }
+        });
 
         $builder->add(
             'baseUrl',
