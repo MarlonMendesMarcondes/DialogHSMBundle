@@ -29,10 +29,9 @@ class DialogHSMApi
 
         $payload = $this->buildPayload($mobile, $payloadData);
 
-        $this->logger->debug('DialogHSM: Enviando payload', [
-            'url'     => $url,
-            'mobile'   => $mobile,
-            'payload' => $payload,
+        $this->logger->debug('DialogHSM: Enviando mensagem', [
+            'url'      => $url,
+            'template' => $payload['template']['name'] ?? '',
         ]);
 
         try {
@@ -49,18 +48,15 @@ class DialogHSMApi
             $responseBody = json_decode($response->getBody()->getContents(), true);
 
 
-                        // Log payload for debugging (plugin scope)
-                        $this->logger->debug('DialogHSM: sending payload to 360dialog', ['url' => $url, 'payload' => $payload]);
             if ($statusCode >= 200 && $statusCode < 300) {
                 $this->logger->info('DialogHSM: Mensagem enviada com sucesso', [
-                    'mobile'      => $mobile,
                     'http_status' => $statusCode,
-                    'template'    => $payload['template'] ?? '',
+                    'template'    => $payload['template']['name'] ?? '',
                 ]);
 
                 return [
                     'success'     => true,
-                    'response'    => ['api_response' => $responseBody, 'payload_sent' => $payload],
+                    'response'    => $responseBody,
                     'error'       => null,
                     'http_status' => $statusCode,
                 ];
@@ -72,14 +68,13 @@ class DialogHSMApi
                 ?? json_encode($responseBody);
 
             $this->logger->error('DialogHSM: API retornou erro', [
-                'mobile'       => $mobile,
                 'http_status' => $statusCode,
-                'response'    => $responseBody,
+                'error'       => $errorDetail,
             ]);
 
             return [
                 'success'     => false,
-                'response'    => ['api_response' => $responseBody, 'payload_sent' => $payload],
+                'response'    => $responseBody,
                 'error'       => "HTTP {$statusCode}: {$errorDetail}",
                 'http_status' => $statusCode,
             ];
@@ -93,7 +88,6 @@ class DialogHSMApi
             }
 
             $this->logger->error('DialogHSM: Erro ao enviar mensagem', [
-                'mobile'       => $mobile,
                 'http_status' => $statusCode,
                 'error'       => $e->getMessage(),
             ]);
@@ -106,7 +100,6 @@ class DialogHSMApi
             ];
         } catch (\Throwable $e) {
             $this->logger->error('DialogHSM: Erro inesperado', [
-                'mobile' => $mobile,
                 'error' => $e->getMessage(),
             ]);
 
