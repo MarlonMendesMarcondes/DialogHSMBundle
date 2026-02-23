@@ -12,8 +12,9 @@ return function (ContainerConfigurator $configurator): void {
         ->autoconfigure()
         ->public();
 
+    $excludes   = array_merge(MauticCoreExtension::DEFAULT_EXCLUDES, ['Message']);
     $services->load('MauticPlugin\\DialogHSMBundle\\', '../')
-        ->exclude('../{'.implode(',', MauticCoreExtension::DEFAULT_EXCLUDES).'}');
+        ->exclude('../{'.implode(',', $excludes).'}');
 
     $services->load('MauticPlugin\\DialogHSMBundle\\Entity\\', '../Entity/*Repository.php');
 
