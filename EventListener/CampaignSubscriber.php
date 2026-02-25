@@ -119,13 +119,12 @@ class CampaignSubscriber implements EventSubscriberInterface
         $sendDelay  = (int) ($config['send_delay'] ?? 0);
         $batchLimit = (int) ($config['batch_limit'] ?? 0);
 
-        $sentCount = 0;
+        // batch_limit=N: send N messages, then pause send_delay ms, repeat for all contacts.
+        // batch_limit=0: apply send_delay between every individual send.
+        $effectiveBatch = $batchLimit > 0 ? $batchLimit : 1;
+        $sentCount      = 0;
 
         foreach ($contacts as $logId => $contact) {
-            if ($batchLimit > 0 && $sentCount >= $batchLimit) {
-                break;
-            }
-
             $phone = $contact->getLeadPhoneNumber();
 
             if (empty($phone)) {
@@ -153,6 +152,10 @@ class CampaignSubscriber implements EventSubscriberInterface
             $event->pass($event->getPending()->get($logId));
 
             ++$sentCount;
+
+            if ($sendDelay > 0 && $sentCount % $effectiveBatch === 0) {
+                usleep($sendDelay * 1000);
+            }
         }
     }
 
