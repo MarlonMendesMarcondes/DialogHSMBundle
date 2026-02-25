@@ -14,6 +14,7 @@ use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
 use MauticPlugin\DialogHSMBundle\Form\Type\SendWhatsAppType;
 use MauticPlugin\DialogHSMBundle\Integration\DialogHSMIntegration;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
+use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppMessageHandler;
 use MauticPlugin\DialogHSMBundle\Model\WhatsAppNumberModel;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
@@ -26,14 +27,16 @@ class CampaignSubscriber implements EventSubscriberInterface
         private MessageBusInterface $bus,
         private LoggerInterface $logger,
         private WhatsAppNumberModel $whatsAppNumberModel,
+        private SendWhatsAppMessageHandler $handler,
     ) {
     }
 
     public static function getSubscribedEvents(): array
     {
         return [
-            CampaignEvents::CAMPAIGN_ON_BUILD           => ['onCampaignBuild', 0],
-            DialogHSMEvents::ON_CAMPAIGN_TRIGGER_ACTION => ['onCampaignTriggerAction', 0],
+            CampaignEvents::CAMPAIGN_ON_BUILD                 => ['onCampaignBuild', 0],
+            DialogHSMEvents::ON_CAMPAIGN_TRIGGER_ACTION       => ['onCampaignTriggerAction', 0],
+            DialogHSMEvents::ON_CAMPAIGN_TRIGGER_ACTION_QUEUE => ['onCampaignTriggerActionQueue', 0],
         ];
     }
 
@@ -49,6 +52,17 @@ class CampaignSubscriber implements EventSubscriberInterface
                 'channel'        => 'whatsapp',
             ]
         );
+
+        $event->addAction(
+            'dialoghsm.send_whatsapp_queue',
+            [
+                'label'          => 'dialoghsm.campaign.send_whatsapp_queue',
+                'description'    => 'dialoghsm.campaign.send_whatsapp_queue.tooltip',
+                'batchEventName' => DialogHSMEvents::ON_CAMPAIGN_TRIGGER_ACTION_QUEUE,
+                'formType'       => SendWhatsAppType::class,
+                'channel'        => 'whatsapp',
+            ]
+        );
     }
 
     public function onCampaignTriggerAction(PendingEvent $event): void
@@ -57,6 +71,24 @@ class CampaignSubscriber implements EventSubscriberInterface
             return;
         }
 
+        $this->processContacts($event, function (SendWhatsAppMessage $message): void {
+            ($this->handler)($message);
+        });
+    }
+
+    public function onCampaignTriggerActionQueue(PendingEvent $event): void
+    {
+        if (!$event->checkContext('dialoghsm.send_whatsapp_queue')) {
+            return;
+        }
+
+        $this->processContacts($event, function (SendWhatsAppMessage $message): void {
+            $this->bus->dispatch($message);
+        });
+    }
+
+    private function processContacts(PendingEvent $event, callable $sender): void
+    {
         if (!$this->isIntegrationEnabled()) {
             $event->failAll('dialoghsm.campaign.error.integration_disabled');
 
@@ -108,7 +140,7 @@ class CampaignSubscriber implements EventSubscriberInterface
             $payloadData   = $this->buildPayloadFromConfig($config, $profileFields);
             $templateName  = $payloadData['content'] ?? $payloadData['template'] ?? 'unknown';
 
-            $this->bus->dispatch(new SendWhatsAppMessage(
+            $sender(new SendWhatsAppMessage(
                 leadId:       $contact->getId(),
                 phone:        $phone,
                 apiKey:       $apiKey,
