@@ -24,10 +24,6 @@ class SendWhatsAppMessageHandler implements MessageHandlerInterface
 
     public function __invoke(SendWhatsAppMessage $message): void
     {
-        if ($message->sendDelay > 0) {
-            usleep($message->sendDelay * 1000);
-        }
-
         $result = $this->api->sendMessage(
             $message->apiKey,
             $message->baseUrl,

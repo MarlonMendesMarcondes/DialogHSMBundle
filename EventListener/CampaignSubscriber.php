@@ -84,10 +84,10 @@ class CampaignSubscriber implements EventSubscriberInterface
 
         $this->processContacts($event, function (SendWhatsAppMessage $message): void {
             $this->bus->dispatch($message);
-        });
+        }, applyBatchSleep: false);
     }
 
-    private function processContacts(PendingEvent $event, callable $sender): void
+    private function processContacts(PendingEvent $event, callable $sender, bool $applyBatchSleep = true): void
     {
         if (!$this->isIntegrationEnabled()) {
             $event->failAll('dialoghsm.campaign.error.integration_disabled');
@@ -153,7 +153,7 @@ class CampaignSubscriber implements EventSubscriberInterface
 
             ++$sentCount;
 
-            if ($sendDelay > 0 && $sentCount % $effectiveBatch === 0) {
+            if ($applyBatchSleep && $sendDelay > 0 && $sentCount % $effectiveBatch === 0) {
                 usleep($sendDelay * 1000);
             }
         }
