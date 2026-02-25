@@ -175,29 +175,24 @@ class DialogHSMApi
         }
 
         // Montar telefone com +55 se não começa com +
-        $cleanmobile      = preg_replace('/\D/', '', $mobile);
+        $cleanmobile     = preg_replace('/\D/', '', $mobile);
         $startWithPlus   = str_starts_with(trim($mobile), '+');
-        $formattedmobile  = ($startWithPlus ? '+' : '+55').$cleanmobile;
+        $formattedmobile = ($startWithPlus ? '+' : '+55').$cleanmobile;
 
-        // Montar payload final com todos os dados
-        $payload = $data;
-        $payload['recipient_type']    = 'individual';
-        $payload['messaging_product'] = 'whatsapp';
-        $payload['type']              = 'template';
-        $payload['to']                = $formattedmobile;
-        $payload['receivers']         = $mobile;
-
-        // Montar objeto de template no formato esperado pela 360dialog
-        $payload['template'] = [
-            'name'       => $data['content'] ?? '',
-            'language'   => ['code' => $data['language'] ?? 'pt_BR'],
-            'components' => $components,
+        // Montar payload apenas com os campos esperados pela API 360dialog.
+        // Campos de controle interno do plugin (vars, buttons, url_arquivo, etc.)
+        // não devem ser enviados à API.
+        return [
+            'recipient_type'    => 'individual',
+            'messaging_product' => 'whatsapp',
+            'type'              => 'template',
+            'to'                => $formattedmobile,
+            'template'          => [
+                'name'       => $data['content'] ?? '',
+                'language'   => ['code' => $data['language'] ?? 'pt_BR'],
+                'components' => $components,
+            ],
         ];
-
-        // Remover apenas url_arquivo (já foi processado no header component)
-        unset($payload['url_arquivo']);
-
-        return $payload;
     }
 
     /**
