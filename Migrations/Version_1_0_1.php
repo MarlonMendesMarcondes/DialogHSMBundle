@@ -43,6 +43,7 @@ class Version_1_0_1 extends AbstractMigration
                 `name` VARCHAR(191) NOT NULL,
                 `phone_number` VARCHAR(50) NOT NULL,
                 `api_key` LONGTEXT NOT NULL,
+                `base_url` VARCHAR(500) DEFAULT NULL,
                 INDEX `{$this->concatPrefix('idx_hsm_number_name')}` (`name`),
                 PRIMARY KEY(`id`)
             ) DEFAULT CHARACTER SET utf8mb4 COLLATE `utf8mb4_unicode_ci` ENGINE = InnoDB

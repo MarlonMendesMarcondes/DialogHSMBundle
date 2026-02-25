@@ -34,6 +34,7 @@ class Version_1_0_0 extends AbstractMigration
                 `template_name` VARCHAR(255) NOT NULL,
                 `phone_number` VARCHAR(50) NOT NULL,
                 `status` VARCHAR(20) NOT NULL,
+                `http_status_code` INT DEFAULT NULL,
                 `api_response` LONGTEXT DEFAULT NULL,
                 `error_message` LONGTEXT DEFAULT NULL,
                 `date_sent` DATETIME NOT NULL,
