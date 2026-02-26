@@ -33,6 +33,20 @@ class ConsumeWhatsAppCommand extends Command
             InputOption::VALUE_OPTIONAL,
             'Override the consumer limit from plugin settings'
         );
+
+        $this->addOption(
+            'queue',
+            null,
+            InputOption::VALUE_OPTIONAL,
+            'Consume only the specified RabbitMQ queue (e.g. whatsapp_5511). Omit to consume all queues.'
+        );
+
+        $this->addOption(
+            'time-limit',
+            null,
+            InputOption::VALUE_OPTIONAL,
+            'Stop consumer after this many seconds (0 = no time limit).'
+        );
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -41,14 +55,34 @@ class ConsumeWhatsAppCommand extends Command
             ? max(1, (int) $input->getOption('limit'))
             : $this->getConsumerLimit();
 
-        $output->writeln(sprintf('<info>DialogHSM: consuming whatsapp queue (limit=%d)</info>', $limit));
+        $queue = $input->getOption('queue') ?: null;
+
+        if ($queue) {
+            $output->writeln(sprintf('<info>DialogHSM: consuming queue "%s" (limit=%d)</info>', $queue, $limit));
+        } else {
+            $output->writeln(sprintf('<info>DialogHSM: consuming all whatsapp queues (limit=%d)</info>', $limit));
+        }
 
         $subCommand = $this->getApplication()->find('messenger:consume');
-        $subInput   = new ArrayInput([
+        $timeLimit = $input->getOption('time-limit') !== null
+            ? max(0, (int) $input->getOption('time-limit'))
+            : 0;
+
+        $subArgs = [
             'command'   => 'messenger:consume',
             'receivers' => ['whatsapp'],
             '--limit'   => (string) $limit,
-        ]);
+        ];
+
+        if ($queue) {
+            $subArgs['--queues'] = [$queue];
+        }
+
+        if ($timeLimit > 0) {
+            $subArgs['--time-limit'] = (string) $timeLimit;
+        }
+
+        $subInput = new ArrayInput($subArgs);
         $subInput->setInteractive(false);
 
         return $subCommand->run($subInput, $output);

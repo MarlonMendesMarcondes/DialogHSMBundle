@@ -22,7 +22,10 @@ class SendWhatsAppMessageHandler implements MessageHandlerInterface
     ) {
     }
 
-    public function __invoke(SendWhatsAppMessage $message): void
+    /**
+     * @return array{success: bool, response: array|null, error: string|null, http_status: int|null}
+     */
+    public function __invoke(SendWhatsAppMessage $message): array
     {
         $result = $this->api->sendMessage(
             $message->apiKey,
@@ -31,8 +34,18 @@ class SendWhatsAppMessageHandler implements MessageHandlerInterface
             $message->payloadData
         );
 
-        $this->logMessage($message->leadId, $message->templateName, $message->phone, $result);
+        try {
+            $this->logMessage($message->leadId, $message->templateName, $message->phone, $result);
+        } catch (\Throwable $e) {
+            $this->logger->warning('DialogHSM: Falha ao registrar log da mensagem', [
+                'lead_id' => $message->leadId,
+                'error'   => $e->getMessage(),
+            ]);
+        }
+
         $this->updateContactFieldsById($message->leadId, $result);
+
+        return $result;
     }
 
     private function logMessage(int $leadId, string $templateName, string $phone, array $result): void

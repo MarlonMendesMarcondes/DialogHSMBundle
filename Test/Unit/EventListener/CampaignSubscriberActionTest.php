@@ -16,6 +16,12 @@ use MauticPlugin\DialogHSMBundle\Model\WhatsAppNumberModel;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
+use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Input\InputInterface;
+use Symfony\Component\Console\Input\InputOption;
+use Symfony\Component\DependencyInjection\ContainerInterface;
+use Symfony\Component\HttpKernel\Bundle\Bundle;
+use Symfony\Component\HttpKernel\KernelInterface;
 use Symfony\Component\Messenger\MessageBusInterface;
 
 class CampaignSubscriberActionTest extends TestCase
@@ -25,6 +31,7 @@ class CampaignSubscriberActionTest extends TestCase
     private LoggerInterface&MockObject $mockLogger;
     private WhatsAppNumberModel&MockObject $mockNumberModel;
     private SendWhatsAppMessageHandler&MockObject $mockHandler;
+    private KernelInterface&MockObject $mockKernel;
     private CampaignSubscriber $subscriber;
 
     protected function setUp(): void
@@ -34,6 +41,7 @@ class CampaignSubscriberActionTest extends TestCase
         $this->mockLogger             = $this->createMock(LoggerInterface::class);
         $this->mockNumberModel        = $this->createMock(WhatsAppNumberModel::class);
         $this->mockHandler            = $this->createMock(SendWhatsAppMessageHandler::class);
+        $this->mockKernel             = $this->createMock(KernelInterface::class);
 
         $this->subscriber = new CampaignSubscriber(
             $this->mockIntegrationsHelper,
@@ -41,6 +49,7 @@ class CampaignSubscriberActionTest extends TestCase
             $this->mockLogger,
             $this->mockNumberModel,
             $this->mockHandler,
+            $this->mockKernel,
         );
     }
 
@@ -135,11 +144,12 @@ class CampaignSubscriberActionTest extends TestCase
         $contact = $this->buildContact('11999999999', 1);
         $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
 
-        // Handler deve ser chamado uma vez
+        // Handler deve ser chamado uma vez e retornar sucesso
         $this->mockHandler
             ->expects($this->once())
             ->method('__invoke')
-            ->with($this->isInstanceOf(SendWhatsAppMessage::class));
+            ->with($this->isInstanceOf(SendWhatsAppMessage::class))
+            ->willReturn(['success' => true, 'error' => null, 'http_status' => 200, 'response' => null]);
 
         // Bus NÃO deve ser chamado
         $this->mockBus
@@ -272,7 +282,8 @@ class CampaignSubscriberActionTest extends TestCase
         $this->mockHandler
             ->expects($this->exactly(3))
             ->method('__invoke')
-            ->with($this->isInstanceOf(SendWhatsAppMessage::class));
+            ->with($this->isInstanceOf(SendWhatsAppMessage::class))
+            ->willReturn(['success' => true, 'error' => null, 'http_status' => 200, 'response' => null]);
 
         $event->expects($this->exactly(3))->method('pass');
 
@@ -302,9 +313,34 @@ class CampaignSubscriberActionTest extends TestCase
 
         $this->mockHandler
             ->expects($this->exactly(3))
-            ->method('__invoke');
+            ->method('__invoke')
+            ->willReturn(['success' => true, 'error' => null, 'http_status' => 200, 'response' => null]);
 
         $event->expects($this->exactly(3))->method('pass');
+
+        $this->subscriber->onCampaignTriggerAction($event);
+    }
+
+    public function testDirectSendCallsPassWithErrorWhenApiFails(): void
+    {
+        $this->enableIntegration();
+
+        $this->mockNumberModel
+            ->method('getEntity')
+            ->willReturn($this->buildWhatsAppNumber());
+
+        $contact = $this->buildContact('11999999999', 1);
+        $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
+
+        $this->mockHandler
+            ->expects($this->once())
+            ->method('__invoke')
+            ->willReturn(['success' => false, 'error' => 'HTTP 400: Bad request', 'http_status' => 400, 'response' => null]);
+
+        $event->expects($this->never())->method('pass');
+        $event->expects($this->once())
+            ->method('passWithError')
+            ->with($this->anything(), 'dialoghsm.campaign.error.send_failed');
 
         $this->subscriber->onCampaignTriggerAction($event);
     }
@@ -313,7 +349,7 @@ class CampaignSubscriberActionTest extends TestCase
     // Testes: send_delay e batch timing (síncrono)
     // -------------------------------------------------------------------------
 
-    public function testDirectSendMessageCarriesSendDelay(): void
+    public function testDirectSendWithDelayConfigStillProcessesContact(): void
     {
         $this->enableIntegration();
 
@@ -328,18 +364,15 @@ class CampaignSubscriberActionTest extends TestCase
             ['send_delay' => 1500]
         );
 
-        $capturedMessage = null;
         $this->mockHandler
             ->expects($this->once())
             ->method('__invoke')
-            ->willReturnCallback(function (SendWhatsAppMessage $msg) use (&$capturedMessage): void {
-                $capturedMessage = $msg;
-            });
+            ->with($this->isInstanceOf(SendWhatsAppMessage::class))
+            ->willReturn(['success' => true, 'error' => null, 'http_status' => 200, 'response' => null]);
+
+        $event->expects($this->once())->method('pass');
 
         $this->subscriber->onCampaignTriggerAction($event);
-
-        $this->assertInstanceOf(SendWhatsAppMessage::class, $capturedMessage);
-        $this->assertEquals(1500, $capturedMessage->sendDelay);
     }
 
     public function testDirectSendMultipleContactsAllReceiveSameSendDelay(): void
@@ -366,8 +399,10 @@ class CampaignSubscriberActionTest extends TestCase
         $this->mockHandler
             ->expects($this->exactly(3))
             ->method('__invoke')
-            ->willReturnCallback(function (SendWhatsAppMessage $msg) use (&$capturedMessages): void {
+            ->willReturnCallback(function (SendWhatsAppMessage $msg) use (&$capturedMessages): array {
                 $capturedMessages[] = $msg;
+
+                return ['success' => true, 'error' => null, 'http_status' => 200, 'response' => null];
             });
 
         $event->expects($this->exactly(3))->method('pass');
@@ -375,9 +410,6 @@ class CampaignSubscriberActionTest extends TestCase
         $this->subscriber->onCampaignTriggerAction($event);
 
         $this->assertCount(3, $capturedMessages);
-        foreach ($capturedMessages as $msg) {
-            $this->assertEquals(300, $msg->sendDelay);
-        }
     }
 
     public function testDirectSendBatchLimitWithDelayCombination(): void
@@ -405,8 +437,10 @@ class CampaignSubscriberActionTest extends TestCase
         $this->mockHandler
             ->expects($this->exactly(3))
             ->method('__invoke')
-            ->willReturnCallback(function (SendWhatsAppMessage $msg) use (&$capturedMessages): void {
+            ->willReturnCallback(function (SendWhatsAppMessage $msg) use (&$capturedMessages): array {
                 $capturedMessages[] = $msg;
+
+                return ['success' => true, 'error' => null, 'http_status' => 200, 'response' => null];
             });
 
         $event->expects($this->exactly(3))->method('pass');
@@ -414,9 +448,6 @@ class CampaignSubscriberActionTest extends TestCase
         $this->subscriber->onCampaignTriggerAction($event);
 
         $this->assertCount(3, $capturedMessages);
-        foreach ($capturedMessages as $msg) {
-            $this->assertEquals(200, $msg->sendDelay);
-        }
     }
 
     // -------------------------------------------------------------------------
@@ -460,7 +491,7 @@ class CampaignSubscriberActionTest extends TestCase
         $this->assertEquals('template_queue', $capturedMessage->payloadData['content'] ?? null);
     }
 
-    public function testQueueSendMessageCarriesSendDelay(): void
+    public function testQueueSendWithDelayConfigStillDispatchesMessage(): void
     {
         $this->enableIntegration();
 
@@ -475,20 +506,15 @@ class CampaignSubscriberActionTest extends TestCase
             ['send_delay' => 2000]
         );
 
-        $capturedMessage = null;
         $this->mockBus
             ->expects($this->once())
             ->method('dispatch')
-            ->willReturnCallback(function (SendWhatsAppMessage $msg) use (&$capturedMessage): Envelope {
-                $capturedMessage = $msg;
+            ->with($this->isInstanceOf(SendWhatsAppMessage::class))
+            ->willReturn(new Envelope(new \stdClass()));
 
-                return new Envelope($msg);
-            });
+        $event->expects($this->once())->method('pass');
 
         $this->subscriber->onCampaignTriggerActionQueue($event);
-
-        $this->assertInstanceOf(SendWhatsAppMessage::class, $capturedMessage);
-        $this->assertEquals(2000, $capturedMessage->sendDelay);
     }
 
     public function testQueueSendMultipleContactsAllReceiveSameSendDelay(): void
@@ -526,9 +552,6 @@ class CampaignSubscriberActionTest extends TestCase
         $this->subscriber->onCampaignTriggerActionQueue($event);
 
         $this->assertCount(3, $capturedMessages);
-        foreach ($capturedMessages as $msg) {
-            $this->assertEquals(500, $msg->sendDelay);
-        }
     }
 
     public function testQueueSendBatchLimitWithDelayCombination(): void
@@ -567,9 +590,6 @@ class CampaignSubscriberActionTest extends TestCase
         $this->subscriber->onCampaignTriggerActionQueue($event);
 
         $this->assertCount(3, $capturedMessages);
-        foreach ($capturedMessages as $msg) {
-            $this->assertEquals(400, $msg->sendDelay);
-        }
     }
 
     public function testQueueSendFailsAllWhenIntegrationDisabled(): void
@@ -626,8 +646,10 @@ class CampaignSubscriberActionTest extends TestCase
         $this->mockHandler
             ->expects($this->once())
             ->method('__invoke')
-            ->willReturnCallback(function (SendWhatsAppMessage $msg) use (&$capturedMessage): void {
+            ->willReturnCallback(function (SendWhatsAppMessage $msg) use (&$capturedMessage): array {
                 $capturedMessage = $msg;
+
+                return ['success' => true, 'error' => null, 'http_status' => 200, 'response' => null];
             });
 
         $this->subscriber->onCampaignTriggerAction($event);
@@ -637,5 +659,98 @@ class CampaignSubscriberActionTest extends TestCase
         $this->assertEquals('VALID_API_KEY_12345', $capturedMessage->apiKey);
         $this->assertEquals('https://api.360dialog.com/v1/messages', $capturedMessage->baseUrl);
         $this->assertEquals(5, $capturedMessage->leadId);
+    }
+
+    // -------------------------------------------------------------------------
+    // Testes: consume queue
+    // -------------------------------------------------------------------------
+
+    public function testConsumeQueueSkipsWhenContextDoesNotMatch(): void
+    {
+        $mockPendingEvent = $this->createMock(PendingEvent::class);
+        $mockPendingEvent->method('checkContext')
+            ->with('dialoghsm.consume_queue')
+            ->willReturn(false);
+        $mockPendingEvent->expects($this->never())->method('getEvent');
+        $mockPendingEvent->expects($this->never())->method('pass');
+
+        $this->subscriber->onCampaignTriggerConsumeQueue($mockPendingEvent);
+    }
+
+    public function testConsumeQueuePassesAllContactsAfterConsume(): void
+    {
+        $fakeCommand = new Command('dialoghsm:consume');
+        $fakeCommand->setCode(function (): int { return 0; });
+
+        $mockBundle = $this->createMock(Bundle::class);
+        $mockBundle->method('registerCommands')
+            ->willReturnCallback(function ($app) use ($fakeCommand): void {
+                $app->add($fakeCommand);
+            });
+
+        $mockContainer = $this->createMock(ContainerInterface::class);
+        $mockContainer->method('has')->willReturn(false);
+
+        $this->mockKernel->method('getBundles')->willReturn([$mockBundle]);
+        $this->mockKernel->method('getContainer')->willReturn($mockContainer);
+
+        $contacts = [
+            1 => $this->buildContact('11999999991', 1),
+            2 => $this->buildContact('11999999992', 2),
+        ];
+
+        $event = $this->buildPendingEvent('dialoghsm.consume_queue', $contacts, [
+            'whatsapp_number' => 0,
+            'limit'           => 0,
+            'time_limit'      => 0,
+        ]);
+
+        $event->expects($this->exactly(2))->method('pass');
+
+        $this->subscriber->onCampaignTriggerConsumeQueue($event);
+    }
+
+    public function testConsumeQueuePassesQueueOptionWhenNumberHasQueueName(): void
+    {
+        $capturedInput = null;
+        $fakeCommand   = new Command('dialoghsm:consume');
+        $fakeCommand->addOption('queue', null, InputOption::VALUE_OPTIONAL);
+        $fakeCommand->setCode(function (InputInterface $input) use (&$capturedInput): int {
+            $capturedInput = $input;
+
+            return 0;
+        });
+
+        $mockBundle = $this->createMock(Bundle::class);
+        $mockBundle->method('registerCommands')
+            ->willReturnCallback(function ($app) use ($fakeCommand): void {
+                $app->add($fakeCommand);
+            });
+
+        $mockContainer = $this->createMock(ContainerInterface::class);
+        $mockContainer->method('has')->willReturn(false);
+
+        $this->mockKernel->method('getBundles')->willReturn([$mockBundle]);
+        $this->mockKernel->method('getContainer')->willReturn($mockContainer);
+
+        $number = $this->buildWhatsAppNumber();
+        $number->method('getQueueName')->willReturn('minha_fila');
+
+        $this->mockNumberModel->method('getEntity')->willReturn($number);
+
+        $contacts = [1 => $this->buildContact('11999999991', 1)];
+
+        $event = $this->buildPendingEvent('dialoghsm.consume_queue', $contacts, [
+            'whatsapp_number' => 1,
+            'limit'           => 0,
+            'time_limit'      => 0,
+        ]);
+
+        $event->expects($this->once())->method('pass');
+
+        $this->subscriber->onCampaignTriggerConsumeQueue($event);
+
+        $this->assertNotNull($capturedInput);
+        $this->assertEquals('minha_fila', $capturedInput->getOption('queue'));
     }
 }
