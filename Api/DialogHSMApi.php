@@ -62,8 +62,9 @@ class DialogHSMApi
                 ];
             }
 
+            $firstError  = is_array($responseBody['errors'] ?? null) ? ($responseBody['errors'][0] ?? null) : null;
             $errorDetail = $responseBody['error']['message']
-                ?? $responseBody['errors'][0]['details']
+                ?? ($firstError['details'] ?? null)
                 ?? $responseBody['message']
                 ?? json_encode($responseBody);
 
@@ -174,10 +175,19 @@ class DialogHSMApi
             }
         }
 
-        // Montar telefone com +55 se não começa com +
-        $cleanmobile     = preg_replace('/\D/', '', $mobile);
-        $startWithPlus   = str_starts_with(trim($mobile), '+');
-        $formattedmobile = ($startWithPlus ? '+' : '+55').$cleanmobile;
+        // Formatar telefone: preserva código de país existente.
+        // Se começar com '+': remove o '+', limpa dígitos e recoloca '+'.
+        // Se não começar com '+' mas tiver >= 12 dígitos começando com '55':
+        //   assume que já possui DDI Brasil → apenas adiciona '+'.
+        // Caso contrário: assume número local brasileiro → prefixa com '+55'.
+        $cleanmobile   = preg_replace('/\D/', '', $mobile);
+        $startWithPlus = str_starts_with(trim($mobile), '+');
+
+        if ($startWithPlus || (strlen($cleanmobile) >= 12 && str_starts_with($cleanmobile, '55'))) {
+            $formattedmobile = '+'.$cleanmobile;
+        } else {
+            $formattedmobile = '+55'.$cleanmobile;
+        }
 
         // Montar payload apenas com os campos esperados pela API 360dialog.
         // Campos de controle interno do plugin (vars, buttons, url_arquivo, etc.)

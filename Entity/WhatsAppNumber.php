@@ -18,6 +18,7 @@ class WhatsAppNumber extends FormEntity
     private ?string $phoneNumber = null;
     private ?string $apiKey = null;
     private ?string $baseUrl = null;
+    private ?string $queueName = null;
 
     public static function loadMetadata(ORM\ClassMetadata $metadata): void
     {
@@ -44,6 +45,13 @@ class WhatsAppNumber extends FormEntity
             ->createField('baseUrl', 'string')
             ->columnName('base_url')
             ->length(500)
+            ->nullable()
+            ->build();
+
+        $builder
+            ->createField('queueName', 'string')
+            ->columnName('queue_name')
+            ->length(100)
             ->nullable()
             ->build();
     }
@@ -112,6 +120,19 @@ class WhatsAppNumber extends FormEntity
     {
         $this->isChanged('baseUrl', $baseUrl);
         $this->baseUrl = $baseUrl ?: null;
+
+        return $this;
+    }
+
+    public function getQueueName(): ?string
+    {
+        return $this->queueName;
+    }
+
+    public function setQueueName(?string $queueName): self
+    {
+        $this->isChanged('queueName', $queueName);
+        $this->queueName = $queueName ?: null;
 
         return $this;
     }
