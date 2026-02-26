@@ -20,6 +20,7 @@ use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\DependencyInjection\ContainerInterface;
+use Symfony\Component\EventDispatcher\EventDispatcher;
 use Symfony\Component\HttpKernel\Bundle\Bundle;
 use Symfony\Component\HttpKernel\KernelInterface;
 use Symfony\Component\Messenger\MessageBusInterface;
@@ -677,11 +678,8 @@ class CampaignSubscriberActionTest extends TestCase
         $this->subscriber->onCampaignTriggerConsumeQueue($mockPendingEvent);
     }
 
-    public function testConsumeQueuePassesAllContactsAfterConsume(): void
+    private function buildKernelWithCommand(Command $fakeCommand): void
     {
-        $fakeCommand = new Command('dialoghsm:consume');
-        $fakeCommand->setCode(function (): int { return 0; });
-
         $mockBundle = $this->createMock(Bundle::class);
         $mockBundle->method('registerCommands')
             ->willReturnCallback(function ($app) use ($fakeCommand): void {
@@ -690,9 +688,20 @@ class CampaignSubscriberActionTest extends TestCase
 
         $mockContainer = $this->createMock(ContainerInterface::class);
         $mockContainer->method('has')->willReturn(false);
+        $mockContainer->method('get')
+            ->with('event_dispatcher')
+            ->willReturn(new EventDispatcher());
 
         $this->mockKernel->method('getBundles')->willReturn([$mockBundle]);
         $this->mockKernel->method('getContainer')->willReturn($mockContainer);
+    }
+
+    public function testConsumeQueuePassesAllContactsAfterConsume(): void
+    {
+        $fakeCommand = new Command('dialoghsm:consume');
+        $fakeCommand->setCode(function (): int { return 0; });
+
+        $this->buildKernelWithCommand($fakeCommand);
 
         $contacts = [
             1 => $this->buildContact('11999999991', 1),
@@ -721,17 +730,7 @@ class CampaignSubscriberActionTest extends TestCase
             return 0;
         });
 
-        $mockBundle = $this->createMock(Bundle::class);
-        $mockBundle->method('registerCommands')
-            ->willReturnCallback(function ($app) use ($fakeCommand): void {
-                $app->add($fakeCommand);
-            });
-
-        $mockContainer = $this->createMock(ContainerInterface::class);
-        $mockContainer->method('has')->willReturn(false);
-
-        $this->mockKernel->method('getBundles')->willReturn([$mockBundle]);
-        $this->mockKernel->method('getContainer')->willReturn($mockContainer);
+        $this->buildKernelWithCommand($fakeCommand);
 
         $number = $this->buildWhatsAppNumber();
         $number->method('getQueueName')->willReturn('minha_fila');
