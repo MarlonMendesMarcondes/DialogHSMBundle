@@ -142,18 +142,18 @@ framework:
         dsn: "amqp://user:password@rabbitmq:5672/%2f/whatsapp"
         options:
           queues:
-            queue: ~   # fila horário comercial
-            batch: ~   # fila massiva
+            queue: ~   # fila massiva
+            batch: ~   # fila horário comercial (lotes)
 ```
 
 ### Consumer Manual
 
 ```bash
-# Consumir a fila comercial (com limite e tempo)
-php bin/console dialoghsm:consume --queue=queue --limit=100 --time-limit=540
-
 # Consumir a fila massiva
-php bin/console dialoghsm:consume --queue=batch --limit=50 --time-limit=60
+php bin/console dialoghsm:consume --queue=queue --limit=50 --time-limit=60
+
+# Consumir a fila de lotes (horário comercial)
+php bin/console dialoghsm:consume --queue=batch --limit=100 --time-limit=540
 
 # Consumir todas as filas (usa limite configurado no plugin)
 php bin/console dialoghsm:consume
@@ -172,11 +172,11 @@ php bin/console dialoghsm:consume
 Recomenda-se dois crons independentes por fila:
 
 ```bash
-# Fila comercial: seg a sex, 8h às 18h, a cada 10 minutos
-*/10 8-17 * * 1-5 php /var/www/html/bin/console dialoghsm:consume --queue=queue --limit=100 --time-limit=540
-
 # Fila massiva: qualquer horário, a cada minuto
-* * * * * php /var/www/html/bin/console dialoghsm:consume --queue=batch --limit=50 --time-limit=60
+* * * * * php /var/www/html/bin/console dialoghsm:consume --queue=queue --limit=50 --time-limit=60
+
+# Fila de lotes (horário comercial): seg a sex, 8h às 18h, a cada 10 minutos
+*/10 8-17 * * 1-5 php /var/www/html/bin/console dialoghsm:consume --queue=batch --limit=100 --time-limit=540
 ```
 
 > O `--time-limit` deve ser menor que o intervalo do cron para evitar sobreposição de execuções.
