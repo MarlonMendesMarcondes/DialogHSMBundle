@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 use Doctrine\Common\Collections\ArrayCollection;
 use Mautic\CampaignBundle\Entity\Event as CampaignEvent;
+use Symfony\Component\Messenger\Bridge\Amqp\Transport\AmqpStamp;
 use Symfony\Component\Messenger\Envelope;
 use Mautic\CampaignBundle\Entity\LeadEventLog;
 use Mautic\CampaignBundle\Event\PendingEvent;
@@ -591,6 +592,76 @@ class CampaignSubscriberActionTest extends TestCase
         $this->subscriber->onCampaignTriggerActionQueue($event);
 
         $this->assertCount(3, $capturedMessages);
+    }
+
+    public function testQueueSendUsesQueueOverrideInsteadOfNumberQueueName(): void
+    {
+        $this->enableIntegration();
+
+        $number = $this->buildWhatsAppNumber();
+        $number->method('getQueueName')->willReturn('batch');
+
+        $this->mockNumberModel->method('getEntity')->willReturn($number);
+
+        $contact = $this->buildContact('11999999999', 1);
+        $event   = $this->buildPendingEvent(
+            'dialoghsm.send_whatsapp_queue',
+            [1 => $contact],
+            ['queue_override' => 'queue']
+        );
+
+        $capturedStamps = null;
+        $this->mockBus
+            ->expects($this->once())
+            ->method('dispatch')
+            ->willReturnCallback(function ($msg, array $stamps) use (&$capturedStamps): Envelope {
+                $capturedStamps = $stamps;
+
+                return new Envelope($msg);
+            });
+
+        $event->expects($this->once())->method('pass');
+
+        $this->subscriber->onCampaignTriggerActionQueue($event);
+
+        $this->assertCount(1, $capturedStamps);
+        $this->assertInstanceOf(AmqpStamp::class, $capturedStamps[0]);
+        $this->assertEquals('queue', $capturedStamps[0]->getRoutingKey());
+    }
+
+    public function testQueueSendFallsBackToNumberQueueNameWhenOverrideIsEmpty(): void
+    {
+        $this->enableIntegration();
+
+        $number = $this->buildWhatsAppNumber();
+        $number->method('getQueueName')->willReturn('batch');
+
+        $this->mockNumberModel->method('getEntity')->willReturn($number);
+
+        $contact = $this->buildContact('11999999999', 1);
+        $event   = $this->buildPendingEvent(
+            'dialoghsm.send_whatsapp_queue',
+            [1 => $contact],
+            ['queue_override' => '']
+        );
+
+        $capturedStamps = null;
+        $this->mockBus
+            ->expects($this->once())
+            ->method('dispatch')
+            ->willReturnCallback(function ($msg, array $stamps) use (&$capturedStamps): Envelope {
+                $capturedStamps = $stamps;
+
+                return new Envelope($msg);
+            });
+
+        $event->expects($this->once())->method('pass');
+
+        $this->subscriber->onCampaignTriggerActionQueue($event);
+
+        $this->assertCount(1, $capturedStamps);
+        $this->assertInstanceOf(AmqpStamp::class, $capturedStamps[0]);
+        $this->assertEquals('batch', $capturedStamps[0]->getRoutingKey());
     }
 
     public function testQueueSendFailsAllWhenIntegrationDisabled(): void
