@@ -38,7 +38,7 @@ class ConsumeWhatsAppCommand extends Command
             'queue',
             null,
             InputOption::VALUE_OPTIONAL,
-            'Consume only the specified RabbitMQ queue (e.g. whatsapp_5511). Omit to consume all queues.'
+            'Consume only the specified RabbitMQ queue (e.g. queue, batch). Omit to consume all queues.'
         );
 
         $this->addOption(
@@ -66,7 +66,7 @@ class ConsumeWhatsAppCommand extends Command
         $subCommand = $this->getApplication()->find('messenger:consume');
         $timeLimit = $input->getOption('time-limit') !== null
             ? max(0, (int) $input->getOption('time-limit'))
-            : 0;
+            : 60;
 
         $subArgs = [
             'command'   => 'messenger:consume',
