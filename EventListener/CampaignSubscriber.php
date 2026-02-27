@@ -11,20 +11,15 @@ use Mautic\IntegrationsBundle\Helper\IntegrationsHelper;
 use Mautic\LeadBundle\Helper\TokenHelper;
 use MauticPlugin\DialogHSMBundle\DialogHSMEvents;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
-use MauticPlugin\DialogHSMBundle\Form\Type\ConsumeQueueType;
 use MauticPlugin\DialogHSMBundle\Form\Type\SendWhatsAppType;
 use MauticPlugin\DialogHSMBundle\Integration\DialogHSMIntegration;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppMessageHandler;
 use MauticPlugin\DialogHSMBundle\Model\WhatsAppNumberModel;
 use Psr\Log\LoggerInterface;
-use Symfony\Bundle\FrameworkBundle\Console\Application;
-use Symfony\Component\Console\Input\ArrayInput;
-use Symfony\Component\Console\Output\NullOutput;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
-use Symfony\Component\HttpKernel\KernelInterface;
-use Symfony\Component\Messenger\MessageBusInterface;
 use Symfony\Component\Messenger\Bridge\Amqp\Transport\AmqpStamp;
+use Symfony\Component\Messenger\MessageBusInterface;
 
 class CampaignSubscriber implements EventSubscriberInterface
 {
@@ -34,17 +29,15 @@ class CampaignSubscriber implements EventSubscriberInterface
         private LoggerInterface $logger,
         private WhatsAppNumberModel $whatsAppNumberModel,
         private SendWhatsAppMessageHandler $handler,
-        private KernelInterface $kernel,
     ) {
     }
 
     public static function getSubscribedEvents(): array
     {
         return [
-            CampaignEvents::CAMPAIGN_ON_BUILD                  => ['onCampaignBuild', 0],
-            DialogHSMEvents::ON_CAMPAIGN_TRIGGER_ACTION        => ['onCampaignTriggerAction', 0],
-            DialogHSMEvents::ON_CAMPAIGN_TRIGGER_ACTION_QUEUE  => ['onCampaignTriggerActionQueue', 0],
-            DialogHSMEvents::ON_CAMPAIGN_TRIGGER_CONSUME_QUEUE => ['onCampaignTriggerConsumeQueue', 0],
+            CampaignEvents::CAMPAIGN_ON_BUILD                 => ['onCampaignBuild', 0],
+            DialogHSMEvents::ON_CAMPAIGN_TRIGGER_ACTION       => ['onCampaignTriggerAction', 0],
+            DialogHSMEvents::ON_CAMPAIGN_TRIGGER_ACTION_QUEUE => ['onCampaignTriggerActionQueue', 0],
         ];
     }
 
@@ -68,17 +61,6 @@ class CampaignSubscriber implements EventSubscriberInterface
                 'description'    => 'dialoghsm.campaign.send_whatsapp_queue.tooltip',
                 'batchEventName' => DialogHSMEvents::ON_CAMPAIGN_TRIGGER_ACTION_QUEUE,
                 'formType'       => SendWhatsAppType::class,
-                'channel'        => 'whatsapp',
-            ]
-        );
-
-        $event->addAction(
-            'dialoghsm.consume_queue',
-            [
-                'label'          => 'dialoghsm.campaign.consume_queue',
-                'description'    => 'dialoghsm.campaign.consume_queue.tooltip',
-                'batchEventName' => DialogHSMEvents::ON_CAMPAIGN_TRIGGER_CONSUME_QUEUE,
-                'formType'       => ConsumeQueueType::class,
                 'channel'        => 'whatsapp',
             ]
         );
@@ -115,47 +97,6 @@ class CampaignSubscriber implements EventSubscriberInterface
         }, applyBatchSleep: false);
     }
 
-    public function onCampaignTriggerConsumeQueue(PendingEvent $event): void
-    {
-        if (!$event->checkContext('dialoghsm.consume_queue')) {
-            return;
-        }
-
-        $config    = $event->getEvent()->getProperties();
-        $numberId  = (int) ($config['whatsapp_number'] ?? 0);
-        $limit     = (int) ($config['limit'] ?? 0);
-        $timeLimit = (int) ($config['time_limit'] ?? 30);
-
-        $queueName = null;
-        if ($numberId > 0) {
-            $number    = $this->getWhatsAppNumber($numberId);
-            $queueName = $number?->getQueueName();
-        }
-
-        $app = new Application($this->kernel);
-        $app->setAutoExit(false);
-
-        $args = ['command' => 'dialoghsm:consume'];
-
-        if ($limit > 0) {
-            $args['--limit'] = (string) $limit;
-        }
-
-        if ($queueName) {
-            $args['--queue'] = $queueName;
-        }
-
-        if ($timeLimit > 0) {
-            $args['--time-limit'] = (string) $timeLimit;
-        }
-
-        $app->run(new ArrayInput($args), new NullOutput());
-
-        foreach ($event->getContacts() as $logId => $contact) {
-            $event->pass($event->getPending()->get($logId));
-        }
-    }
-
     private function processContacts(PendingEvent $event, callable $sender, bool $applyBatchSleep = true): void
     {
         if (!$this->isIntegrationEnabled()) {
@@ -188,8 +129,8 @@ class CampaignSubscriber implements EventSubscriberInterface
         $sendDelay  = (int) ($config['send_delay'] ?? 0);
         $batchLimit = (int) ($config['batch_limit'] ?? 0);
 
-        // batch_limit=N: send N messages, then pause send_delay ms, repeat for all contacts.
-        // batch_limit=0: apply send_delay between every individual send.
+        // batch_limit=N: envia N mensagens, pausa send_delay ms, repete para todos os contatos.
+        // batch_limit=0: aplica send_delay entre cada mensagem individualmente.
         $effectiveBatch = $batchLimit > 0 ? $batchLimit : 1;
         $sentCount      = 0;
 
