@@ -17,11 +17,19 @@ Plugin que integra o Mautic com a API 360dialog para envio de mensagens WhatsApp
 
 ## Instalação
 
-### 1. Copiar o plugin
+### 1. Clonar o repositório
+
+Clone diretamente na pasta `plugins/` do Mautic:
 
 ```bash
-cp -r DialogHSMBundle /var/www/html/docroot/plugins/
+cd /var/www/html/docroot/plugins
+git clone <url-do-repositorio> DialogHSMBundle
 ```
+
+> Com Docker:
+> ```bash
+> docker exec mautic_app bash -c "cd /var/www/html/docroot/plugins && git clone <url-do-repositorio> DialogHSMBundle"
+> ```
 
 ### 2. Limpar o cache e rodar as migrações
 
@@ -40,6 +48,17 @@ php bin/console mautic:migrations:execute --bundle=DialogHSMBundle
 
 1. Acesse **Configurações → Plugins**
 2. Localize **360dialog WhatsApp** e clique em **Ativar/Publicar**
+
+### Atualizações futuras
+
+Para atualizar o plugin após uma nova versão:
+
+```bash
+cd /var/www/html/docroot/plugins/DialogHSMBundle
+git pull
+php bin/console cache:clear
+php bin/console mautic:migrations:execute --bundle=DialogHSMBundle
+```
 
 ---
 
