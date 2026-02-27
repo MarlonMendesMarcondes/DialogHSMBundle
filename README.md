@@ -9,7 +9,7 @@ Plugin que integra o Mautic com a API 360dialog para envio de mensagens WhatsApp
 | Dependência | Versão mínima |
 |-------------|---------------|
 | Mautic      | 5.x           |
-| PHP         | 8.1           |
+| PHP         | 8.1, 8.2, 8.3 |
 | MySQL       | 5.7 / 8.x     |
 | RabbitMQ    | 3.x *(opcional — necessário apenas para envio assíncrono)* |
 
