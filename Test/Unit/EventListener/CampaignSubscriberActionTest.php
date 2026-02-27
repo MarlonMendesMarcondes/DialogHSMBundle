@@ -585,12 +585,12 @@ class CampaignSubscriberActionTest extends TestCase
         $this->assertCount(3, $capturedMessages);
     }
 
-    public function testQueueSendUsesQueueOverrideInsteadOfNumberQueueName(): void
+    public function testQueueSendModeQueueUsesQueueName(): void
     {
         $this->enableIntegration();
 
         $number = $this->buildWhatsAppNumber();
-        $number->method('getQueueName')->willReturn('batch');
+        $number->method('getQueueName')->willReturn('queue');
 
         $this->mockNumberModel->method('getEntity')->willReturn($number);
 
@@ -620,12 +620,12 @@ class CampaignSubscriberActionTest extends TestCase
         $this->assertEquals('queue', $capturedStamps[0]->getRoutingKey());
     }
 
-    public function testQueueSendFallsBackToNumberQueueNameWhenOverrideIsEmpty(): void
+    public function testQueueSendFallsBackToQueueNameWhenModeIsEmpty(): void
     {
         $this->enableIntegration();
 
         $number = $this->buildWhatsAppNumber();
-        $number->method('getQueueName')->willReturn('batch');
+        $number->method('getQueueName')->willReturn('queue');
 
         $this->mockNumberModel->method('getEntity')->willReturn($number);
 
@@ -652,7 +652,79 @@ class CampaignSubscriberActionTest extends TestCase
 
         $this->assertCount(1, $capturedStamps);
         $this->assertInstanceOf(AmqpStamp::class, $capturedStamps[0]);
+        $this->assertEquals('queue', $capturedStamps[0]->getRoutingKey());
+    }
+
+    public function testQueueSendBatchModeUsesBatchQueueName(): void
+    {
+        $this->enableIntegration();
+
+        $number = $this->buildWhatsAppNumber();
+        $number->method('getQueueName')->willReturn('queue');
+        $number->method('getBatchQueueName')->willReturn('batch');
+
+        $this->mockNumberModel->method('getEntity')->willReturn($number);
+
+        $contact = $this->buildContact('11999999999', 1);
+        $event   = $this->buildPendingEvent(
+            'dialoghsm.send_whatsapp_queue',
+            [1 => $contact],
+            ['queue_override' => 'batch']
+        );
+
+        $capturedStamps = null;
+        $this->mockBus
+            ->expects($this->once())
+            ->method('dispatch')
+            ->willReturnCallback(function ($msg, array $stamps) use (&$capturedStamps): Envelope {
+                $capturedStamps = $stamps;
+
+                return new Envelope($msg);
+            });
+
+        $event->expects($this->once())->method('pass');
+
+        $this->subscriber->onCampaignTriggerActionQueue($event);
+
+        $this->assertCount(1, $capturedStamps);
+        $this->assertInstanceOf(AmqpStamp::class, $capturedStamps[0]);
         $this->assertEquals('batch', $capturedStamps[0]->getRoutingKey());
+    }
+
+    public function testQueueSendBatchModeFallsBackToQueueNameWhenBatchQueueNameIsEmpty(): void
+    {
+        $this->enableIntegration();
+
+        $number = $this->buildWhatsAppNumber();
+        $number->method('getQueueName')->willReturn('queue');
+        $number->method('getBatchQueueName')->willReturn(null);
+
+        $this->mockNumberModel->method('getEntity')->willReturn($number);
+
+        $contact = $this->buildContact('11999999999', 1);
+        $event   = $this->buildPendingEvent(
+            'dialoghsm.send_whatsapp_queue',
+            [1 => $contact],
+            ['queue_override' => 'batch']
+        );
+
+        $capturedStamps = null;
+        $this->mockBus
+            ->expects($this->once())
+            ->method('dispatch')
+            ->willReturnCallback(function ($msg, array $stamps) use (&$capturedStamps): Envelope {
+                $capturedStamps = $stamps;
+
+                return new Envelope($msg);
+            });
+
+        $event->expects($this->once())->method('pass');
+
+        $this->subscriber->onCampaignTriggerActionQueue($event);
+
+        $this->assertCount(1, $capturedStamps);
+        $this->assertInstanceOf(AmqpStamp::class, $capturedStamps[0]);
+        $this->assertEquals('queue', $capturedStamps[0]->getRoutingKey());
     }
 
     public function testQueueSendFailsAllWhenIntegrationDisabled(): void
