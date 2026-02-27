@@ -7,6 +7,7 @@ namespace MauticPlugin\DialogHSMBundle\Form\Type;
 use Mautic\CoreBundle\Form\Type\SortableListType;
 use Symfony\Component\Form\AbstractType;
 use Symfony\Component\Form\Extension\Core\Type\IntegerType;
+use Symfony\Component\Form\Extension\Core\Type\TextType;
 use Symfony\Component\Form\FormBuilderInterface;
 use Symfony\Component\Form\FormEvent;
 use Symfony\Component\Form\FormEvents;
@@ -77,6 +78,23 @@ class SendWhatsAppType extends AbstractType
                 'data'        => 0,
                 'constraints' => [new Range(['min' => 0, 'max' => 10000])],
                 'help'        => 'dialoghsm.campaign.batch_limit.help',
+            ]
+        );
+
+        $builder->add(
+            'queue_override',
+            TextType::class,
+            [
+                'label'      => 'dialoghsm.campaign.queue_override',
+                'label_attr' => ['class' => 'control-label'],
+                'attr'       => [
+                    'class'       => 'form-control',
+                    'placeholder' => 'dialoghsm.campaign.queue_override.placeholder',
+                    'tooltip'     => 'dialoghsm.campaign.queue_override.tooltip',
+                ],
+                'required'   => false,
+                'empty_data' => '',
+                'help'       => 'dialoghsm.campaign.queue_override.help',
             ]
         );
 
