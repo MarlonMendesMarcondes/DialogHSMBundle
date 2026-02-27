@@ -85,12 +85,17 @@ class CampaignSubscriber implements EventSubscriberInterface
             return;
         }
 
-        $config        = $event->getEvent()->getProperties();
-        $queueOverride = trim($config['queue_override'] ?? '');
+        $config = $event->getEvent()->getProperties();
+        $mode   = trim($config['queue_override'] ?? '');
 
-        $this->processContacts($event, function (SendWhatsAppMessage $message, WhatsAppNumber $number) use ($queueOverride): bool {
-            $queueName = $queueOverride !== '' ? $queueOverride : $number->getQueueName();
-            $stamps    = $queueName ? [new AmqpStamp($queueName)] : [];
+        $this->processContacts($event, function (SendWhatsAppMessage $message, WhatsAppNumber $number) use ($mode): bool {
+            $queueName = match ($mode) {
+                'batch' => $number->getBatchQueueName() ?: $number->getQueueName(),
+                'queue' => $number->getQueueName(),
+                default => $number->getQueueName(),
+            };
+
+            $stamps = $queueName ? [new AmqpStamp($queueName)] : [];
             $this->bus->dispatch($message, $stamps);
 
             return true;

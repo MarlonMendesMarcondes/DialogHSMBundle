@@ -103,6 +103,22 @@ class WhatsAppNumberType extends AbstractType
             ]
         );
 
+        $builder->add(
+            'batchQueueName',
+            TextType::class,
+            [
+                'label'      => 'dialoghsm.number.batch_queue_name',
+                'label_attr' => ['class' => 'control-label'],
+                'attr'       => [
+                    'class'       => 'form-control',
+                    'placeholder' => 'dialoghsm.number.batch_queue_name.placeholder',
+                    'tooltip'     => 'dialoghsm.number.batch_queue_name.tooltip',
+                ],
+                'required' => false,
+                'help'     => 'dialoghsm.number.batch_queue_name.help',
+            ]
+        );
+
         $builder->add('isPublished', YesNoButtonGroupType::class);
 
         $builder->add('buttons', FormButtonsType::class);
