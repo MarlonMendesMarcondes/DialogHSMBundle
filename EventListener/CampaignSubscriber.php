@@ -11,6 +11,7 @@ use Mautic\IntegrationsBundle\Helper\IntegrationsHelper;
 use Mautic\LeadBundle\Helper\TokenHelper;
 use MauticPlugin\DialogHSMBundle\DialogHSMEvents;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
+use MauticPlugin\DialogHSMBundle\Form\Type\SendWhatsAppQueueType;
 use MauticPlugin\DialogHSMBundle\Form\Type\SendWhatsAppType;
 use MauticPlugin\DialogHSMBundle\Integration\DialogHSMIntegration;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
@@ -60,7 +61,7 @@ class CampaignSubscriber implements EventSubscriberInterface
                 'label'          => 'dialoghsm.campaign.send_whatsapp_queue',
                 'description'    => 'dialoghsm.campaign.send_whatsapp_queue.tooltip',
                 'batchEventName' => DialogHSMEvents::ON_CAMPAIGN_TRIGGER_ACTION_QUEUE,
-                'formType'       => SendWhatsAppType::class,
+                'formType'       => SendWhatsAppQueueType::class,
                 'channel'        => 'whatsapp',
             ]
         );
