@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 use MauticPlugin\DialogHSMBundle\EventListener\CampaignSubscriber;
@@ -19,7 +20,6 @@ class CampaignSubscriberTest extends TestCase
         $this->assertArrayHasKey('mautic.dialoghsm.on_campaign_trigger_action_queue', $events);
         $this->assertEquals(['onCampaignTriggerActionQueue', 0], $events['mautic.dialoghsm.on_campaign_trigger_action_queue']);
 
-        $this->assertArrayHasKey('mautic.dialoghsm.on_campaign_trigger_consume_queue', $events);
-        $this->assertEquals(['onCampaignTriggerConsumeQueue', 0], $events['mautic.dialoghsm.on_campaign_trigger_consume_queue']);
+        $this->assertCount(3, $events);
     }
 }
