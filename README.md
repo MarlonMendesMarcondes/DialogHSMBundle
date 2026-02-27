@@ -35,13 +35,13 @@ git clone <url-do-repositorio> DialogHSMBundle
 
 ```bash
 php bin/console cache:clear
-php bin/console mautic:migrations:execute --bundle=DialogHSMBundle
+php bin/console mautic:plugins:reload
 ```
 
 > Com Docker:
 > ```bash
 > docker exec mautic_app php /var/www/html/bin/console cache:clear
-> docker exec mautic_app php /var/www/html/bin/console mautic:migrations:execute --bundle=DialogHSMBundle
+> docker exec mautic_app php /var/www/html/bin/console mautic:plugins:reload
 > ```
 
 ### 3. Ativar o plugin
@@ -57,7 +57,7 @@ Para atualizar o plugin após uma nova versão:
 cd /var/www/html/docroot/plugins/DialogHSMBundle
 git pull
 php bin/console cache:clear
-php bin/console mautic:migrations:execute --bundle=DialogHSMBundle
+php bin/console mautic:plugins:reload
 ```
 
 ---
@@ -83,7 +83,8 @@ Acesse **Canais → Números WhatsApp → Novo**.
 | **Telefone**   | Número remetente no formato internacional (ex: `+5511999999999`)                     | ✅          |
 | **API Key**    | Chave D360-API-KEY fornecida pela 360dialog                                          | ✅          |
 | **URL Base**   | URL customizada da API. Se vazio, usa a URL global configurada no plugin             | ❌          |
-| **Fila RabbitMQ** | Nome da fila RabbitMQ para envio assíncrono (ex: `queue`, `batch`)               | ❌          |
+| **Fila Massiva (RabbitMQ)** | Nome da fila para envio massivo em qualquer horário (ex: `queue`)       | ❌          |
+| **Fila Batch (RabbitMQ)**   | Nome da fila para envio em lote no horário comercial (ex: `batch`)      | ❌          |
 
 ---
 
@@ -110,7 +111,7 @@ Possui os mesmos campos da ação síncrona, mais:
 
 | Campo              | Descrição                                                                                           |
 |--------------------|-----------------------------------------------------------------------------------------------------|
-| **Fila (override)** | Sobrescreve a fila RabbitMQ do número para esta ação. Se vazio, usa o `queue_name` do número. Ex: `queue`, `batch` |
+| **Tipo de Fila**   | Seleciona qual fila do número usar: **Massivo** (fila massiva, qualquer horário) ou **Batch** (fila batch, horário comercial). Se não selecionado, usa a fila massiva do número. |
 
 > O delay **não é aplicado** no enfileiramento — todas as mensagens vão para o RabbitMQ imediatamente.
 > O ritmo de envio é controlado pelo consumer (cron).
