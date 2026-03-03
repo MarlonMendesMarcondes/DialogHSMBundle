@@ -5,6 +5,7 @@ use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use Mautic\CoreBundle\Helper\CoreParametersHelper;
 use MauticPlugin\DialogHSMBundle\Api\DialogHSMApi;
+use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppMessageHandler;
 use PHPUnit\Framework\MockObject\MockObject;
@@ -18,15 +19,17 @@ class SendWhatsAppMessageHandlerTest extends TestCase
     private LoggerInterface&MockObject $mockLogger;
     private CoreParametersHelper&MockObject $mockCoreParameters;
     private Connection&MockObject $mockConnection;
+    private MessageLogRepository&MockObject $mockMessageLogRepository;
     private SendWhatsAppMessageHandler $handler;
 
     protected function setUp(): void
     {
-        $this->mockApi            = $this->createMock(DialogHSMApi::class);
-        $this->mockEntityManager  = $this->createMock(EntityManagerInterface::class);
-        $this->mockLogger         = $this->createMock(LoggerInterface::class);
-        $this->mockCoreParameters = $this->createMock(CoreParametersHelper::class);
-        $this->mockConnection     = $this->createMock(Connection::class);
+        $this->mockApi                  = $this->createMock(DialogHSMApi::class);
+        $this->mockEntityManager        = $this->createMock(EntityManagerInterface::class);
+        $this->mockLogger               = $this->createMock(LoggerInterface::class);
+        $this->mockCoreParameters       = $this->createMock(CoreParametersHelper::class);
+        $this->mockConnection           = $this->createMock(Connection::class);
+        $this->mockMessageLogRepository = $this->createMock(MessageLogRepository::class);
 
         $this->mockEntityManager->method('getConnection')->willReturn($this->mockConnection);
         $this->mockCoreParameters->method('get')->with('default_timezone')->willReturn('UTC');
@@ -36,6 +39,7 @@ class SendWhatsAppMessageHandlerTest extends TestCase
             $this->mockEntityManager,
             $this->mockLogger,
             $this->mockCoreParameters,
+            $this->mockMessageLogRepository,
         );
     }
 
@@ -58,6 +62,7 @@ class SendWhatsAppMessageHandlerTest extends TestCase
         $this->mockEntityManager->expects($this->once())->method('persist');
         $this->mockEntityManager->expects($this->once())->method('flush');
         $this->mockConnection->expects($this->once())->method('executeStatement');
+        $this->mockMessageLogRepository->expects($this->once())->method('prune');
 
         ($this->handler)($message);
     }
@@ -81,6 +86,7 @@ class SendWhatsAppMessageHandlerTest extends TestCase
         $this->mockEntityManager->expects($this->once())->method('persist');
         $this->mockEntityManager->expects($this->once())->method('flush');
         $this->mockConnection->expects($this->once())->method('executeStatement');
+        $this->mockMessageLogRepository->expects($this->once())->method('prune');
 
         ($this->handler)($message);
     }
@@ -104,6 +110,7 @@ class SendWhatsAppMessageHandlerTest extends TestCase
         $this->mockEntityManager->expects($this->once())->method('persist');
         $this->mockEntityManager->expects($this->once())->method('flush');
         $this->mockConnection->expects($this->once())->method('executeStatement');
+        $this->mockMessageLogRepository->expects($this->once())->method('prune');
 
         ($this->handler)($message);
     }
