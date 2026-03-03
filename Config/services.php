@@ -25,4 +25,9 @@ return function (ContainerConfigurator $configurator): void {
             ->public()
             ->autowire()
             ->tag('controller.service_arguments');
+
+        $services->set(\MauticPlugin\DialogHSMBundle\Controller\MessageLogController::class)
+            ->public()
+            ->autowire()
+            ->tag('controller.service_arguments');
 };

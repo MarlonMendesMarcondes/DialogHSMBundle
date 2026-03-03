@@ -1,0 +1,99 @@
+{% set isIndex = tmpl == 'index' ? true : false %}
+{% set tmpl = 'list' %}
+{% extends isIndex ? '@MauticCore/Default/content.html.twig' : '@MauticCore/Default/raw_output.html.twig' %}
+{% block mauticContent %}dialoghsm_log{% endblock %}
+{% block headerTitle %}{{ 'dialoghsm.log.list.title'|trans }}{% endblock %}
+{% block content %}
+    {% if isIndex %}
+    <div id="page-list-wrapper" class="panel panel-default">
+        <div class="page-list-header">
+            <div class="list-toolbar-container">
+                <div class="toolbar-action-buttons">
+                    <span class="label label-default" style="font-size:13px; padding: 6px 12px;">
+                        {{ totalItems }} / {{ maxLogs }} {{ 'dialoghsm.log.list.counter'|trans }}
+                    </span>
+                </div>
+            </div>
+        </div>
+
+        <div class="page-list">
+            {{ block('listResults') }}
+        </div>
+    </div>
+    {% else %}
+        {{ block('listResults') }}
+    {% endif %}
+{% endblock %}
+
+{% block listResults %}
+{% if items|length %}
+    <div class="table-responsive">
+        <table class="table table-hover dialoghsm-log-list">
+            <thead>
+            <tr>
+                <th class="col-dialoghsm-date">{{ 'dialoghsm.log.date_sent'|trans }}</th>
+                <th class="col-dialoghsm-lead">{{ 'dialoghsm.log.lead_id'|trans }}</th>
+                <th class="col-dialoghsm-phone">{{ 'dialoghsm.log.phone'|trans }}</th>
+                <th class="col-dialoghsm-template">{{ 'dialoghsm.log.template'|trans }}</th>
+                <th class="col-dialoghsm-status">{{ 'dialoghsm.log.status'|trans }}</th>
+                <th class="col-dialoghsm-http">HTTP</th>
+                <th class="col-dialoghsm-error">{{ 'dialoghsm.log.error'|trans }}</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for item in items %}
+                <tr>
+                    <td>{{ item.getDateSent()|date('d/m/Y H:i:s') }}</td>
+                    <td>
+                        <a href="{{ path('mautic_contact_action', {'objectAction': 'view', 'objectId': item.getLeadId()}) }}" target="_blank">
+                            #{{ item.getLeadId() }}
+                        </a>
+                    </td>
+                    <td>{{ item.getPhoneNumber() }}</td>
+                    <td>{{ item.getTemplateName() }}</td>
+                    <td>
+                        {% if item.getStatus() == 'sent' %}
+                            <span class="label label-success">{{ item.getStatus() }}</span>
+                        {% else %}
+                            <span class="label label-danger">{{ item.getStatus() }}</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% set http = item.getHttpStatusCode() %}
+                        {% if http is not null %}
+                            {% if http >= 200 and http < 300 %}
+                                <span class="label label-success">{{ http }}</span>
+                            {% else %}
+                                <span class="label label-danger">{{ http }}</span>
+                            {% endif %}
+                        {% else %}
+                            <span class="text-muted">—</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if item.getErrorMessage() is not empty %}
+                            <span class="text-danger" title="{{ item.getErrorMessage() }}">
+                                {{ item.getErrorMessage()|length > 80 ? item.getErrorMessage()|slice(0, 80) ~ '…' : item.getErrorMessage() }}
+                            </span>
+                        {% else %}
+                            <span class="text-muted">—</span>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div class="panel-footer">
+        {{- include('@MauticCore/Helper/pagination.html.twig', {
+            'totalItems' : totalItems,
+            'page'       : page,
+            'limit'      : limit,
+            'baseUrl'    : path('mautic_dialoghsm_log_index'),
+            'sessionVar' : 'dialoghsm.log',
+        }) -}}
+    </div>
+{% else %}
+    {{- include('@MauticCore/Helper/noresults.html.twig', {'message' : 'dialoghsm.log.noresults'}) -}}
+{% endif %}
+{% endblock %}
