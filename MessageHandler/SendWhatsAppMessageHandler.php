@@ -8,6 +8,7 @@ use Doctrine\ORM\EntityManagerInterface;
 use Mautic\CoreBundle\Helper\CoreParametersHelper;
 use MauticPlugin\DialogHSMBundle\Api\DialogHSMApi;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
+use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Messenger\Handler\MessageHandlerInterface;
@@ -19,6 +20,7 @@ class SendWhatsAppMessageHandler implements MessageHandlerInterface
         private EntityManagerInterface $entityManager,
         private LoggerInterface $logger,
         private CoreParametersHelper $coreParametersHelper,
+        private MessageLogRepository $messageLogRepository,
     ) {
     }
 
@@ -62,6 +64,8 @@ class SendWhatsAppMessageHandler implements MessageHandlerInterface
 
         $this->entityManager->persist($log);
         $this->entityManager->flush();
+
+        $this->messageLogRepository->prune();
     }
 
     private function updateContactFieldsById(int $leadId, array $result): void
