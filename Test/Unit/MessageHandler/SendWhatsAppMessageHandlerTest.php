@@ -114,4 +114,125 @@ class SendWhatsAppMessageHandlerTest extends TestCase
 
         ($this->handler)($message);
     }
+
+    public function testSuccessUpdatesContactFieldWithSentStatus(): void
+    {
+        $message = new SendWhatsAppMessage(
+            leadId:       42,
+            phone:        '11999999999',
+            apiKey:       'API_KEY',
+            baseUrl:      'https://api.360dialog.com/v1/messages',
+            payloadData:  ['content' => 'nome_template', 'language' => 'pt_BR'],
+            templateName: 'nome_template',
+        );
+
+        $this->mockApi
+            ->method('sendMessage')
+            ->willReturn(['success' => true, 'response' => ['id' => 'abc'], 'error' => null, 'http_status' => 200]);
+
+        $capturedParams = null;
+        $this->mockConnection
+            ->method('executeStatement')
+            ->willReturnCallback(function (string $sql, array $params) use (&$capturedParams): int {
+                $capturedParams = $params;
+
+                return 1;
+            });
+
+        ($this->handler)($message);
+
+        // $capturedParams[0] = dialoghsm_status, [1] = dialoghsm_last_response, [3] = lead_id
+        $this->assertStringContainsString('sent', $capturedParams[0]);
+        $this->assertEquals('OK', $capturedParams[1]);
+        $this->assertEquals(42, $capturedParams[3]);
+    }
+
+    public function testFailureUpdatesContactFieldWithFailedStatus(): void
+    {
+        $message = new SendWhatsAppMessage(
+            leadId:       7,
+            phone:        '11999999999',
+            apiKey:       'API_KEY',
+            baseUrl:      'https://api.360dialog.com/v1/messages',
+            payloadData:  ['content' => 'nome_template', 'language' => 'pt_BR'],
+            templateName: 'nome_template',
+        );
+
+        $this->mockApi
+            ->method('sendMessage')
+            ->willReturn(['success' => false, 'response' => null, 'error' => 'HTTP 400: Bad Request', 'http_status' => 400]);
+
+        $capturedParams = null;
+        $this->mockConnection
+            ->method('executeStatement')
+            ->willReturnCallback(function (string $sql, array $params) use (&$capturedParams): int {
+                $capturedParams = $params;
+
+                return 1;
+            });
+
+        ($this->handler)($message);
+
+        $this->assertStringContainsString('failed', $capturedParams[0]);
+        $this->assertEquals('HTTP 400: Bad Request', $capturedParams[1]);
+        $this->assertEquals(7, $capturedParams[3]);
+    }
+
+    public function testLongErrorMessageIsTruncatedTo255CharsInContactField(): void
+    {
+        $longError = str_repeat('x', 300); // 300 caracteres
+
+        $message = new SendWhatsAppMessage(
+            leadId:       1,
+            phone:        '11999999999',
+            apiKey:       'API_KEY',
+            baseUrl:      'https://api.360dialog.com/v1/messages',
+            payloadData:  ['content' => 'nome_template', 'language' => 'pt_BR'],
+            templateName: 'nome_template',
+        );
+
+        $this->mockApi
+            ->method('sendMessage')
+            ->willReturn(['success' => false, 'response' => null, 'error' => $longError, 'http_status' => 500]);
+
+        $capturedParams = null;
+        $this->mockConnection
+            ->method('executeStatement')
+            ->willReturnCallback(function (string $sql, array $params) use (&$capturedParams): int {
+                $capturedParams = $params;
+
+                return 1;
+            });
+
+        ($this->handler)($message);
+
+        // dialoghsm_last_response deve ser truncado em 255 chars
+        $this->assertEquals(255, mb_strlen($capturedParams[1]));
+    }
+
+    public function testLogFailureDoesNotPreventContactFieldUpdate(): void
+    {
+        $message = new SendWhatsAppMessage(
+            leadId:       1,
+            phone:        '11999999999',
+            apiKey:       'API_KEY',
+            baseUrl:      'https://api.360dialog.com/v1/messages',
+            payloadData:  ['content' => 'nome_template', 'language' => 'pt_BR'],
+            templateName: 'nome_template',
+        );
+
+        $this->mockApi
+            ->method('sendMessage')
+            ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200]);
+
+        // Simula falha no persist (log falha)
+        $this->mockEntityManager
+            ->method('persist')
+            ->willThrowException(new \RuntimeException('DB error'));
+
+        // executeStatement deve ser chamado mesmo assim
+        $this->mockConnection->expects($this->once())->method('executeStatement');
+
+        ($this->handler)($message);
+    }
 }
