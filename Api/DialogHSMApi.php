@@ -114,7 +114,6 @@ class DialogHSMApi
     }
     /**
      * Monta o payload no formato esperado pela 360dialog.
-     * Replica a lógica do n8n: monta components a partir de vars, buttons, buttons_vars e url_arquivo.
      */
     private function buildPayload(string $mobile, array $data): array
     {
