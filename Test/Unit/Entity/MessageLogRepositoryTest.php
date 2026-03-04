@@ -111,4 +111,35 @@ class MessageLogRepositoryTest extends TestCase
 
         $this->repository->prune();
     }
+
+    public function testPruneDeletesExactlyOneWhenExcessIsOne(): void
+    {
+        // 10001 registros com limite padrão de 10000 → apaga exatamente 1
+        $this->mockConnection
+            ->expects($this->once())
+            ->method('fetchOne')
+            ->willReturn('10001');
+
+        $this->mockConnection
+            ->expects($this->once())
+            ->method('executeStatement')
+            ->with('DELETE FROM `dialog_hsm_message_log` ORDER BY date_sent ASC, id ASC LIMIT 1');
+
+        $this->repository->prune();
+    }
+
+    public function testPruneWithCustomMaxRecordsDoesNothingWhenCountIsExactlyAtLimit(): void
+    {
+        // Exatamente no limite customizado → não deleta
+        $this->mockConnection
+            ->expects($this->once())
+            ->method('fetchOne')
+            ->willReturn('500');
+
+        $this->mockConnection
+            ->expects($this->never())
+            ->method('executeStatement');
+
+        $this->repository->prune(maxRecords: 500);
+    }
 }
