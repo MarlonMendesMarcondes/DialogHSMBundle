@@ -22,4 +22,24 @@ class CampaignSubscriberTest extends TestCase
 
         $this->assertCount(3, $events);
     }
+
+    public function testEventNamesMatchDialogHSMEventsConstants(): void
+    {
+        $events = CampaignSubscriber::getSubscribedEvents();
+
+        $this->assertArrayHasKey(\MauticPlugin\DialogHSMBundle\DialogHSMEvents::ON_CAMPAIGN_TRIGGER_ACTION, $events);
+        $this->assertArrayHasKey(\MauticPlugin\DialogHSMBundle\DialogHSMEvents::ON_CAMPAIGN_TRIGGER_ACTION_QUEUE, $events);
+    }
+
+    public function testSubscribedHandlerMethodsExistOnClass(): void
+    {
+        $events = CampaignSubscriber::getSubscribedEvents();
+
+        foreach ($events as [$method]) {
+            $this->assertTrue(
+                method_exists(CampaignSubscriber::class, $method),
+                "Método '{$method}' não existe em CampaignSubscriber"
+            );
+        }
+    }
 }
