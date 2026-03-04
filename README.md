@@ -11,15 +11,13 @@ Plugin que integra o Mautic com a API 360dialog para envio de mensagens WhatsApp
 | Mautic      | 5.x           |
 | PHP         | 8.1, 8.2, 8.3 |
 | MySQL       | 5.7 / 8.x     |
-| RabbitMQ    | 3.x *(opcional — necessário apenas para envio assíncrono)* |
+| RabbitMQ    | 3.x *(opcional — necessário apenas para envio com fila)* |
 
 ---
 
 ## Instalação
 
 ### 1. Clonar o repositório
-
-Clone diretamente na pasta `plugins/` do Mautic:
 
 ```bash
 cd /var/www/html/docroot/plugins
@@ -51,8 +49,6 @@ php bin/console mautic:plugins:reload
 
 ### Atualizações futuras
 
-Para atualizar o plugin após uma nova versão:
-
 ```bash
 cd /var/www/html/docroot/plugins/DialogHSMBundle
 git pull
@@ -69,7 +65,7 @@ Acesse **Configurações → Plugins → 360dialog WhatsApp → Configuração**
 | Campo             | Descrição                                                        | Padrão                              |
 |-------------------|------------------------------------------------------------------|-------------------------------------|
 | **URL Base da API** | URL padrão da API 360dialog usada quando o número não define a sua | `https://waba-v2.360dialog.io/messages` |
-| **Limite do Consumer** | Número máximo de mensagens processadas por execução do `dialoghsm:consume` | `50` |
+| **Limite do Consumer** | Máximo de mensagens processadas por execução do consumer | `50` |
 
 ---
 
@@ -109,12 +105,9 @@ Enfileira a mensagem no RabbitMQ para processamento posterior pelo consumer.
 
 Possui os mesmos campos da ação síncrona, mais:
 
-| Campo              | Descrição                                                                                           |
-|--------------------|-----------------------------------------------------------------------------------------------------|
-| **Tipo de Fila**   | Seleciona qual fila do número usar: **Massivo** (fila massiva, qualquer horário) ou **Batch** (fila batch, horário comercial). Se não selecionado, usa a fila massiva do número. |
-
-> O delay **não é aplicado** no enfileiramento — todas as mensagens vão para o RabbitMQ imediatamente.
-> O ritmo de envio é controlado pelo consumer (cron).
+| Campo            | Opções                  | Descrição                                                                                           |
+|------------------|-------------------------|-----------------------------------------------------------------------------------------------------|
+| **Tipo de Fila** | **Massivo** / **Batch** | **Massivo** usa a *Fila Massiva* do número (qualquer horário). **Batch** usa a *Fila Batch* (horário comercial). |
 
 ### Estrutura do Payload
 
@@ -124,53 +117,36 @@ A chave `content` define o nome do template. As demais chaves são variáveis en
 content  = nome_do_template
 nome     = {{ contact.firstname }}
 telefone = {{ contact.phone }}
-codigo   = {{ contact.custom_field }}
+custom   = {{ contact.custom_field }}
 ```
 
 ---
 
 ## Envio Assíncrono via RabbitMQ
 
-### Configuração das Filas
+### 1. Configurar a conexão
 
-O plugin usa o transport `whatsapp` do Symfony Messenger. Configure no `messenger.yaml` do Mautic:
-
-```yaml
-framework:
-  messenger:
-    transports:
-      whatsapp:
-        dsn: "amqp://user:password@rabbitmq:5672/%2f/whatsapp"
-        options:
-          queues:
-            queue: ~   # fila massiva
-            batch: ~   # fila horário comercial (lotes)
-```
-
-### Consumer Manual
+Adicione no `.env.local` (na raiz do Mautic):
 
 ```bash
-# Consumir a fila massiva
-php bin/console dialoghsm:consume --queue=queue --limit=50 --time-limit=60
-
-# Consumir a fila de lotes (horário comercial)
-php bin/console dialoghsm:consume --queue=batch --limit=100 --time-limit=540
-
-# Consumir todas as filas (usa limite configurado no plugin)
-php bin/console dialoghsm:consume
+MAUTIC_MESSENGER_DSN_WHATSAPP=amqp://user:password@localhost:5672/%2f/whatsapp
 ```
 
-**Opções disponíveis:**
+> Em Docker, substitua `localhost` pelo nome do serviço RabbitMQ (ex: `rabbitmq`).
 
-| Opção           | Descrição                                                       | Padrão              |
-|-----------------|-----------------------------------------------------------------|---------------------|
-| `--queue`       | Nome da fila RabbitMQ a consumir. Omitir = consome todas        | *(todas)*           |
-| `--limit`       | Máximo de mensagens a processar. Substitui o limite global      | Limite do plugin    |
-| `--time-limit`  | Para o consumer após N segundos. `0` = sem limite               | `60`                |
+### 2. Criar as filas no RabbitMQ
 
-### Configuração do Cron
+Crie as filas com os **mesmos nomes** configurados nos campos *Fila Massiva* e *Fila Batch* de cada número:
 
-Recomenda-se dois crons independentes por fila:
+```bash
+# Exemplo para o número "Comercial"
+rabbitmqctl add_queue comercial_sp_massiva
+rabbitmqctl add_queue comercial_sp_batch
+```
+
+> Se a fila não existir no RabbitMQ, a mensagem é descartada silenciosamente.
+
+### 3. Configurar o Cron
 
 ```bash
 # Fila massiva: qualquer horário, a cada minuto
@@ -180,19 +156,39 @@ Recomenda-se dois crons independentes por fila:
 */10 8-17 * * 1-5 php /var/www/html/bin/console dialoghsm:consume --queue=batch --limit=100 --time-limit=540
 ```
 
-> O `--time-limit` deve ser menor que o intervalo do cron para evitar sobreposição de execuções.
-> Para cron de 10 minutos, use `--time-limit=540` (9 minutos).
+### Consumer Manual
+
+```bash
+# Consumir uma fila específica
+php bin/console dialoghsm:consume --queue=queue --limit=50 --time-limit=60
+
+# Consumir todas as filas
+php bin/console dialoghsm:consume
+```
+
+| Opção           | Descrição                                                       | Padrão           |
+|-----------------|-----------------------------------------------------------------|------------------|
+| `--queue`       | Nome da fila a consumir. Omitir = consome todas                 | *(todas)*        |
+| `--limit`       | Máximo de mensagens a processar                                 | Limite do plugin |
+| `--time-limit`  | Para o consumer após N segundos. `0` = sem limite               | `60`             |
 
 ---
 
-## Estrutura de Banco de Dados
+## Logs de Envio
 
-O plugin cria as seguintes tabelas via migrations:
+Acesse **Canais → Logs de Envio** para auditar todos os envios realizados pelo plugin.
 
-| Tabela                     | Descrição                                      |
-|----------------------------|------------------------------------------------|
-| `dialog_hsm_numbers`       | Números WhatsApp cadastrados                   |
-| `dialog_hsm_message_log`   | Log de todos os envios realizados              |
+| Coluna        | Descrição                                              |
+|---------------|--------------------------------------------------------|
+| **Data/Hora** | Timestamp do envio                                     |
+| **Contato**   | Link para o perfil do contato no Mautic                |
+| **Telefone**  | Número de destino                                      |
+| **Template**  | Nome do template HSM enviado                           |
+| **Status**    | `sent` (verde) ou `failed` (vermelho)                  |
+| **HTTP**      | Código de resposta da API 360dialog                    |
+| **Erro**      | Mensagem de erro quando o envio falha                  |
+
+> Os logs são mantidos automaticamente em no máximo **10.000 registros**.
 
 ---
 
@@ -210,4 +206,3 @@ php bin/console cache:clear
 
 **Consumer não finaliza:**
 - Sempre use `--time-limit` ao rodar manualmente
-- Sem `--time-limit`, o consumer aguarda novas mensagens indefinidamente (comportamento de daemon)
