@@ -27,6 +27,43 @@ class WhatsAppNumberRepository extends CommonRepository
     }
 
     /**
+     * Returns distinct non-empty queue_name values from published numbers.
+     *
+     * @return string[]
+     */
+    public function getDistinctBulkQueueNames(): array
+    {
+        return $this->getDistinctQueueField('queueName');
+    }
+
+    /**
+     * Returns distinct non-empty batch_queue_name values from published numbers.
+     *
+     * @return string[]
+     */
+    public function getDistinctBatchQueueNames(): array
+    {
+        return $this->getDistinctQueueField('batchQueueName');
+    }
+
+    /**
+     * @return string[]
+     */
+    private function getDistinctQueueField(string $field): array
+    {
+        $rows = $this->createQueryBuilder('wn')
+            ->select("DISTINCT wn.{$field} AS q")
+            ->where("wn.{$field} IS NOT NULL")
+            ->andWhere("wn.{$field} != ''")
+            ->andWhere('wn.isPublished = :published')
+            ->setParameter('published', true)
+            ->getQuery()
+            ->getArrayResult();
+
+        return array_values(array_filter(array_column($rows, 'q')));
+    }
+
+    /**
      * @param string|array $search
      *
      * @return array<array{id: int, name: string, phoneNumber: string}>
