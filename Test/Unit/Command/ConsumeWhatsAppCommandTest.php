@@ -234,4 +234,38 @@ class ConsumeWhatsAppCommandTest extends TestCase
 
         $this->assertEquals(['whatsapp'], $this->capturedArgs['receivers']);
     }
+
+    // -------------------------------------------------------------------------
+    // Testes: limit a partir das configurações da integração
+    // -------------------------------------------------------------------------
+
+    public function testLimitFromIntegrationSettingsWhenConfigured(): void
+    {
+        $mockApiKeys = ['consumer_limit' => '100'];
+
+        $mockConfig = new class($mockApiKeys) {
+            public function __construct(private array $keys) {}
+            public function getApiKeys(): array { return $this->keys; }
+        };
+
+        $mockIntegration = new class($mockConfig) {
+            public function __construct(private $config) {}
+            public function getIntegrationConfiguration() { return $this->config; }
+        };
+
+        $this->mockIntegrationsHelper = $this->createMock(\Mautic\IntegrationsBundle\Helper\IntegrationsHelper::class);
+        $this->mockIntegrationsHelper->method('getIntegration')->willReturn($mockIntegration);
+
+        $this->runCommand([]);
+
+        $this->assertEquals('100', $this->capturedArgs['--limit']);
+    }
+
+    public function testExplicitLimitOfZeroIsEnforcedToAtLeastOne(): void
+    {
+        // max(1, 0) → 1: nunca permite limit=0 que consumiria mensagens indefinidamente
+        $this->runCommand(['--limit' => '0']);
+
+        $this->assertEquals('1', $this->capturedArgs['--limit']);
+    }
 }
