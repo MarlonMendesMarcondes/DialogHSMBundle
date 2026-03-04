@@ -154,6 +154,253 @@ class DialogHsmApiTest extends TestCase
         $this->assertEquals('https://example.com/image.jpg', $header['parameters'][0]['image']['link']);
     }
 
+    public function testHeaderWithPngImage(): void
+    {
+        $capturedPayload = null;
+        $mockResponse    = new Response(200, [], json_encode(['message' => [['id' => 'abc']]]));
 
+        $this->mockClient
+            ->method('request')
+            ->willReturnCallback(function (string $method, string $url, array $options) use (&$capturedPayload, $mockResponse) {
+                $capturedPayload = $options['json'];
+
+                return $mockResponse;
+            });
+
+        $this->api->sendMessage('API_KEY', 'https://api.360dialog.com/v1/messages', '11999999999', [
+            'content'     => 'nome_template',
+            'language'    => 'pt_BR',
+            'url_arquivo' => 'https://example.com/banner.png',
+        ]);
+
+        $header = $capturedPayload['template']['components'][0];
+        $this->assertEquals('header', $header['type']);
+        $this->assertEquals('image', $header['parameters'][0]['type']);
+        $this->assertEquals('https://example.com/banner.png', $header['parameters'][0]['image']['link']);
+    }
+
+    public function testHeaderWithMp4Video(): void
+    {
+        $capturedPayload = null;
+        $mockResponse    = new Response(200, [], json_encode(['message' => [['id' => 'abc']]]));
+
+        $this->mockClient
+            ->method('request')
+            ->willReturnCallback(function (string $method, string $url, array $options) use (&$capturedPayload, $mockResponse) {
+                $capturedPayload = $options['json'];
+
+                return $mockResponse;
+            });
+
+        $this->api->sendMessage('API_KEY', 'https://api.360dialog.com/v1/messages', '11999999999', [
+            'content'     => 'nome_template',
+            'language'    => 'pt_BR',
+            'url_arquivo' => 'https://example.com/video.mp4',
+        ]);
+
+        $header = $capturedPayload['template']['components'][0];
+        $this->assertEquals('header', $header['type']);
+        $this->assertEquals('video', $header['parameters'][0]['type']);
+        $this->assertEquals('https://example.com/video.mp4', $header['parameters'][0]['video']['link']);
+    }
+
+    public function testHeaderWithPdfDocument(): void
+    {
+        $capturedPayload = null;
+        $mockResponse    = new Response(200, [], json_encode(['message' => [['id' => 'abc']]]));
+
+        $this->mockClient
+            ->method('request')
+            ->willReturnCallback(function (string $method, string $url, array $options) use (&$capturedPayload, $mockResponse) {
+                $capturedPayload = $options['json'];
+
+                return $mockResponse;
+            });
+
+        $this->api->sendMessage('API_KEY', 'https://api.360dialog.com/v1/messages', '11999999999', [
+            'content'     => 'nome_template',
+            'language'    => 'pt_BR',
+            'url_arquivo' => 'https://example.com/contrato.pdf',
+        ]);
+
+        $header = $capturedPayload['template']['components'][0];
+        $this->assertEquals('header', $header['type']);
+        $this->assertEquals('document', $header['parameters'][0]['type']);
+        $this->assertEquals('https://example.com/contrato.pdf', $header['parameters'][0]['document']['link']);
+    }
+
+    public function testHeaderWithUnknownExtensionProducesNoHeaderComponent(): void
+    {
+        $capturedPayload = null;
+        $mockResponse    = new Response(200, [], json_encode(['message' => [['id' => 'abc']]]));
+
+        $this->mockClient
+            ->method('request')
+            ->willReturnCallback(function (string $method, string $url, array $options) use (&$capturedPayload, $mockResponse) {
+                $capturedPayload = $options['json'];
+
+                return $mockResponse;
+            });
+
+        $this->api->sendMessage('API_KEY', 'https://api.360dialog.com/v1/messages', '11999999999', [
+            'content'     => 'nome_template',
+            'language'    => 'pt_BR',
+            'url_arquivo' => 'https://example.com/arquivo.txt',
+        ]);
+
+        // Extensão desconhecida → buildHeaderParameter retorna null → sem componente de header
+        $this->assertEmpty($capturedPayload['template']['components']);
+    }
+
+    public function testBodyVariablesAreIncludedAsTextParameters(): void
+    {
+        $capturedPayload = null;
+        $mockResponse    = new Response(200, [], json_encode(['message' => [['id' => 'abc']]]));
+
+        $this->mockClient
+            ->method('request')
+            ->willReturnCallback(function (string $method, string $url, array $options) use (&$capturedPayload, $mockResponse) {
+                $capturedPayload = $options['json'];
+
+                return $mockResponse;
+            });
+
+        $this->api->sendMessage('API_KEY', 'https://api.360dialog.com/v1/messages', '11999999999', [
+            'content'  => 'nome_template',
+            'language' => 'pt_BR',
+            'vars'     => 'nome, cidade',
+            'nome'     => 'João',
+            'cidade'   => 'São Paulo',
+        ]);
+
+        $components = $capturedPayload['template']['components'];
+        $body       = array_values(array_filter($components, fn($c) => $c['type'] === 'body'))[0] ?? null;
+
+        $this->assertNotNull($body);
+        $this->assertCount(2, $body['parameters']);
+        $this->assertEquals('text', $body['parameters'][0]['type']);
+        $this->assertEquals('João', $body['parameters'][0]['text']);
+        $this->assertEquals('text', $body['parameters'][1]['type']);
+        $this->assertEquals('São Paulo', $body['parameters'][1]['text']);
+    }
+
+    public function testButtonComponentsAreIncludedInPayload(): void
+    {
+        $capturedPayload = null;
+        $mockResponse    = new Response(200, [], json_encode(['message' => [['id' => 'abc']]]));
+
+        $this->mockClient
+            ->method('request')
+            ->willReturnCallback(function (string $method, string $url, array $options) use (&$capturedPayload, $mockResponse) {
+                $capturedPayload = $options['json'];
+
+                return $mockResponse;
+            });
+
+        $this->api->sendMessage('API_KEY', 'https://api.360dialog.com/v1/messages', '11999999999', [
+            'content'      => 'nome_template',
+            'language'     => 'pt_BR',
+            'buttons'      => 'url, quick_reply',
+            'buttons_vars' => 'pagina, sim',
+        ]);
+
+        $components = $capturedPayload['template']['components'];
+        $buttons    = array_values(array_filter($components, fn($c) => $c['type'] === 'button'));
+
+        $this->assertCount(2, $buttons);
+        $this->assertEquals('url', $buttons[0]['sub_type']);
+        $this->assertEquals(0, $buttons[0]['index']);
+        $this->assertEquals('pagina', $buttons[0]['parameters'][0]['text']);
+        $this->assertEquals('quick_reply', $buttons[1]['sub_type']);
+        $this->assertEquals(1, $buttons[1]['index']);
+        $this->assertEquals('sim', $buttons[1]['parameters'][0]['text']);
+    }
+
+    public function testPhoneWithPlusPrefixIsPreservedWithoutDoubleDdi(): void
+    {
+        $capturedPayload = null;
+        $mockResponse    = new Response(200, [], json_encode(['message' => [['id' => 'abc']]]));
+
+        $this->mockClient
+            ->method('request')
+            ->willReturnCallback(function (string $method, string $url, array $options) use (&$capturedPayload, $mockResponse) {
+                $capturedPayload = $options['json'];
+
+                return $mockResponse;
+            });
+
+        // Número já vem com "+" → deve preservar o DDI sem duplicar
+        $this->api->sendMessage('API_KEY', 'https://api.360dialog.com/v1/messages', '+5511999999999', [
+            'content'  => 'nome_template',
+            'language' => 'pt_BR',
+        ]);
+
+        $this->assertEquals('+5511999999999', $capturedPayload['to']);
+    }
+
+    public function testPhoneWith55PrefixGetsLeadingPlus(): void
+    {
+        $capturedPayload = null;
+        $mockResponse    = new Response(200, [], json_encode(['message' => [['id' => 'abc']]]));
+
+        $this->mockClient
+            ->method('request')
+            ->willReturnCallback(function (string $method, string $url, array $options) use (&$capturedPayload, $mockResponse) {
+                $capturedPayload = $options['json'];
+
+                return $mockResponse;
+            });
+
+        // Número com DDI 55 mas sem "+" → adiciona "+"
+        $this->api->sendMessage('API_KEY', 'https://api.360dialog.com/v1/messages', '5511999999999', [
+            'content'  => 'nome_template',
+            'language' => 'pt_BR',
+        ]);
+
+        $this->assertEquals('+5511999999999', $capturedPayload['to']);
+    }
+
+    public function testPhoneWithoutCountryCodeGetsBrazilPrefix(): void
+    {
+        $capturedPayload = null;
+        $mockResponse    = new Response(200, [], json_encode(['message' => [['id' => 'abc']]]));
+
+        $this->mockClient
+            ->method('request')
+            ->willReturnCallback(function (string $method, string $url, array $options) use (&$capturedPayload, $mockResponse) {
+                $capturedPayload = $options['json'];
+
+                return $mockResponse;
+            });
+
+        // Número local sem DDI → prefixa com "+55"
+        $this->api->sendMessage('API_KEY', 'https://api.360dialog.com/v1/messages', '11999999999', [
+            'content'  => 'nome_template',
+            'language' => 'pt_BR',
+        ]);
+
+        $this->assertEquals('+5511999999999', $capturedPayload['to']);
+    }
+
+    public function testBaseUrlTrailingSlashIsStripped(): void
+    {
+        $capturedUrl  = null;
+        $mockResponse = new Response(200, [], json_encode(['message' => [['id' => 'abc']]]));
+
+        $this->mockClient
+            ->method('request')
+            ->willReturnCallback(function (string $method, string $url, array $options) use (&$capturedUrl, $mockResponse) {
+                $capturedUrl = $url;
+
+                return $mockResponse;
+            });
+
+        $this->api->sendMessage('API_KEY', 'https://api.360dialog.com/v1/messages/', '11999999999', [
+            'content'  => 'nome_template',
+            'language' => 'pt_BR',
+        ]);
+
+        $this->assertEquals('https://api.360dialog.com/v1/messages', $capturedUrl);
+    }
 }
 ?>
