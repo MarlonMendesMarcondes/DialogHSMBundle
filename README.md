@@ -139,9 +139,8 @@ MAUTIC_MESSENGER_DSN_WHATSAPP=amqp://user:password@localhost:5672/%2f/whatsapp
 Crie as filas com os **mesmos nomes** configurados nos campos *Fila Massiva* e *Fila Batch* de cada número:
 
 ```bash
-# Exemplo para o número "Comercial"
-rabbitmqctl add_queue comercial_sp_massiva
-rabbitmqctl add_queue comercial_sp_batch
+rabbitmqctl add_queue bulk
+rabbitmqctl add_queue batch
 ```
 
 > Se a fila não existir no RabbitMQ, a mensagem é descartada silenciosamente.
@@ -149,28 +148,35 @@ rabbitmqctl add_queue comercial_sp_batch
 ### 3. Configurar o Cron
 
 ```bash
-# Fila massiva: qualquer horário, a cada minuto
-* * * * * php /var/www/html/bin/console dialoghsm:consume --queue=queue --limit=50 --time-limit=60
+# Fila bulk: qualquer horário, a cada minuto
+* * * * * php /var/www/html/bin/console dialoghsm:consume --mode=bulk --time-limit=60
 
-# Fila de lotes (horário comercial): seg a sex, 8h às 18h, a cada 10 minutos
-*/10 8-17 * * 1-5 php /var/www/html/bin/console dialoghsm:consume --queue=batch --limit=100 --time-limit=540
+# Fila batch (horário comercial): seg a sex, 8h às 18h, a cada 10 minutos
+*/10 8-17 * * 1-5 php /var/www/html/bin/console dialoghsm:consume --mode=batch --time-limit=540
 ```
 
 ### Consumer Manual
 
 ```bash
-# Consumir uma fila específica
-php bin/console dialoghsm:consume --queue=queue --limit=50 --time-limit=60
+# Fila padrão bulk
+php bin/console dialoghsm:consume --mode=bulk --time-limit=60
 
-# Consumir todas as filas
+# Fila padrão batch
+php bin/console dialoghsm:consume --mode=batch --time-limit=60
+
+# Fila com nome customizado
+php bin/console dialoghsm:consume --queue=nome_da_fila --time-limit=60
+
+# Todas as filas
 php bin/console dialoghsm:consume
 ```
 
-| Opção           | Descrição                                                       | Padrão           |
-|-----------------|-----------------------------------------------------------------|------------------|
-| `--queue`       | Nome da fila a consumir. Omitir = consome todas                 | *(todas)*        |
-| `--limit`       | Máximo de mensagens a processar                                 | Limite do plugin |
-| `--time-limit`  | Para o consumer após N segundos. `0` = sem limite               | `60`             |
+| Opção           | Descrição                                                                      | Padrão           |
+|-----------------|--------------------------------------------------------------------------------|------------------|
+| `--mode`        | Atalho para filas padrão: `bulk` ou `batch`                                    | *(nenhum)*       |
+| `--queue`       | Nome exato da fila. Tem prioridade sobre `--mode`                              | *(todas)*        |
+| `--limit`       | Máximo de mensagens a processar                                                | Limite do plugin |
+| `--time-limit`  | Para o consumer após N segundos. `0` = sem limite                              | `60`             |
 
 ---
 
