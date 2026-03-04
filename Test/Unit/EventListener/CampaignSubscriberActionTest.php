@@ -795,4 +795,93 @@ class CampaignSubscriberActionTest extends TestCase
         $this->assertEquals('https://api.360dialog.com/v1/messages', $capturedMessage->baseUrl);
         $this->assertEquals(5, $capturedMessage->leadId);
     }
+
+    // -------------------------------------------------------------------------
+    // Testes: cenários de erro no modo fila (espelhos dos testes de envio direto)
+    // -------------------------------------------------------------------------
+
+    public function testQueueSendFailsAllWhenNumberNotFound(): void
+    {
+        $this->enableIntegration();
+
+        $this->mockNumberModel
+            ->method('getEntity')
+            ->willReturn(null);
+
+        $event = $this->buildPendingEvent('dialoghsm.send_whatsapp_queue');
+
+        $event->expects($this->once())
+            ->method('failAll')
+            ->with('dialoghsm.campaign.error.missing_number');
+
+        $this->mockBus->expects($this->never())->method('dispatch');
+
+        $this->subscriber->onCampaignTriggerActionQueue($event);
+    }
+
+    public function testQueueSendFailsAllWhenApiKeyEmpty(): void
+    {
+        $this->enableIntegration();
+
+        $this->mockNumberModel
+            ->method('getEntity')
+            ->willReturn($this->buildWhatsAppNumber(apiKey: ''));
+
+        $event = $this->buildPendingEvent('dialoghsm.send_whatsapp_queue');
+
+        $event->expects($this->once())
+            ->method('failAll')
+            ->with('dialoghsm.campaign.error.missing_api_key');
+
+        $this->mockBus->expects($this->never())->method('dispatch');
+
+        $this->subscriber->onCampaignTriggerActionQueue($event);
+    }
+
+    public function testDirectSendFailsAllWhenNumberIsUnpublished(): void
+    {
+        $this->enableIntegration();
+
+        $unpublishedNumber = $this->createMock(WhatsAppNumber::class);
+        $unpublishedNumber->method('getIsPublished')->willReturn(false);
+
+        $this->mockNumberModel
+            ->method('getEntity')
+            ->willReturn($unpublishedNumber);
+
+        $event = $this->buildPendingEvent('dialoghsm.send_whatsapp');
+
+        $event->expects($this->once())
+            ->method('failAll')
+            ->with('dialoghsm.campaign.error.missing_number');
+
+        $this->mockHandler->expects($this->never())->method('__invoke');
+
+        $this->subscriber->onCampaignTriggerAction($event);
+    }
+
+    public function testDirectSendHandlesExceptionFromHandlerGracefully(): void
+    {
+        $this->enableIntegration();
+
+        $this->mockNumberModel
+            ->method('getEntity')
+            ->willReturn($this->buildWhatsAppNumber());
+
+        $contact = $this->buildContact('11999999999', 1);
+        $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
+
+        // Handler lança exceção → subscriber captura e trata como falha
+        $this->mockHandler
+            ->expects($this->once())
+            ->method('__invoke')
+            ->willThrowException(new \RuntimeException('Unexpected failure'));
+
+        $event->expects($this->never())->method('pass');
+        $event->expects($this->once())
+            ->method('passWithError')
+            ->with($this->anything(), 'dialoghsm.campaign.error.send_failed');
+
+        $this->subscriber->onCampaignTriggerAction($event);
+    }
 }
