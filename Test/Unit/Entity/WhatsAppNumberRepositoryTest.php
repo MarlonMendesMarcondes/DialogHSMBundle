@@ -136,6 +136,32 @@ class WhatsAppNumberRepositoryTest extends TestCase
         $this->assertNotContains(null, $result);
     }
 
+    public function testGetDistinctBatchQueueNamesFilterEmptyStrings(): void
+    {
+        $this->mockQuery
+            ->method('getArrayResult')
+            ->willReturn([['q' => 'educa_lote'], ['q' => '']]);
+
+        $result = $this->repository->getDistinctBatchQueueNames();
+
+        $this->assertEquals(['educa_lote'], $result);
+        $this->assertNotContains('', $result);
+    }
+
+    public function testGetDistinctBatchQueueNamesReturnsReindexedArray(): void
+    {
+        // array_values garante que o resultado é sempre um array indexado sequencialmente
+        $this->mockQuery
+            ->method('getArrayResult')
+            ->willReturn([['q' => null], ['q' => 'educa_lote'], ['q' => 'vendas_lote']]);
+
+        $result = $this->repository->getDistinctBatchQueueNames();
+
+        $this->assertArrayHasKey(0, $result);
+        $this->assertArrayHasKey(1, $result);
+        $this->assertArrayNotHasKey(2, $result);
+    }
+
     // -------------------------------------------------------------------------
     // Testes cruzados: bulk e batch são independentes
     // -------------------------------------------------------------------------
