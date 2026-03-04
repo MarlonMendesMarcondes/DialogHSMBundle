@@ -38,7 +38,14 @@ class ConsumeWhatsAppCommand extends Command
             'queue',
             null,
             InputOption::VALUE_OPTIONAL,
-            'Consume only the specified RabbitMQ queue (e.g. queue, batch). Omit to consume all queues.'
+            'Consume only the specified RabbitMQ queue by exact name.'
+        );
+
+        $this->addOption(
+            'mode',
+            null,
+            InputOption::VALUE_OPTIONAL,
+            'Shorthand for standard queues: "bulk" or "batch". Overridden by --queue if both are set.'
         );
 
         $this->addOption(
@@ -55,7 +62,11 @@ class ConsumeWhatsAppCommand extends Command
             ? max(1, (int) $input->getOption('limit'))
             : $this->getConsumerLimit();
 
-        $queue = $input->getOption('queue') ?: null;
+        $queue = $input->getOption('queue') ?: match ($input->getOption('mode')) {
+            'bulk'  => 'bulk',
+            'batch' => 'batch',
+            default => null,
+        };
 
         if ($queue) {
             $output->writeln(sprintf('<info>DialogHSM: consuming queue "%s" (limit=%d)</info>', $queue, $limit));
