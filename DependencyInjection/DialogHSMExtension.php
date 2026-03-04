@@ -19,7 +19,11 @@ class DialogHSMExtension extends Extension implements PrependExtensionInterface
             'messenger' => [
                 'transports' => [
                     'whatsapp' => [
-                        'dsn' => '%env(MAUTIC_MESSENGER_DSN_WHATSAPP)%',
+                        'dsn'     => '%env(MAUTIC_MESSENGER_DSN_WHATSAPP)%',
+                        'options' => [
+                            'auto_setup' => false,
+                            'exchange'   => ['name' => '', 'type' => 'direct'],
+                        ],
                     ],
                 ],
                 'routing' => [
