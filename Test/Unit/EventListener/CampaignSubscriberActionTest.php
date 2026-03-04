@@ -585,12 +585,12 @@ class CampaignSubscriberActionTest extends TestCase
         $this->assertCount(3, $capturedMessages);
     }
 
-    public function testQueueSendModeQueueUsesQueueName(): void
+    public function testQueueSendModeBulkUsesQueueName(): void
     {
         $this->enableIntegration();
 
         $number = $this->buildWhatsAppNumber();
-        $number->method('getQueueName')->willReturn('queue');
+        $number->method('getQueueName')->willReturn('bulk');
 
         $this->mockNumberModel->method('getEntity')->willReturn($number);
 
@@ -598,7 +598,7 @@ class CampaignSubscriberActionTest extends TestCase
         $event   = $this->buildPendingEvent(
             'dialoghsm.send_whatsapp_queue',
             [1 => $contact],
-            ['queue_override' => 'queue']
+            ['queue_override' => 'bulk']
         );
 
         $capturedStamps = null;
@@ -617,7 +617,7 @@ class CampaignSubscriberActionTest extends TestCase
 
         $this->assertCount(1, $capturedStamps);
         $this->assertInstanceOf(AmqpStamp::class, $capturedStamps[0]);
-        $this->assertEquals('queue', $capturedStamps[0]->getRoutingKey());
+        $this->assertEquals('bulk', $capturedStamps[0]->getRoutingKey());
     }
 
     public function testQueueSendFallsBackToQueueNameWhenModeIsEmpty(): void
@@ -625,7 +625,7 @@ class CampaignSubscriberActionTest extends TestCase
         $this->enableIntegration();
 
         $number = $this->buildWhatsAppNumber();
-        $number->method('getQueueName')->willReturn('queue');
+        $number->method('getQueueName')->willReturn('bulk');
 
         $this->mockNumberModel->method('getEntity')->willReturn($number);
 
@@ -652,7 +652,7 @@ class CampaignSubscriberActionTest extends TestCase
 
         $this->assertCount(1, $capturedStamps);
         $this->assertInstanceOf(AmqpStamp::class, $capturedStamps[0]);
-        $this->assertEquals('queue', $capturedStamps[0]->getRoutingKey());
+        $this->assertEquals('bulk', $capturedStamps[0]->getRoutingKey());
     }
 
     public function testQueueSendBatchModeUsesBatchQueueName(): void
@@ -660,7 +660,7 @@ class CampaignSubscriberActionTest extends TestCase
         $this->enableIntegration();
 
         $number = $this->buildWhatsAppNumber();
-        $number->method('getQueueName')->willReturn('queue');
+        $number->method('getQueueName')->willReturn('bulk');
         $number->method('getBatchQueueName')->willReturn('batch');
 
         $this->mockNumberModel->method('getEntity')->willReturn($number);
@@ -696,7 +696,7 @@ class CampaignSubscriberActionTest extends TestCase
         $this->enableIntegration();
 
         $number = $this->buildWhatsAppNumber();
-        $number->method('getQueueName')->willReturn('queue');
+        $number->method('getQueueName')->willReturn('bulk');
         $number->method('getBatchQueueName')->willReturn(null);
 
         $this->mockNumberModel->method('getEntity')->willReturn($number);
@@ -724,7 +724,7 @@ class CampaignSubscriberActionTest extends TestCase
 
         $this->assertCount(1, $capturedStamps);
         $this->assertInstanceOf(AmqpStamp::class, $capturedStamps[0]);
-        $this->assertEquals('queue', $capturedStamps[0]->getRoutingKey());
+        $this->assertEquals('bulk', $capturedStamps[0]->getRoutingKey());
     }
 
     public function testQueueSendFailsAllWhenIntegrationDisabled(): void

@@ -92,7 +92,7 @@ class CampaignSubscriber implements EventSubscriberInterface
         $this->processContacts($event, function (SendWhatsAppMessage $message, WhatsAppNumber $number) use ($mode): bool {
             $queueName = match ($mode) {
                 'batch' => $number->getBatchQueueName() ?: $number->getQueueName(),
-                'queue' => $number->getQueueName(),
+                'bulk'  => $number->getQueueName(),
                 default => $number->getQueueName(),
             };
 

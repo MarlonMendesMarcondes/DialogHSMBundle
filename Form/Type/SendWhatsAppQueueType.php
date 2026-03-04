@@ -24,7 +24,7 @@ class SendWhatsAppQueueType extends SendWhatsAppType
                     'tooltip' => 'dialoghsm.campaign.queue_override.tooltip',
                 ],
                 'choices'  => [
-                    'dialoghsm.campaign.queue_override.choice.queue' => 'queue',
+                    'dialoghsm.campaign.queue_override.choice.bulk'  => 'bulk',
                     'dialoghsm.campaign.queue_override.choice.batch' => 'batch',
                 ],
                 'required' => true,
