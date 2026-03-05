@@ -268,4 +268,23 @@ class ConsumeWhatsAppCommandTest extends TestCase
 
         $this->assertEquals('1', $this->capturedArgs['--limit']);
     }
+
+    // -------------------------------------------------------------------------
+    // Testes: guard clause — Application não disponível
+    // -------------------------------------------------------------------------
+
+    public function testReturnsFailureWhenApplicationIsNotAvailable(): void
+    {
+        // Comando criado mas NÃO adicionado a nenhuma Application → getApplication() === null
+        $command = new ConsumeWhatsAppCommand(
+            $this->mockIntegrationsHelper,
+            $this->mockRepository,
+        );
+
+        $tester   = new CommandTester($command);
+        $exitCode = $tester->execute([]);
+
+        $this->assertSame(Command::FAILURE, $exitCode);
+        $this->assertStringContainsString('application not available', $tester->getDisplay());
+    }
 }

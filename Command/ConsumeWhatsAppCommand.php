@@ -74,7 +74,14 @@ class ConsumeWhatsAppCommand extends Command
             $output->writeln(sprintf('<info>DialogHSM: consuming queues [%s] (limit=%d)</info>', implode(', ', $queues), $limit));
         }
 
-        $subCommand = $this->getApplication()->find('messenger:consume');
+        $app = $this->getApplication();
+        if (null === $app) {
+            $output->writeln('<error>DialogHSM: application not available.</error>');
+
+            return Command::FAILURE;
+        }
+
+        $subCommand = $app->find('messenger:consume');
         $timeLimit  = $input->getOption('time-limit') !== null
             ? max(0, (int) $input->getOption('time-limit'))
             : 60;
