@@ -15,6 +15,11 @@ class DialogHSMExtension extends Extension implements PrependExtensionInterface
 {
     public function prepend(ContainerBuilder $container): void
     {
+        // Define default value for the env var so the container compiles even when
+        // RabbitMQ is not configured. Without this, Symfony throws at compile time
+        // if MAUTIC_MESSENGER_DSN_WHATSAPP is absent — breaking the entire app.
+        $container->setParameter('env(MAUTIC_MESSENGER_DSN_WHATSAPP)', 'null://null');
+
         $container->prependExtensionConfig('framework', [
             'messenger' => [
                 'transports' => [
