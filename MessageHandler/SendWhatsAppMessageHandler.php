@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace MauticPlugin\DialogHSMBundle\MessageHandler;
 
 use Doctrine\ORM\EntityManagerInterface;
-use Mautic\CoreBundle\Helper\CoreParametersHelper;
+use Mautic\LeadBundle\Model\LeadModel;
 use MauticPlugin\DialogHSMBundle\Api\DialogHSMApi;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
@@ -19,7 +19,7 @@ class SendWhatsAppMessageHandler implements MessageHandlerInterface
         private DialogHSMApi $api,
         private EntityManagerInterface $entityManager,
         private LoggerInterface $logger,
-        private CoreParametersHelper $coreParametersHelper,
+        private LeadModel $leadModel,
         private MessageLogRepository $messageLogRepository,
     ) {
     }
@@ -45,7 +45,7 @@ class SendWhatsAppMessageHandler implements MessageHandlerInterface
             ]);
         }
 
-        $this->updateContactFieldsById($message->leadId, $result);
+        $this->updateContactFields($message->leadId, $result);
 
         return $result;
     }
@@ -68,19 +68,24 @@ class SendWhatsAppMessageHandler implements MessageHandlerInterface
         $this->messageLogRepository->prune();
     }
 
-    private function updateContactFieldsById(int $leadId, array $result): void
+    private function updateContactFields(int $leadId, array $result): void
     {
         try {
+            $lead = $this->leadModel->getEntity($leadId);
+            if (null === $lead) {
+                return;
+            }
+
             $httpStatus   = $result['http_status'] ?? 'N/A';
             $statusText   = $result['success'] ? "sent (HTTP {$httpStatus})" : "failed (HTTP {$httpStatus})";
             $lastResponse = $result['success'] ? 'OK' : mb_substr($result['error'] ?? '', 0, 255);
-            $timezone     = $this->coreParametersHelper->get('default_timezone') ?: 'UTC';
-            $lastSent     = (new \DateTime('now', new \DateTimeZone($timezone)))->format('Y-m-d H:i:s');
 
-            $this->entityManager->getConnection()->executeStatement(
-                'UPDATE leads SET dialoghsm_status = ?, dialoghsm_last_response = ?, dialoghsm_last_sent = ? WHERE id = ?',
-                [$statusText, $lastResponse, $lastSent, $leadId]
-            );
+            $this->leadModel->setFieldValues($lead, [
+                'dialoghsm_status'        => $statusText,
+                'dialoghsm_last_response' => $lastResponse,
+                'dialoghsm_last_sent'     => (new \DateTime())->format('Y-m-d H:i:s'),
+            ]);
+            $this->leadModel->saveEntity($lead);
         } catch (\Throwable $e) {
             $this->logger->warning('DialogHSM: Failed to update contact custom fields', [
                 'lead_id' => $leadId,
