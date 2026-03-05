@@ -1,9 +1,9 @@
 <?php
 declare(strict_types=1);
 
-use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
-use Mautic\CoreBundle\Helper\CoreParametersHelper;
+use Mautic\LeadBundle\Entity\Lead;
+use Mautic\LeadBundle\Model\LeadModel;
 use MauticPlugin\DialogHSMBundle\Api\DialogHSMApi;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
@@ -17,8 +17,8 @@ class SendWhatsAppMessageHandlerTest extends TestCase
     private DialogHSMApi&MockObject $mockApi;
     private EntityManagerInterface&MockObject $mockEntityManager;
     private LoggerInterface&MockObject $mockLogger;
-    private CoreParametersHelper&MockObject $mockCoreParameters;
-    private Connection&MockObject $mockConnection;
+    private LeadModel&MockObject $mockLeadModel;
+    private Lead&MockObject $mockLead;
     private MessageLogRepository&MockObject $mockMessageLogRepository;
     private SendWhatsAppMessageHandler $handler;
 
@@ -27,33 +27,38 @@ class SendWhatsAppMessageHandlerTest extends TestCase
         $this->mockApi                  = $this->createMock(DialogHSMApi::class);
         $this->mockEntityManager        = $this->createMock(EntityManagerInterface::class);
         $this->mockLogger               = $this->createMock(LoggerInterface::class);
-        $this->mockCoreParameters       = $this->createMock(CoreParametersHelper::class);
-        $this->mockConnection           = $this->createMock(Connection::class);
+        $this->mockLeadModel            = $this->createMock(LeadModel::class);
+        $this->mockLead                 = $this->createMock(Lead::class);
         $this->mockMessageLogRepository = $this->createMock(MessageLogRepository::class);
-
-        $this->mockEntityManager->method('getConnection')->willReturn($this->mockConnection);
-        $this->mockCoreParameters->method('get')->with('default_timezone')->willReturn('UTC');
 
         $this->handler = new SendWhatsAppMessageHandler(
             $this->mockApi,
             $this->mockEntityManager,
             $this->mockLogger,
-            $this->mockCoreParameters,
+            $this->mockLeadModel,
             $this->mockMessageLogRepository,
         );
     }
 
-    public function testHandleSuccess(): void
+    private function makeMessage(int $leadId = 1): SendWhatsAppMessage
     {
-        $message = new SendWhatsAppMessage(
-            leadId:       1,
+        return new SendWhatsAppMessage(
+            leadId:       $leadId,
             phone:        '11999999999',
             apiKey:       'API_KEY',
             baseUrl:      'https://api.360dialog.com/v1/messages',
             payloadData:  ['content' => 'nome_template', 'language' => 'pt_BR'],
             templateName: 'nome_template',
         );
+    }
 
+    // -------------------------------------------------------------------------
+    // Testes: fluxo principal (log + atualização de campos)
+    // -------------------------------------------------------------------------
+
+    public function testHandleSuccess(): void
+    {
+        $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
         $this->mockApi
             ->expects($this->once())
             ->method('sendMessage')
@@ -61,23 +66,16 @@ class SendWhatsAppMessageHandlerTest extends TestCase
 
         $this->mockEntityManager->expects($this->once())->method('persist');
         $this->mockEntityManager->expects($this->once())->method('flush');
-        $this->mockConnection->expects($this->once())->method('executeStatement');
+        $this->mockLeadModel->expects($this->once())->method('setFieldValues');
+        $this->mockLeadModel->expects($this->once())->method('saveEntity');
         $this->mockMessageLogRepository->expects($this->once())->method('prune');
 
-        ($this->handler)($message);
+        ($this->handler)($this->makeMessage());
     }
 
     public function testHandleHttpError(): void
     {
-        $message = new SendWhatsAppMessage(
-            leadId:       1,
-            phone:        '11999999999',
-            apiKey:       'API_KEY',
-            baseUrl:      'https://api.360dialog.com/v1/messages',
-            payloadData:  ['content' => 'nome_template', 'language' => 'pt_BR'],
-            templateName: 'nome_template',
-        );
-
+        $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
         $this->mockApi
             ->expects($this->once())
             ->method('sendMessage')
@@ -85,23 +83,16 @@ class SendWhatsAppMessageHandlerTest extends TestCase
 
         $this->mockEntityManager->expects($this->once())->method('persist');
         $this->mockEntityManager->expects($this->once())->method('flush');
-        $this->mockConnection->expects($this->once())->method('executeStatement');
+        $this->mockLeadModel->expects($this->once())->method('setFieldValues');
+        $this->mockLeadModel->expects($this->once())->method('saveEntity');
         $this->mockMessageLogRepository->expects($this->once())->method('prune');
 
-        ($this->handler)($message);
+        ($this->handler)($this->makeMessage());
     }
 
     public function testHandleRequestException(): void
     {
-        $message = new SendWhatsAppMessage(
-            leadId:       1,
-            phone:        '11999999999',
-            apiKey:       'API_KEY',
-            baseUrl:      'https://api.360dialog.com/v1/messages',
-            payloadData:  ['content' => 'nome_template', 'language' => 'pt_BR'],
-            templateName: 'nome_template',
-        );
-
+        $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
         $this->mockApi
             ->expects($this->once())
             ->method('sendMessage')
@@ -109,118 +100,86 @@ class SendWhatsAppMessageHandlerTest extends TestCase
 
         $this->mockEntityManager->expects($this->once())->method('persist');
         $this->mockEntityManager->expects($this->once())->method('flush');
-        $this->mockConnection->expects($this->once())->method('executeStatement');
+        $this->mockLeadModel->expects($this->once())->method('setFieldValues');
+        $this->mockLeadModel->expects($this->once())->method('saveEntity');
         $this->mockMessageLogRepository->expects($this->once())->method('prune');
 
-        ($this->handler)($message);
+        ($this->handler)($this->makeMessage());
     }
+
+    // -------------------------------------------------------------------------
+    // Testes: valores enviados ao LeadModel
+    // -------------------------------------------------------------------------
 
     public function testSuccessUpdatesContactFieldWithSentStatus(): void
     {
-        $message = new SendWhatsAppMessage(
-            leadId:       42,
-            phone:        '11999999999',
-            apiKey:       'API_KEY',
-            baseUrl:      'https://api.360dialog.com/v1/messages',
-            payloadData:  ['content' => 'nome_template', 'language' => 'pt_BR'],
-            templateName: 'nome_template',
-        );
-
+        $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
         $this->mockApi
             ->method('sendMessage')
             ->willReturn(['success' => true, 'response' => ['id' => 'abc'], 'error' => null, 'http_status' => 200]);
 
-        $capturedParams = null;
-        $this->mockConnection
-            ->method('executeStatement')
-            ->willReturnCallback(function (string $sql, array $params) use (&$capturedParams): int {
-                $capturedParams = $params;
-
-                return 1;
+        $capturedFields = null;
+        $this->mockLeadModel
+            ->method('setFieldValues')
+            ->willReturnCallback(function (Lead $lead, array $fields) use (&$capturedFields): void {
+                $capturedFields = $fields;
             });
 
-        ($this->handler)($message);
+        ($this->handler)($this->makeMessage(leadId: 42));
 
-        // $capturedParams[0] = dialoghsm_status, [1] = dialoghsm_last_response, [3] = lead_id
-        $this->assertStringContainsString('sent', $capturedParams[0]);
-        $this->assertEquals('OK', $capturedParams[1]);
-        $this->assertEquals(42, $capturedParams[3]);
+        $this->assertStringContainsString('sent', $capturedFields['dialoghsm_status']);
+        $this->assertEquals('OK', $capturedFields['dialoghsm_last_response']);
+        $this->assertArrayHasKey('dialoghsm_last_sent', $capturedFields);
     }
 
     public function testFailureUpdatesContactFieldWithFailedStatus(): void
     {
-        $message = new SendWhatsAppMessage(
-            leadId:       7,
-            phone:        '11999999999',
-            apiKey:       'API_KEY',
-            baseUrl:      'https://api.360dialog.com/v1/messages',
-            payloadData:  ['content' => 'nome_template', 'language' => 'pt_BR'],
-            templateName: 'nome_template',
-        );
-
+        $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
         $this->mockApi
             ->method('sendMessage')
             ->willReturn(['success' => false, 'response' => null, 'error' => 'HTTP 400: Bad Request', 'http_status' => 400]);
 
-        $capturedParams = null;
-        $this->mockConnection
-            ->method('executeStatement')
-            ->willReturnCallback(function (string $sql, array $params) use (&$capturedParams): int {
-                $capturedParams = $params;
-
-                return 1;
+        $capturedFields = null;
+        $this->mockLeadModel
+            ->method('setFieldValues')
+            ->willReturnCallback(function (Lead $lead, array $fields) use (&$capturedFields): void {
+                $capturedFields = $fields;
             });
 
-        ($this->handler)($message);
+        ($this->handler)($this->makeMessage(leadId: 7));
 
-        $this->assertStringContainsString('failed', $capturedParams[0]);
-        $this->assertEquals('HTTP 400: Bad Request', $capturedParams[1]);
-        $this->assertEquals(7, $capturedParams[3]);
+        $this->assertStringContainsString('failed', $capturedFields['dialoghsm_status']);
+        $this->assertEquals('HTTP 400: Bad Request', $capturedFields['dialoghsm_last_response']);
     }
 
     public function testLongErrorMessageIsTruncatedTo255CharsInContactField(): void
     {
-        $longError = str_repeat('x', 300); // 300 caracteres
-
-        $message = new SendWhatsAppMessage(
-            leadId:       1,
-            phone:        '11999999999',
-            apiKey:       'API_KEY',
-            baseUrl:      'https://api.360dialog.com/v1/messages',
-            payloadData:  ['content' => 'nome_template', 'language' => 'pt_BR'],
-            templateName: 'nome_template',
-        );
+        $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
+        $longError = str_repeat('x', 300);
 
         $this->mockApi
             ->method('sendMessage')
             ->willReturn(['success' => false, 'response' => null, 'error' => $longError, 'http_status' => 500]);
 
-        $capturedParams = null;
-        $this->mockConnection
-            ->method('executeStatement')
-            ->willReturnCallback(function (string $sql, array $params) use (&$capturedParams): int {
-                $capturedParams = $params;
-
-                return 1;
+        $capturedFields = null;
+        $this->mockLeadModel
+            ->method('setFieldValues')
+            ->willReturnCallback(function (Lead $lead, array $fields) use (&$capturedFields): void {
+                $capturedFields = $fields;
             });
 
-        ($this->handler)($message);
+        ($this->handler)($this->makeMessage());
 
-        // dialoghsm_last_response deve ser truncado em 255 chars
-        $this->assertEquals(255, mb_strlen($capturedParams[1]));
+        $this->assertEquals(255, mb_strlen($capturedFields['dialoghsm_last_response']));
     }
+
+    // -------------------------------------------------------------------------
+    // Testes: resiliência — falha no log não impede atualização do contato
+    // -------------------------------------------------------------------------
 
     public function testLogFailureDoesNotPreventContactFieldUpdate(): void
     {
-        $message = new SendWhatsAppMessage(
-            leadId:       1,
-            phone:        '11999999999',
-            apiKey:       'API_KEY',
-            baseUrl:      'https://api.360dialog.com/v1/messages',
-            payloadData:  ['content' => 'nome_template', 'language' => 'pt_BR'],
-            templateName: 'nome_template',
-        );
-
+        $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
         $this->mockApi
             ->method('sendMessage')
             ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200]);
@@ -230,9 +189,28 @@ class SendWhatsAppMessageHandlerTest extends TestCase
             ->method('persist')
             ->willThrowException(new \RuntimeException('DB error'));
 
-        // executeStatement deve ser chamado mesmo assim
-        $this->mockConnection->expects($this->once())->method('executeStatement');
+        // setFieldValues e saveEntity devem ser chamados mesmo assim
+        $this->mockLeadModel->expects($this->once())->method('setFieldValues');
+        $this->mockLeadModel->expects($this->once())->method('saveEntity');
 
-        ($this->handler)($message);
+        ($this->handler)($this->makeMessage());
+    }
+
+    // -------------------------------------------------------------------------
+    // Testes: contato não encontrado
+    // -------------------------------------------------------------------------
+
+    public function testLeadNotFoundDoesNotUpdateFields(): void
+    {
+        $this->mockApi
+            ->method('sendMessage')
+            ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200]);
+
+        $this->mockLeadModel->method('getEntity')->willReturn(null);
+
+        $this->mockLeadModel->expects($this->never())->method('setFieldValues');
+        $this->mockLeadModel->expects($this->never())->method('saveEntity');
+
+        ($this->handler)($this->makeMessage());
     }
 }
