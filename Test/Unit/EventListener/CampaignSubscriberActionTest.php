@@ -50,21 +50,25 @@ class CampaignSubscriberActionTest extends TestCase
     // Helpers
     // -------------------------------------------------------------------------
 
-    private function enableIntegration(): void
+    private function makeIntegrationMock(bool $published = true, string $baseUrl = ''): object
     {
-        $mockConfig = new class {
-            public function getIsPublished(): bool { return true; }
-            public function getApiKeys(): array { return ['base_url' => '']; }
+        $mockConfig = new class($published, $baseUrl) {
+            public function __construct(private bool $pub, private string $url) {}
+            public function getIsPublished(): bool { return $this->pub; }
+            public function getApiKeys(): array { return ['base_url' => $this->url]; }
         };
 
-        $mockIntegration = new class($mockConfig) {
+        return new class($mockConfig) {
             public function __construct(private $config) {}
             public function getIntegrationConfiguration() { return $this->config; }
         };
+    }
 
+    private function enableIntegration(string $baseUrl = ''): void
+    {
         $this->mockIntegrationsHelper
             ->method('getIntegration')
-            ->willReturn($mockIntegration);
+            ->willReturn($this->makeIntegrationMock(published: true, baseUrl: $baseUrl));
     }
 
     private function disableIntegration(): void
@@ -883,5 +887,125 @@ class CampaignSubscriberActionTest extends TestCase
             ->with($this->anything(), 'dialoghsm.campaign.error.send_failed');
 
         $this->subscriber->onCampaignTriggerAction($event);
+    }
+
+    // -------------------------------------------------------------------------
+    // Testes: fetchEnabledIntegration — integração não publicada
+    // -------------------------------------------------------------------------
+
+    public function testDirectSendFailsAllWhenIntegrationFoundButNotPublished(): void
+    {
+        // Integração existe mas isPublished = false → mesmo resultado que não encontrada
+        $this->mockIntegrationsHelper
+            ->method('getIntegration')
+            ->willReturn($this->makeIntegrationMock(published: false));
+
+        $event = $this->buildPendingEvent('dialoghsm.send_whatsapp');
+
+        $event->expects($this->once())
+            ->method('failAll')
+            ->with('dialoghsm.campaign.error.integration_disabled');
+
+        $this->mockHandler->expects($this->never())->method('__invoke');
+
+        $this->subscriber->onCampaignTriggerAction($event);
+    }
+
+    public function testQueueSendFailsAllWhenIntegrationFoundButNotPublished(): void
+    {
+        $this->mockIntegrationsHelper
+            ->method('getIntegration')
+            ->willReturn($this->makeIntegrationMock(published: false));
+
+        $event = $this->buildPendingEvent('dialoghsm.send_whatsapp_queue');
+
+        $event->expects($this->once())
+            ->method('failAll')
+            ->with('dialoghsm.campaign.error.integration_disabled');
+
+        $this->mockBus->expects($this->never())->method('dispatch');
+
+        $this->subscriber->onCampaignTriggerActionQueue($event);
+    }
+
+    // -------------------------------------------------------------------------
+    // Testes: fetchEnabledIntegration chamada apenas uma vez
+    // -------------------------------------------------------------------------
+
+    public function testGetIntegrationIsCalledExactlyOnceEvenWhenBaseUrlFallsBackToPluginConfig(): void
+    {
+        // Number sem baseUrl própria → resolveBaseUrl() usa apiKeys do plugin.
+        // Antes do fix, isso causava 2 chamadas a getIntegration().
+        // O expects($this->once()) verifica que o fix está ativo.
+        $this->mockIntegrationsHelper
+            ->expects($this->once())
+            ->method('getIntegration')
+            ->willReturn($this->makeIntegrationMock(published: true, baseUrl: 'https://custom.plugin.url/messages'));
+
+        $number = $this->buildWhatsAppNumber('VALID_API_KEY_12345', ''); // sem baseUrl no número
+        $this->mockNumberModel->method('getEntity')->willReturn($number);
+
+        $contact = $this->buildContact('11999999999', 1);
+        $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
+
+        $this->mockHandler
+            ->method('__invoke')
+            ->willReturn(['success' => true, 'error' => null, 'http_status' => 200, 'response' => null]);
+
+        $event->expects($this->once())->method('pass');
+
+        $this->subscriber->onCampaignTriggerAction($event);
+    }
+
+    // -------------------------------------------------------------------------
+    // Testes: resolveBaseUrl — fallback para plugin config e default
+    // -------------------------------------------------------------------------
+
+    public function testBaseUrlFallsBackToPluginConfigWhenNumberHasNoBaseUrl(): void
+    {
+        $this->enableIntegration(baseUrl: 'https://custom.plugin.url/messages');
+
+        $number = $this->buildWhatsAppNumber('VALID_API_KEY_12345', ''); // sem baseUrl
+        $this->mockNumberModel->method('getEntity')->willReturn($number);
+
+        $contact = $this->buildContact('11999999999', 1);
+        $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
+
+        $capturedMessage = null;
+        $this->mockHandler
+            ->method('__invoke')
+            ->willReturnCallback(function (SendWhatsAppMessage $msg) use (&$capturedMessage): array {
+                $capturedMessage = $msg;
+
+                return ['success' => true, 'error' => null, 'http_status' => 200, 'response' => null];
+            });
+
+        $this->subscriber->onCampaignTriggerAction($event);
+
+        $this->assertEquals('https://custom.plugin.url/messages', $capturedMessage->baseUrl);
+    }
+
+    public function testBaseUrlFallsBackToHardcodedDefaultWhenBothNumberAndPluginConfigAreEmpty(): void
+    {
+        $this->enableIntegration(baseUrl: ''); // plugin config também vazia
+
+        $number = $this->buildWhatsAppNumber('VALID_API_KEY_12345', ''); // sem baseUrl
+        $this->mockNumberModel->method('getEntity')->willReturn($number);
+
+        $contact = $this->buildContact('11999999999', 1);
+        $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
+
+        $capturedMessage = null;
+        $this->mockHandler
+            ->method('__invoke')
+            ->willReturnCallback(function (SendWhatsAppMessage $msg) use (&$capturedMessage): array {
+                $capturedMessage = $msg;
+
+                return ['success' => true, 'error' => null, 'http_status' => 200, 'response' => null];
+            });
+
+        $this->subscriber->onCampaignTriggerAction($event);
+
+        $this->assertEquals('https://waba-v2.360dialog.io/messages', $capturedMessage->baseUrl);
     }
 }
