@@ -105,7 +105,9 @@ class CampaignSubscriber implements EventSubscriberInterface
 
     private function processContacts(PendingEvent $event, callable $sender, bool $applyBatchSleep = true): void
     {
-        if (!$this->isIntegrationEnabled()) {
+        $integration = $this->fetchEnabledIntegration();
+
+        if (null === $integration) {
             $event->failAll('dialoghsm.campaign.error.integration_disabled');
 
             return;
@@ -123,7 +125,7 @@ class CampaignSubscriber implements EventSubscriberInterface
         }
 
         $apiKey  = $whatsAppNumber->getApiKey();
-        $baseUrl = $this->getBaseUrl($whatsAppNumber);
+        $baseUrl = $this->resolveBaseUrl($whatsAppNumber, $integration);
 
         if (empty($apiKey)) {
             $event->failAll('dialoghsm.campaign.error.missing_api_key');
@@ -223,14 +225,18 @@ class CampaignSubscriber implements EventSubscriberInterface
         return $result;
     }
 
-    private function isIntegrationEnabled(): bool
+    /**
+     * Returns the integration object if it is enabled, or null if disabled/not found.
+     * Centralises the single getIntegration() call for the entire request.
+     */
+    private function fetchEnabledIntegration(): ?object
     {
         try {
             $integration = $this->integrationsHelper->getIntegration(DialogHSMIntegration::NAME);
 
-            return $integration->getIntegrationConfiguration()->getIsPublished();
+            return $integration->getIntegrationConfiguration()->getIsPublished() ? $integration : null;
         } catch (\Exception) {
-            return false;
+            return null;
         }
     }
 
@@ -249,21 +255,16 @@ class CampaignSubscriber implements EventSubscriberInterface
         return $number;
     }
 
-    private function getBaseUrl(WhatsAppNumber $number): string
+    private function resolveBaseUrl(WhatsAppNumber $number, object $integration): string
     {
         $numberUrl = $number->getBaseUrl();
         if (!empty($numberUrl)) {
             return rtrim($numberUrl, '/');
         }
 
-        try {
-            $integration = $this->integrationsHelper->getIntegration(DialogHSMIntegration::NAME);
-            $apiKeys     = $integration->getIntegrationConfiguration()->getApiKeys() ?? [];
-            $pluginUrl   = $apiKeys['base_url'] ?? '';
+        $apiKeys   = $integration->getIntegrationConfiguration()->getApiKeys() ?? [];
+        $pluginUrl = $apiKeys['base_url'] ?? '';
 
-            return !empty($pluginUrl) ? rtrim($pluginUrl, '/') : 'https://waba-v2.360dialog.io/messages';
-        } catch (\Exception) {
-            return 'https://waba-v2.360dialog.io/messages';
-        }
+        return !empty($pluginUrl) ? rtrim($pluginUrl, '/') : 'https://waba-v2.360dialog.io/messages';
     }
 }
