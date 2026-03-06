@@ -127,9 +127,13 @@ class SendWhatsAppMessageHandlerTest extends TestCase
 
         ($this->handler)($this->makeMessage(leadId: 42));
 
-        $this->assertStringContainsString('sent', $capturedFields['dialoghsm_status']);
+        $this->assertEquals('sent (HTTP 200)', $capturedFields['dialoghsm_status']);
         $this->assertEquals('OK', $capturedFields['dialoghsm_last_response']);
-        $this->assertArrayHasKey('dialoghsm_last_sent', $capturedFields);
+        $this->assertMatchesRegularExpression(
+            '/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/',
+            $capturedFields['dialoghsm_last_sent'],
+            'dialoghsm_last_sent deve estar no formato Y-m-d H:i:s'
+        );
     }
 
     public function testFailureUpdatesContactFieldWithFailedStatus(): void
@@ -148,8 +152,70 @@ class SendWhatsAppMessageHandlerTest extends TestCase
 
         ($this->handler)($this->makeMessage(leadId: 7));
 
-        $this->assertStringContainsString('failed', $capturedFields['dialoghsm_status']);
+        $this->assertEquals('failed (HTTP 400)', $capturedFields['dialoghsm_status']);
         $this->assertEquals('HTTP 400: Bad Request', $capturedFields['dialoghsm_last_response']);
+        $this->assertMatchesRegularExpression(
+            '/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/',
+            $capturedFields['dialoghsm_last_sent'],
+            'dialoghsm_last_sent deve estar no formato Y-m-d H:i:s'
+        );
+    }
+
+    public function testNullHttpStatusFallsBackToNA(): void
+    {
+        $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
+        $this->mockApi
+            ->method('sendMessage')
+            ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => null]);
+
+        $capturedFields = null;
+        $this->mockLeadModel
+            ->method('setFieldValues')
+            ->willReturnCallback(function (Lead $lead, array $fields) use (&$capturedFields): void {
+                $capturedFields = $fields;
+            });
+
+        ($this->handler)($this->makeMessage());
+
+        $this->assertEquals('sent (HTTP N/A)', $capturedFields['dialoghsm_status']);
+    }
+
+    public function testSetFieldValuesReceivesLeadReturnedByGetEntity(): void
+    {
+        $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
+        $this->mockApi
+            ->method('sendMessage')
+            ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200]);
+
+        $capturedLead = null;
+        $this->mockLeadModel
+            ->method('setFieldValues')
+            ->willReturnCallback(function (Lead $lead, array $fields) use (&$capturedLead): void {
+                $capturedLead = $lead;
+            });
+
+        ($this->handler)($this->makeMessage());
+
+        $this->assertSame($this->mockLead, $capturedLead);
+    }
+
+    public function testLeadModelExceptionIsHandledGracefully(): void
+    {
+        $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
+        $this->mockApi
+            ->method('sendMessage')
+            ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200]);
+
+        $this->mockLeadModel
+            ->method('setFieldValues')
+            ->willThrowException(new \RuntimeException('LeadModel failure'));
+
+        $this->mockLogger
+            ->expects($this->atLeastOnce())
+            ->method('warning');
+
+        // Não deve lançar exceção
+        ($this->handler)($this->makeMessage());
     }
 
     public function testLongErrorMessageIsTruncatedTo255CharsInContactField(): void
