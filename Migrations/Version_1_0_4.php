@@ -70,7 +70,7 @@ class Version_1_0_4 extends AbstractMigration
                       is_published, date_added)';
 
         $this->addSql("INSERT INTO `{$fieldsTable}` {$columns}
-            SELECT 'DialogHSM Status', 'dialoghsm_status', 'text', 'core', NULL,
+            SELECT 'WhatsApp Status', 'dialoghsm_status', 'text', 'core', NULL,
                    0, 0, 1, 0, 1, 0, 0, 0, 50, 200, 'lead',
                    'a:0:{}', 0, 0, 1, NOW()
             FROM DUAL
@@ -80,7 +80,7 @@ class Version_1_0_4 extends AbstractMigration
         ");
 
         $this->addSql("INSERT INTO `{$fieldsTable}` {$columns}
-            SELECT 'DialogHSM Last Response', 'dialoghsm_last_response', 'text', 'core', NULL,
+            SELECT 'WhatsApp Last Response', 'dialoghsm_last_response', 'text', 'core', NULL,
                    0, 0, 1, 0, 1, 0, 0, 0, 191, 201, 'lead',
                    'a:0:{}', 0, 0, 1, NOW()
             FROM DUAL
@@ -90,7 +90,7 @@ class Version_1_0_4 extends AbstractMigration
         ");
 
         $this->addSql("INSERT INTO `{$fieldsTable}` {$columns}
-            SELECT 'DialogHSM Last Sent', 'dialoghsm_last_sent', 'datetime', 'core', NULL,
+            SELECT 'WhatsApp Last Sent', 'dialoghsm_last_sent', 'datetime', 'core', NULL,
                    0, 0, 1, 0, 1, 0, 0, 0, NULL, 202, 'lead',
                    'a:0:{}', 0, 0, 1, NOW()
             FROM DUAL
