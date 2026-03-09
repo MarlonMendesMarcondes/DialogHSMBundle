@@ -129,7 +129,7 @@ custom   = {{ contact.custom_field }}
 Adicione no `.env.local` (na raiz do Mautic):
 
 ```bash
-MAUTIC_MESSENGER_DSN_WHATSAPP=amqp://user:password@localhost:5672/%2f/
+MAUTIC_MESSENGER_DSN_WHATSAPP=amqp://user:password@localhost:5672/%2f
 ```
 
 > Em Docker, substitua `localhost` pelo nome do serviço RabbitMQ (ex: `rabbitmq`).
