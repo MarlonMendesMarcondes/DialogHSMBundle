@@ -12,6 +12,9 @@ Plugin que integra o Mautic com a API 360dialog para envio de mensagens WhatsApp
 | PHP         | 8.1, 8.2, 8.3 |
 | MySQL       | 5.7 / 8.x     |
 | RabbitMQ    | 3.x *(opcional — necessário apenas para envio com fila)* |
+| Extensão PHP `amqp` | qualquer *(obrigatória se usar RabbitMQ)* |
+
+> **Atenção:** O transport `amqp://` do Symfony exige a extensão nativa `amqp` do PHP. Ela **não vem instalada por padrão** — inclusive em ambientes LiteSpeed (lsphp). Veja a seção [Instalando a extensão amqp](#instalando-a-extensão-amqp-litespeed--vps) se estiver usando LiteSpeed ou VPS sem Docker.
 
 ---
 
@@ -212,3 +215,64 @@ php bin/console cache:clear
 
 **Consumer não finaliza:**
 - Sempre use `--time-limit` ao rodar manualmente
+
+---
+
+## Instalando a extensão amqp (LiteSpeed / VPS)
+
+Se estiver usando **LiteSpeed** (`lsphp83`) ou qualquer VPS sem Docker, a extensão `amqp` precisa ser compilada manualmente. O pacote `lsphp83-amqp` **não existe** nos repositórios padrão.
+
+### Passo 1 — Instale as dependências
+
+```bash
+apt install -y lsphp83-dev librabbitmq-dev build-essential autoconf
+```
+
+### Passo 2 — Baixe e extraia o código-fonte da extensão
+
+```bash
+cd /tmp
+wget https://pecl.php.net/get/amqp-2.1.2.tgz
+tar xzf amqp-2.1.2.tgz
+cd amqp-2.1.2
+```
+
+### Passo 3 — Compile usando o phpize do lsphp83
+
+```bash
+/usr/local/lsws/lsphp83/bin/phpize
+./configure --with-php-config=/usr/local/lsws/lsphp83/bin/php-config
+make && make install
+```
+
+### Passo 4 — Ative a extensão
+
+```bash
+echo "extension=amqp.so" > /usr/local/lsws/lsphp83/etc/php/8.3/mods-available/amqp.ini
+```
+
+### Passo 5 — Confirme
+
+```bash
+/usr/local/lsws/lsphp83/bin/php -m | grep amqp
+# deve retornar: amqp
+```
+
+### Alternativas sem compilação
+
+Se não quiser compilar, o plugin suporta dois outros transports que não precisam de extensão adicional:
+
+**Redis** (recomendado — extensão já vem com o lsphp83):
+```bash
+# .env.local
+MAUTIC_MESSENGER_DSN_WHATSAPP=redis://localhost:6379
+```
+
+**Banco de dados** (zero dependência extra):
+```bash
+# .env.local
+MAUTIC_MESSENGER_DSN_WHATSAPP=doctrine://default?table_name=messenger_messages
+
+# Criar a tabela uma única vez:
+php bin/console messenger:setup-transports
+```
