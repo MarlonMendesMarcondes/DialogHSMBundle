@@ -154,6 +154,23 @@ class DialogHSMApi
             ];
         }
 
+        // Limited time offer component (se tem limited_time_offer)
+        $limitedTimeOffer = $data['limited_time_offer'] ?? '';
+        if ('' !== $limitedTimeOffer) {
+            $expirationMs = (new \DateTime($limitedTimeOffer))->getTimestamp() * 1000;
+            $components[] = [
+                'type'       => 'limited_time_offer',
+                'parameters' => [
+                    [
+                        'type'               => 'limited_time_offer',
+                        'limited_time_offer' => [
+                            'expiration_time_ms' => $expirationMs,
+                        ],
+                    ],
+                ],
+            ];
+        }
+
         // Button components (se tem buttons)
         if ('' !== $buttons) {
             $buttonNodes = array_map('trim', explode(',', $buttons));
