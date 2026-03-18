@@ -346,34 +346,117 @@ class CampaignSubscriberActionTest extends TestCase
     // Testes: send_delay e batch timing (síncrono)
     // -------------------------------------------------------------------------
 
-    public function testDirectSendWithDelayConfigStillProcessesContact(): void
+    public function testDirectSendDelayZeroDoesNotSleep(): void
     {
+        // send_delay=0 → usleep nunca chamado → execução rápida
         $this->enableIntegration();
 
         $this->mockNumberModel
             ->method('getEntity')
             ->willReturn($this->buildWhatsAppNumber());
 
-        $contact = $this->buildContact('11999999999', 1);
-        $event   = $this->buildPendingEvent(
+        $contacts = [
+            1 => $this->buildContact('11999999991', 1),
+            2 => $this->buildContact('11999999992', 2),
+            3 => $this->buildContact('11999999993', 3),
+        ];
+
+        $event = $this->buildPendingEvent(
             'dialoghsm.send_whatsapp',
-            [1 => $contact],
-            ['send_delay' => 1500]
+            $contacts,
+            ['batch_limit' => 1, 'send_delay' => 0]
         );
 
         $this->mockHandler
-            ->expects($this->once())
+            ->expects($this->exactly(3))
             ->method('__invoke')
-            ->with($this->isInstanceOf(SendWhatsAppMessage::class))
             ->willReturn(['success' => true, 'error' => null, 'http_status' => 200, 'response' => null]);
 
-        $event->expects($this->once())->method('pass');
+        $event->expects($this->exactly(3))->method('pass');
 
+        $start = microtime(true);
         $this->subscriber->onCampaignTriggerAction($event);
+        $elapsed = microtime(true) - $start;
+
+        $this->assertLessThan(1.0, $elapsed, 'send_delay=0 não deve gerar nenhum sleep');
     }
 
-    public function testDirectSendMultipleContactsAllReceiveSameSendDelay(): void
+    public function testDirectSendDelaySleepsAfterEachContactWhenBatchLimitIsZero(): void
     {
+        // batch_limit=0 → effectiveBatch=1 → dorme após CADA contato
+        // 2 contatos × 1s = pelo menos 2s de execução
+        $this->enableIntegration();
+
+        $this->mockNumberModel
+            ->method('getEntity')
+            ->willReturn($this->buildWhatsAppNumber());
+
+        $contacts = [
+            1 => $this->buildContact('11999999991', 1),
+            2 => $this->buildContact('11999999992', 2),
+        ];
+
+        $event = $this->buildPendingEvent(
+            'dialoghsm.send_whatsapp',
+            $contacts,
+            ['batch_limit' => 0, 'send_delay' => 1]
+        );
+
+        $this->mockHandler
+            ->expects($this->exactly(2))
+            ->method('__invoke')
+            ->willReturn(['success' => true, 'error' => null, 'http_status' => 200, 'response' => null]);
+
+        $event->expects($this->exactly(2))->method('pass');
+
+        $start = microtime(true);
+        $this->subscriber->onCampaignTriggerAction($event);
+        $elapsed = microtime(true) - $start;
+
+        // 2 contatos × 1s = pelo menos 2s
+        $this->assertGreaterThanOrEqual(2.0, $elapsed, 'Esperado sleep de 1s após cada contato (batch_limit=0)');
+    }
+
+    public function testDirectSendDelaySleepsAfterEachBatchGroup(): void
+    {
+        // batch_limit=2 + send_delay=1 + 4 contatos → dorme após 2º e 4º = 2s total
+        $this->enableIntegration();
+
+        $this->mockNumberModel
+            ->method('getEntity')
+            ->willReturn($this->buildWhatsAppNumber());
+
+        $contacts = [
+            1 => $this->buildContact('11999999991', 1),
+            2 => $this->buildContact('11999999992', 2),
+            3 => $this->buildContact('11999999993', 3),
+            4 => $this->buildContact('11999999994', 4),
+        ];
+
+        $event = $this->buildPendingEvent(
+            'dialoghsm.send_whatsapp',
+            $contacts,
+            ['batch_limit' => 2, 'send_delay' => 1]
+        );
+
+        $this->mockHandler
+            ->expects($this->exactly(4))
+            ->method('__invoke')
+            ->willReturn(['success' => true, 'error' => null, 'http_status' => 200, 'response' => null]);
+
+        $event->expects($this->exactly(4))->method('pass');
+
+        $start = microtime(true);
+        $this->subscriber->onCampaignTriggerAction($event);
+        $elapsed = microtime(true) - $start;
+
+        // 2 lotes completos × 1s = pelo menos 2s
+        $this->assertGreaterThanOrEqual(2.0, $elapsed, 'Esperado sleep após cada grupo de 2 contatos');
+    }
+
+    public function testDirectSendPartialBatchAtEndDoesNotSleep(): void
+    {
+        // batch_limit=2 + 3 contatos → dorme só após 2º (lote completo); 3º não completa lote
         $this->enableIntegration();
 
         $this->mockNumberModel
@@ -389,28 +472,28 @@ class CampaignSubscriberActionTest extends TestCase
         $event = $this->buildPendingEvent(
             'dialoghsm.send_whatsapp',
             $contacts,
-            ['send_delay' => 300]
+            ['batch_limit' => 2, 'send_delay' => 1]
         );
 
-        $capturedMessages = [];
         $this->mockHandler
             ->expects($this->exactly(3))
             ->method('__invoke')
-            ->willReturnCallback(function (SendWhatsAppMessage $msg) use (&$capturedMessages): array {
-                $capturedMessages[] = $msg;
-
-                return ['success' => true, 'error' => null, 'http_status' => 200, 'response' => null];
-            });
+            ->willReturn(['success' => true, 'error' => null, 'http_status' => 200, 'response' => null]);
 
         $event->expects($this->exactly(3))->method('pass');
 
+        $start = microtime(true);
         $this->subscriber->onCampaignTriggerAction($event);
+        $elapsed = microtime(true) - $start;
 
-        $this->assertCount(3, $capturedMessages);
+        // Apenas 1 sleep (após 2º contato) — 3º não completa o lote
+        $this->assertGreaterThanOrEqual(1.0, $elapsed, 'Esperado 1 sleep após lote completo');
+        $this->assertLessThan(2.0, $elapsed, 'Não deve dormir no lote incompleto do final');
     }
 
-    public function testDirectSendBatchLimitWithDelayCombination(): void
+    public function testDirectSendBatchLimitLargerThanContactCountDoesNotSleep(): void
     {
+        // batch_limit=10 com 3 contatos → sentCount nunca é múltiplo de 10 → sem sleep
         $this->enableIntegration();
 
         $this->mockNumberModel
@@ -423,28 +506,137 @@ class CampaignSubscriberActionTest extends TestCase
             3 => $this->buildContact('11999999993', 3),
         ];
 
-        // batch_limit=2 + send_delay=200: todos os 3 contatos processados, cada um com delay=200
         $event = $this->buildPendingEvent(
             'dialoghsm.send_whatsapp',
             $contacts,
-            ['batch_limit' => 2, 'send_delay' => 200]
+            ['batch_limit' => 10, 'send_delay' => 1]
         );
 
-        $capturedMessages = [];
         $this->mockHandler
             ->expects($this->exactly(3))
             ->method('__invoke')
-            ->willReturnCallback(function (SendWhatsAppMessage $msg) use (&$capturedMessages): array {
-                $capturedMessages[] = $msg;
-
-                return ['success' => true, 'error' => null, 'http_status' => 200, 'response' => null];
-            });
+            ->willReturn(['success' => true, 'error' => null, 'http_status' => 200, 'response' => null]);
 
         $event->expects($this->exactly(3))->method('pass');
 
+        $start = microtime(true);
         $this->subscriber->onCampaignTriggerAction($event);
+        $elapsed = microtime(true) - $start;
 
-        $this->assertCount(3, $capturedMessages);
+        $this->assertLessThan(1.0, $elapsed, 'Não deve dormir quando batch não está completo');
+    }
+
+    public function testDirectSendMixedSuccessAndFailureWithBatchLimit(): void
+    {
+        // batch_limit=2: contatos com sucesso e falha alternados — todos processados
+        $this->enableIntegration();
+
+        $this->mockNumberModel
+            ->method('getEntity')
+            ->willReturn($this->buildWhatsAppNumber());
+
+        $contacts = [
+            1 => $this->buildContact('11999999991', 1),
+            2 => $this->buildContact('11999999992', 2),
+            3 => $this->buildContact('11999999993', 3),
+            4 => $this->buildContact('11999999994', 4),
+        ];
+
+        $event = $this->buildPendingEvent(
+            'dialoghsm.send_whatsapp',
+            $contacts,
+            ['batch_limit' => 2, 'send_delay' => 0]
+        );
+
+        $callCount = 0;
+        $this->mockHandler
+            ->expects($this->exactly(4))
+            ->method('__invoke')
+            ->willReturnCallback(function () use (&$callCount): array {
+                ++$callCount;
+                $success = ($callCount % 2 !== 0); // ímpares = sucesso, pares = falha
+
+                return ['success' => $success, 'error' => $success ? null : 'erro', 'http_status' => $success ? 200 : 400, 'response' => null];
+            });
+
+        $event->expects($this->exactly(2))->method('pass');
+        $event->expects($this->exactly(2))->method('passWithError');
+
+        $this->subscriber->onCampaignTriggerAction($event);
+    }
+
+    public function testDirectSendSkipsContactWithoutPhoneButContinuesBatch(): void
+    {
+        // Contato sem telefone no meio do lote → não interrompe os demais
+        $this->enableIntegration();
+
+        $this->mockNumberModel
+            ->method('getEntity')
+            ->willReturn($this->buildWhatsAppNumber());
+
+        $contacts = [
+            1 => $this->buildContact('11999999991', 1),
+            2 => $this->buildContact('', 2),             // sem telefone
+            3 => $this->buildContact('11999999993', 3),
+        ];
+
+        $event = $this->buildPendingEvent(
+            'dialoghsm.send_whatsapp',
+            $contacts,
+            ['batch_limit' => 2, 'send_delay' => 0]
+        );
+
+        // Handler chamado apenas 2 vezes (contatos com telefone)
+        $this->mockHandler
+            ->expects($this->exactly(2))
+            ->method('__invoke')
+            ->willReturn(['success' => true, 'error' => null, 'http_status' => 200, 'response' => null]);
+
+        $event->expects($this->exactly(2))->method('pass');
+        $event->expects($this->once())
+            ->method('passWithError')
+            ->with($this->anything(), 'dialoghsm.campaign.error.missing_phone');
+
+        $this->subscriber->onCampaignTriggerAction($event);
+    }
+
+    // -------------------------------------------------------------------------
+    // Testes: fila nunca dorme (applyBatchSleep=false)
+    // -------------------------------------------------------------------------
+
+    public function testQueueSendNeverSleepsEvenWithNonZeroDelay(): void
+    {
+        // Queue usa applyBatchSleep=false → usleep jamais chamado, mesmo com send_delay=5
+        $this->enableIntegration();
+
+        $this->mockNumberModel
+            ->method('getEntity')
+            ->willReturn($this->buildWhatsAppNumber());
+
+        $contacts = [
+            1 => $this->buildContact('11999999991', 1),
+            2 => $this->buildContact('11999999992', 2),
+            3 => $this->buildContact('11999999993', 3),
+        ];
+
+        $event = $this->buildPendingEvent(
+            'dialoghsm.send_whatsapp_queue',
+            $contacts,
+            ['batch_limit' => 1, 'send_delay' => 5]
+        );
+
+        $this->mockBus
+            ->expects($this->exactly(3))
+            ->method('dispatch')
+            ->willReturn(new Envelope(new \stdClass()));
+
+        $event->expects($this->exactly(3))->method('pass');
+
+        $start = microtime(true);
+        $this->subscriber->onCampaignTriggerActionQueue($event);
+        $elapsed = microtime(true) - $start;
+
+        $this->assertLessThan(1.0, $elapsed, 'Fila nunca deve dormir independente do send_delay');
     }
 
     // -------------------------------------------------------------------------
@@ -500,7 +692,7 @@ class CampaignSubscriberActionTest extends TestCase
         $event   = $this->buildPendingEvent(
             'dialoghsm.send_whatsapp_queue',
             [1 => $contact],
-            ['send_delay' => 2000]
+            ['send_delay' => 0]
         );
 
         $this->mockBus
@@ -531,7 +723,7 @@ class CampaignSubscriberActionTest extends TestCase
         $event = $this->buildPendingEvent(
             'dialoghsm.send_whatsapp_queue',
             $contacts,
-            ['send_delay' => 500]
+            ['send_delay' => 0]
         );
 
         $capturedMessages = [];
@@ -565,11 +757,11 @@ class CampaignSubscriberActionTest extends TestCase
             3 => $this->buildContact('11999999993', 3),
         ];
 
-        // batch_limit=2 + send_delay=400: todos os 3 contatos despachados, cada um com delay=400
+        // batch_limit=2 + send_delay=0: todos os 3 contatos despachados (queue nunca dorme)
         $event = $this->buildPendingEvent(
             'dialoghsm.send_whatsapp_queue',
             $contacts,
-            ['batch_limit' => 2, 'send_delay' => 400]
+            ['batch_limit' => 2, 'send_delay' => 0]
         );
 
         $capturedMessages = [];

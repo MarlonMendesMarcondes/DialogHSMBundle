@@ -186,7 +186,7 @@ class CampaignSubscriber implements EventSubscriberInterface
             ++$sentCount;
 
             if ($applyBatchSleep && $sendDelay > 0 && $sentCount % $effectiveBatch === 0) {
-                usleep($sendDelay * 1000);
+                usleep($sendDelay * 1_000_000);
             }
         }
     }
