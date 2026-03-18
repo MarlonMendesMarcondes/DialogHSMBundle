@@ -402,5 +402,134 @@ class DialogHsmApiTest extends TestCase
 
         $this->assertEquals('https://api.360dialog.com/v1/messages', $capturedUrl);
     }
+
+    public function testLimitedTimeOfferComponentIsIncludedInPayload(): void
+    {
+        $capturedPayload = null;
+        $mockResponse    = new Response(200, [], json_encode(['message' => [['id' => 'abc']]]));
+
+        $this->mockClient
+            ->method('request')
+            ->willReturnCallback(function (string $method, string $url, array $options) use (&$capturedPayload, $mockResponse) {
+                $capturedPayload = $options['json'];
+
+                return $mockResponse;
+            });
+
+        $this->api->sendMessage('API_KEY', 'https://api.360dialog.com/v1/messages', '11999999999', [
+            'content'            => 'nome_template',
+            'language'           => 'pt_BR',
+            'limited_time_offer' => '2024-12-31T23:59:59',
+        ]);
+
+        $components = $capturedPayload['template']['components'];
+        $lto        = array_values(array_filter($components, fn ($c) => $c['type'] === 'limited_time_offer'))[0] ?? null;
+
+        $this->assertNotNull($lto);
+        $this->assertEquals('limited_time_offer', $lto['parameters'][0]['type']);
+        $expectedMs = (new \DateTime('2024-12-31T23:59:59'))->getTimestamp() * 1000;
+        $this->assertEquals($expectedMs, $lto['parameters'][0]['limited_time_offer']['expiration_time_ms']);
+    }
+
+    public function testLimitedTimeOfferComponentIsAbsentWhenNotProvided(): void
+    {
+        $capturedPayload = null;
+        $mockResponse    = new Response(200, [], json_encode(['message' => [['id' => 'abc']]]));
+
+        $this->mockClient
+            ->method('request')
+            ->willReturnCallback(function (string $method, string $url, array $options) use (&$capturedPayload, $mockResponse) {
+                $capturedPayload = $options['json'];
+
+                return $mockResponse;
+            });
+
+        $this->api->sendMessage('API_KEY', 'https://api.360dialog.com/v1/messages', '11999999999', [
+            'content'  => 'nome_template',
+            'language' => 'pt_BR',
+        ]);
+
+        $components = $capturedPayload['template']['components'];
+        $lto        = array_values(array_filter($components, fn ($c) => $c['type'] === 'limited_time_offer'));
+
+        $this->assertEmpty($lto);
+    }
+
+    public function testLimitedTimeOfferComponentIsPositionedBeforeButtons(): void
+    {
+        $capturedPayload = null;
+        $mockResponse    = new Response(200, [], json_encode(['message' => [['id' => 'abc']]]));
+
+        $this->mockClient
+            ->method('request')
+            ->willReturnCallback(function (string $method, string $url, array $options) use (&$capturedPayload, $mockResponse) {
+                $capturedPayload = $options['json'];
+
+                return $mockResponse;
+            });
+
+        $this->api->sendMessage('API_KEY', 'https://api.360dialog.com/v1/messages', '11999999999', [
+            'content'            => 'nome_template',
+            'language'           => 'pt_BR',
+            'limited_time_offer' => '2025-06-01T00:00:00',
+            'buttons'            => 'url',
+            'buttons_vars'       => 'pagina',
+        ]);
+
+        $components = $capturedPayload['template']['components'];
+        $types      = array_column($components, 'type');
+
+        $ltoIndex    = array_search('limited_time_offer', $types);
+        $buttonIndex = array_search('button', $types);
+
+        $this->assertNotFalse($ltoIndex);
+        $this->assertNotFalse($buttonIndex);
+        $this->assertLessThan($buttonIndex, $ltoIndex, 'limited_time_offer deve aparecer antes dos buttons');
+    }
+
+    public function testLimitedTimeOfferWithAllComponents(): void
+    {
+        $capturedPayload = null;
+        $mockResponse    = new Response(200, [], json_encode(['message' => [['id' => 'abc']]]));
+
+        $this->mockClient
+            ->method('request')
+            ->willReturnCallback(function (string $method, string $url, array $options) use (&$capturedPayload, $mockResponse) {
+                $capturedPayload = $options['json'];
+
+                return $mockResponse;
+            });
+
+        $this->api->sendMessage('API_KEY', 'https://api.360dialog.com/v1/messages', '11999999999', [
+            'content'            => 'nome_template',
+            'language'           => 'pt_BR',
+            'url_arquivo'        => 'https://example.com/banner.jpg',
+            'vars'               => 'nome',
+            'nome'               => 'Maria',
+            'limited_time_offer' => '2025-06-01T12:00:00',
+            'buttons'            => 'url',
+            'buttons_vars'       => 'link',
+        ]);
+
+        $components = $capturedPayload['template']['components'];
+        $types      = array_column($components, 'type');
+
+        $this->assertContains('header', $types);
+        $this->assertContains('body', $types);
+        $this->assertContains('limited_time_offer', $types);
+        $this->assertContains('button', $types);
+
+        // Ordem: header → body → limited_time_offer → button
+        $this->assertLessThan(
+            array_search('limited_time_offer', $types),
+            array_search('body', $types),
+            'body deve aparecer antes de limited_time_offer'
+        );
+        $this->assertLessThan(
+            array_search('button', $types),
+            array_search('limited_time_offer', $types),
+            'limited_time_offer deve aparecer antes de button'
+        );
+    }
 }
 ?>
