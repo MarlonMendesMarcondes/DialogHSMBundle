@@ -49,13 +49,13 @@ class SendWhatsAppType extends AbstractType
                 'attr'       => [
                     'class'   => 'form-control',
                     'min'     => 0,
-                    'max'     => 60000,
+                    'max'     => 60,
                     'tooltip' => 'dialoghsm.campaign.send_delay.tooltip',
                 ],
                 'required'    => false,
                 'empty_data'  => 0,
                 'data'        => 0,
-                'constraints' => [new Range(['min' => 0, 'max' => 60000])],
+                'constraints' => [new Range(['min' => 0, 'max' => 60])],
                 'help'        => 'dialoghsm.campaign.send_delay.help',
             ]
         );
