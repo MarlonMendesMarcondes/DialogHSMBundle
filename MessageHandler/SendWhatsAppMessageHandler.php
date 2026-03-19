@@ -37,7 +37,7 @@ class SendWhatsAppMessageHandler implements MessageHandlerInterface
         );
 
         try {
-            $this->logMessage($message->leadId, $message->templateName, $message->phone, $result);
+            $this->logMessage($message->leadId, $message->templateName, $message->phone, $message->whatsAppNumberName, $result);
         } catch (\Throwable $e) {
             $this->logger->warning('DialogHSM: Falha ao registrar log da mensagem', [
                 'lead_id' => $message->leadId,
@@ -50,10 +50,11 @@ class SendWhatsAppMessageHandler implements MessageHandlerInterface
         return $result;
     }
 
-    private function logMessage(int $leadId, string $templateName, string $phone, array $result): void
+    private function logMessage(int $leadId, string $templateName, string $phone, string $senderName, array $result): void
     {
         $log = new MessageLog();
         $log->setLeadId($leadId);
+        $log->setSenderName($senderName ?: null);
         $log->setTemplateName($templateName);
         $log->setPhoneNumber($phone);
         $log->setStatus($result['success'] ? 'sent' : 'failed');
