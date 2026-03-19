@@ -42,18 +42,22 @@ class ConsumeWhatsAppCommandTest extends TestCase
     /**
      * Constrói uma Application com o comando real + um messenger:consume fake
      * que captura os argumentos recebidos em $this->capturedArgs.
+     *
+     * @param \Throwable|null $fakeException Se informado, o fake messenger:consume lança essa exceção
+     * @param callable|null   $processFactory Injeta processFactory customizado no comando
      */
-    private function buildApplication(): Application
+    private function buildApplication(?\Throwable $fakeException = null, ?callable $processFactory = null): Application
     {
         $command = new ConsumeWhatsAppCommand(
             $this->mockIntegrationsHelper,
             $this->mockRepository,
+            $processFactory,
         );
 
         $capturedArgs = &$this->capturedArgs;
 
-        $fakeMessengerConsume = new class($capturedArgs) extends Command {
-            public function __construct(private array &$captured)
+        $fakeMessengerConsume = new class($capturedArgs, $fakeException) extends Command {
+            public function __construct(private array &$captured, private ?\Throwable $exception)
             {
                 parent::__construct('messenger:consume');
             }
@@ -69,11 +73,15 @@ class ConsumeWhatsAppCommandTest extends TestCase
 
             protected function execute(InputInterface $input, OutputInterface $output): int
             {
+                if ($this->exception !== null) {
+                    throw $this->exception;
+                }
+
                 $this->captured = [
-                    'receivers'   => $input->getArgument('receivers'),
-                    '--limit'     => $input->getOption('limit'),
+                    'receivers'    => $input->getArgument('receivers'),
+                    '--limit'      => $input->getOption('limit'),
                     '--time-limit' => $input->getOption('time-limit'),
-                    '--queues'    => $input->getOption('queues'),
+                    '--queues'     => $input->getOption('queues'),
                 ];
 
                 return Command::SUCCESS;
@@ -88,9 +96,9 @@ class ConsumeWhatsAppCommandTest extends TestCase
         return $app;
     }
 
-    private function runCommand(array $input = []): int
+    private function runCommand(array $input = [], ?\Throwable $fakeException = null): int
     {
-        $app     = $this->buildApplication();
+        $app     = $this->buildApplication($fakeException);
         $command = $app->find('dialoghsm:consume');
         $tester  = new CommandTester($command);
 
@@ -101,9 +109,9 @@ class ConsumeWhatsAppCommandTest extends TestCase
      * Executa o comando e retorna o CommandTester para inspeção de output.
      * Útil nos testes de modo paralelo onde capturedArgs não é populado.
      */
-    private function runCommandTester(array $input = []): CommandTester
+    private function runCommandTester(array $input = [], ?\Throwable $fakeException = null, ?callable $processFactory = null): CommandTester
     {
-        $app     = $this->buildApplication();
+        $app     = $this->buildApplication($fakeException, $processFactory);
         $command = $app->find('dialoghsm:consume');
         $tester  = new CommandTester($command);
         $tester->execute($input);
@@ -410,6 +418,103 @@ class ConsumeWhatsAppCommandTest extends TestCase
 
         $this->assertStringNotContainsString('parallel workers', $output);
         $this->assertEquals(['queue_a'], $this->capturedArgs['--queues']);
+    }
+
+    // -------------------------------------------------------------------------
+    // Testes: tratamento de erro — fila não encontrada no RabbitMQ
+    // -------------------------------------------------------------------------
+
+    public function testRunConsumerShowsFriendlyMessageOnNotFoundQueue(): void
+    {
+        $exception = new \RuntimeException("Server channel error: 404, message: NOT_FOUND - no queue 'fila_x' in vhost '/'");
+
+        $this->mockRepository
+            ->method('getDistinctBulkQueueNames')
+            ->willReturn(['fila_x']);
+
+        $tester = $this->runCommandTester(['--mode' => 'bulk'], $exception);
+        $output = $tester->getDisplay();
+
+        $this->assertStringContainsString('fila_x', $output);
+        $this->assertStringContainsString('não encontrada no RabbitMQ', $output);
+        $this->assertStringContainsString('WhatsApp Numbers', $output);
+        $this->assertSame(Command::FAILURE, $tester->getStatusCode());
+    }
+
+    public function testRunConsumerRethrowsUnrelatedExceptions(): void
+    {
+        $exception = new \RuntimeException('Unexpected connection error');
+
+        $this->mockRepository
+            ->method('getDistinctBulkQueueNames')
+            ->willReturn(['fila_x']);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Unexpected connection error');
+
+        $this->runCommand(['--mode' => 'bulk'], $exception);
+    }
+
+    public function testRunConsumerShowsFriendlyMessageOnNoQueueVariant(): void
+    {
+        // Variação da mensagem de erro com "no queue" sem "NOT_FOUND"
+        $exception = new \RuntimeException("no queue 'fila_y' declared");
+
+        $this->mockRepository
+            ->method('getDistinctBulkQueueNames')
+            ->willReturn(['fila_y']);
+
+        $tester = $this->runCommandTester(['--mode' => 'bulk'], $exception);
+
+        $this->assertStringContainsString('fila_y', $tester->getDisplay());
+        $this->assertStringContainsString('não encontrada no RabbitMQ', $tester->getDisplay());
+        $this->assertSame(Command::FAILURE, $tester->getStatusCode());
+    }
+
+    public function testRunParallelShowsFriendlyMessageWhenProcessOutputContainsNotFound(): void
+    {
+        $this->mockRepository
+            ->method('getDistinctBulkQueueNames')
+            ->willReturn(['fila_a', 'fila_b']);
+
+        // processFactory que simula processo falhando com NOT_FOUND no output
+        $processFactory = function (array $args): \Symfony\Component\Process\Process {
+            // Extrai o nome da fila do argumento --queues=<nome>
+            $queueArg = array_values(array_filter($args, fn ($a) => str_starts_with($a, '--queues=')))[0] ?? '';
+            $queue    = str_replace('--queues=', '', $queueArg);
+
+            return new \Symfony\Component\Process\Process([
+                'bash', '-c',
+                "echo \"NOT_FOUND - no queue '{$queue}' in vhost '/'\" && exit 1",
+            ]);
+        };
+
+        $tester = $this->runCommandTester(['--mode' => 'bulk'], null, $processFactory);
+        $output = $tester->getDisplay();
+
+        $this->assertStringContainsString('não encontrada no RabbitMQ', $output);
+        $this->assertStringContainsString('WhatsApp Numbers', $output);
+        $this->assertSame(Command::FAILURE, $tester->getStatusCode());
+    }
+
+    public function testRunParallelShowsGenericErrorWhenProcessFailsWithOtherReason(): void
+    {
+        $this->mockRepository
+            ->method('getDistinctBulkQueueNames')
+            ->willReturn(['fila_a', 'fila_b']);
+
+        $processFactory = function (): \Symfony\Component\Process\Process {
+            return new \Symfony\Component\Process\Process([
+                'bash', '-c', 'echo "some unrelated error" && exit 1',
+            ]);
+        };
+
+        $tester = $this->runCommandTester(['--mode' => 'bulk'], null, $processFactory);
+        $output = $tester->getDisplay();
+
+        $this->assertStringContainsString('worker failed for queue', $output);
+        $this->assertStringNotContainsString('não encontrada no RabbitMQ', $output);
+        $this->assertSame(Command::FAILURE, $tester->getStatusCode());
     }
 
 }
