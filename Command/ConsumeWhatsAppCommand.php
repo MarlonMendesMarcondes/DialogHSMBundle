@@ -13,6 +13,8 @@ use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
+use Symfony\Component\Process\PhpExecutableFinder;
+use Symfony\Component\Process\Process;
 
 #[AsCommand(
     name: 'dialoghsm:consume',
@@ -20,11 +22,16 @@ use Symfony\Component\Console\Output\OutputInterface;
 )]
 class ConsumeWhatsAppCommand extends Command
 {
+    /** @var callable(string[]): Process */
+    private $processFactory;
+
     public function __construct(
         private IntegrationsHelper $integrationsHelper,
         private WhatsAppNumberRepository $whatsAppNumberRepository,
+        ?callable $processFactory = null,
     ) {
         parent::__construct();
+        $this->processFactory = $processFactory ?? static fn (array $args): Process => new Process($args);
     }
 
     protected function configure(): void
@@ -64,16 +71,25 @@ class ConsumeWhatsAppCommand extends Command
             ? max(1, (int) $input->getOption('limit'))
             : $this->getConsumerLimit();
 
-        $queues = $this->resolveQueues($input);
+        $queues    = $this->resolveQueues($input);
+        $timeLimit = $input->getOption('time-limit') !== null
+            ? max(0, (int) $input->getOption('time-limit'))
+            : 60;
 
-        if (empty($queues)) {
-            $output->writeln(sprintf('<info>DialogHSM: consuming all whatsapp queues (limit=%d)</info>', $limit));
-        } elseif (count($queues) === 1) {
-            $output->writeln(sprintf('<info>DialogHSM: consuming queue "%s" (limit=%d)</info>', $queues[0], $limit));
-        } else {
-            $output->writeln(sprintf('<info>DialogHSM: consuming queues [%s] (limit=%d)</info>', implode(', ', $queues), $limit));
+        // Múltiplas filas (--mode=bulk ou --mode=batch): workers paralelos
+        // Cada fila roda em processo separado com seu próprio --limit
+        if (count($queues) > 1) {
+            $output->writeln(sprintf(
+                '<info>DialogHSM: starting %d parallel workers (limit=%d each): [%s]</info>',
+                count($queues),
+                $limit,
+                implode(', ', $queues)
+            ));
+
+            return $this->runParallel($output, $queues, $limit, $timeLimit);
         }
 
+        // Fila única ou sem fila: comportamento original via sub-comando interno
         $app = $this->getApplication();
         if (null === $app) {
             $output->writeln('<error>DialogHSM: application not available.</error>');
@@ -82,10 +98,87 @@ class ConsumeWhatsAppCommand extends Command
         }
 
         $subCommand = $app->find('messenger:consume');
-        $timeLimit  = $input->getOption('time-limit') !== null
-            ? max(0, (int) $input->getOption('time-limit'))
-            : 60;
 
+        if (empty($queues)) {
+            $output->writeln(sprintf('<info>DialogHSM: consuming all whatsapp queues (limit=%d)</info>', $limit));
+        } else {
+            $output->writeln(sprintf('<info>DialogHSM: consuming queue "%s" (limit=%d)</info>', $queues[0], $limit));
+        }
+
+        return $this->runConsumer($subCommand, $output, $queues, $limit, $timeLimit);
+    }
+
+    /**
+     * Inicia um processo OS independente por fila e aguarda todos terminarem.
+     *
+     * @param string[] $queues
+     */
+    private function runParallel(OutputInterface $output, array $queues, int $limit, int $timeLimit): int
+    {
+        $phpBinary   = (new PhpExecutableFinder())->find(false) ?: PHP_BINARY;
+        $consolePath = $_SERVER['argv'][0] ?? 'bin/console';
+
+        $processes = [];
+
+        foreach ($queues as $queue) {
+            $args = [
+                $phpBinary,
+                $consolePath,
+                'messenger:consume',
+                'whatsapp',
+                '--queues='.$queue,
+                '--limit='.$limit,
+            ];
+
+            if ($timeLimit > 0) {
+                $args[] = '--time-limit='.$timeLimit;
+            }
+
+            $process = ($this->processFactory)($args);
+            $process->setTimeout($timeLimit > 0 ? $timeLimit + 30 : null);
+            $process->start(function (string $type, string $buffer) use ($queue, $output): void {
+                foreach (explode("\n", rtrim($buffer)) as $line) {
+                    if ('' !== $line) {
+                        $output->writeln(sprintf('[%s] %s', $queue, $line));
+                    }
+                }
+            });
+
+            $processes[$queue] = $process;
+            $output->writeln(sprintf(
+                '<info>DialogHSM: worker started for queue "%s" (PID: %d)</info>',
+                $queue,
+                $process->getPid() ?? 0
+            ));
+        }
+
+        $exitCode = Command::SUCCESS;
+
+        foreach ($processes as $queue => $process) {
+            $process->wait();
+
+            if ($process->isSuccessful()) {
+                $output->writeln(sprintf('<info>DialogHSM: worker finished for queue "%s"</info>', $queue));
+            } else {
+                $output->writeln(sprintf(
+                    '<error>DialogHSM: worker failed for queue "%s" (exit: %d)</error>',
+                    $queue,
+                    $process->getExitCode() ?? -1
+                ));
+                $exitCode = Command::FAILURE;
+            }
+        }
+
+        return $exitCode;
+    }
+
+    private function runConsumer(
+        Command $subCommand,
+        OutputInterface $output,
+        array $queues,
+        int $limit,
+        int $timeLimit
+    ): int {
         $subArgs = [
             'command'   => 'messenger:consume',
             'receivers' => ['whatsapp'],
