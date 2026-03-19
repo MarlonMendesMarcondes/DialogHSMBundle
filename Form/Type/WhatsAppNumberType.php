@@ -21,7 +21,7 @@ class WhatsAppNumberType extends AbstractType
 {
     public function buildForm(FormBuilderInterface $builder, array $options): void
     {
-        $builder->addEventSubscriber(new CleanFormSubscriber([]));
+        $builder->addEventSubscriber(new CleanFormSubscriber(['baseUrl' => 'url']));
         $builder->addEventSubscriber(new FormExitSubscriber('dialoghsm.whatsappnumber', $options));
 
         $builder->add(
@@ -55,7 +55,7 @@ class WhatsAppNumberType extends AbstractType
             [
                 'label'        => 'dialoghsm.number.apikey',
                 'label_attr'   => ['class' => 'control-label'],
-                'attr'         => ['class' => 'form-control'],
+                'attr'         => ['class' => 'form-control', 'maxlength' => 250],
                 'required'     => false,
                 'always_empty' => false,
             ]
