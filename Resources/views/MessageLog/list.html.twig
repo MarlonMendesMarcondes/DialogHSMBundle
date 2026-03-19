@@ -32,6 +32,7 @@
             <thead>
             <tr>
                 <th class="col-dialoghsm-date">{{ 'dialoghsm.log.date_sent'|trans }}</th>
+                <th class="col-dialoghsm-sender">{{ 'dialoghsm.log.sender'|trans }}</th>
                 <th class="col-dialoghsm-lead">{{ 'dialoghsm.log.lead_id'|trans }}</th>
                 <th class="col-dialoghsm-phone">{{ 'dialoghsm.log.phone'|trans }}</th>
                 <th class="col-dialoghsm-template">{{ 'dialoghsm.log.template'|trans }}</th>
@@ -44,6 +45,7 @@
             {% for item in items %}
                 <tr>
                     <td>{{ item.getDateSent()|date('d/m/Y H:i:s') }}</td>
+                    <td>{{ item.getSenderName() ?? '—' }}</td>
                     <td>
                         <a href="{{ path('mautic_contact_action', {'objectAction': 'view', 'objectId': item.getLeadId()}) }}" target="_blank">
                             #{{ item.getLeadId() }}

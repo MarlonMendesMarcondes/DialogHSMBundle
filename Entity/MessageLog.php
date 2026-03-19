@@ -12,6 +12,7 @@ class MessageLog
 {
     private ?int $id = null;
     private ?int $leadId = null;
+    private ?string $senderName = null;
     private ?string $templateName = null;
     private ?string $phoneNumber = null;
     private ?string $status = null;
@@ -39,6 +40,13 @@ class MessageLog
         $builder
             ->createField('leadId', Types::INTEGER)
             ->columnName('lead_id')
+            ->build();
+
+        $builder
+            ->createField('senderName', Types::STRING)
+            ->columnName('sender_name')
+            ->length(255)
+            ->nullable()
             ->build();
 
         $builder
@@ -95,6 +103,18 @@ class MessageLog
     public function setLeadId(int $leadId): self
     {
         $this->leadId = $leadId;
+
+        return $this;
+    }
+
+    public function getSenderName(): ?string
+    {
+        return $this->senderName;
+    }
+
+    public function setSenderName(?string $senderName): self
+    {
+        $this->senderName = $senderName;
 
         return $this;
     }
