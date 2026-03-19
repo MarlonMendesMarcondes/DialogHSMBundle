@@ -97,6 +97,20 @@ class ConsumeWhatsAppCommandTest extends TestCase
         return $tester->execute($input);
     }
 
+    /**
+     * Executa o comando e retorna o CommandTester para inspeção de output.
+     * Útil nos testes de modo paralelo onde capturedArgs não é populado.
+     */
+    private function runCommandTester(array $input = []): CommandTester
+    {
+        $app     = $this->buildApplication();
+        $command = $app->find('dialoghsm:consume');
+        $tester  = new CommandTester($command);
+        $tester->execute($input);
+
+        return $tester;
+    }
+
     // -------------------------------------------------------------------------
     // Testes: resolução de filas (resolveQueues)
     // -------------------------------------------------------------------------
@@ -113,30 +127,32 @@ class ConsumeWhatsAppCommandTest extends TestCase
 
     public function testModeBulkCallsRepositoryBulkMethod(): void
     {
+        // Fila única → usa runConsumer (sub-comando interno), capturedArgs é populado
         $this->mockRepository
             ->expects($this->once())
             ->method('getDistinctBulkQueueNames')
-            ->willReturn(['educa', 'vendas']);
+            ->willReturn(['queue_a']);
 
         $this->mockRepository->expects($this->never())->method('getDistinctBatchQueueNames');
 
         $this->runCommand(['--mode' => 'bulk']);
 
-        $this->assertEquals(['educa', 'vendas'], $this->capturedArgs['--queues']);
+        $this->assertEquals(['queue_a'], $this->capturedArgs['--queues']);
     }
 
     public function testModeBatchCallsRepositoryBatchMethod(): void
     {
+        // Fila única → usa runConsumer (sub-comando interno), capturedArgs é populado
         $this->mockRepository
             ->expects($this->once())
             ->method('getDistinctBatchQueueNames')
-            ->willReturn(['educa_lote', 'vendas_lote']);
+            ->willReturn(['queue_a_batch']);
 
         $this->mockRepository->expects($this->never())->method('getDistinctBulkQueueNames');
 
         $this->runCommand(['--mode' => 'batch']);
 
-        $this->assertEquals(['educa_lote', 'vendas_lote'], $this->capturedArgs['--queues']);
+        $this->assertEquals(['queue_a_batch'], $this->capturedArgs['--queues']);
     }
 
     public function testExplicitQueueOptionTakesPriorityOverMode(): void
@@ -144,18 +160,18 @@ class ConsumeWhatsAppCommandTest extends TestCase
         $this->mockRepository->expects($this->never())->method('getDistinctBulkQueueNames');
         $this->mockRepository->expects($this->never())->method('getDistinctBatchQueueNames');
 
-        $this->runCommand(['--queue' => 'minha_fila', '--mode' => 'bulk']);
+        $this->runCommand(['--queue' => 'queue_a', '--mode' => 'bulk']);
 
-        $this->assertEquals(['minha_fila'], $this->capturedArgs['--queues']);
+        $this->assertEquals(['queue_a'], $this->capturedArgs['--queues']);
     }
 
     public function testExplicitQueueOptionWithoutMode(): void
     {
         $this->mockRepository->expects($this->never())->method('getDistinctBulkQueueNames');
 
-        $this->runCommand(['--queue' => 'educa']);
+        $this->runCommand(['--queue' => 'queue_a']);
 
-        $this->assertEquals(['educa'], $this->capturedArgs['--queues']);
+        $this->assertEquals(['queue_a'], $this->capturedArgs['--queues']);
     }
 
     public function testUnknownModePassesNoQueues(): void
@@ -287,4 +303,113 @@ class ConsumeWhatsAppCommandTest extends TestCase
         $this->assertSame(Command::FAILURE, $exitCode);
         $this->assertStringContainsString('application not available', $tester->getDisplay());
     }
+
+    // -------------------------------------------------------------------------
+    // Testes: modo paralelo (runParallel) — count($queues) > 1
+    // -------------------------------------------------------------------------
+
+    /**
+     * Duas filas no modo bulk → mensagem "starting N parallel workers" no output.
+     * Os processos OS falharão no ambiente de testes (sem console real),
+     * mas o output de lançamento já confirma que runParallel() foi invocado.
+     */
+    public function testTwoQueuesFromBulkModeTriggerParallelWorkers(): void
+    {
+        $this->mockRepository
+            ->expects($this->once())
+            ->method('getDistinctBulkQueueNames')
+            ->willReturn(['queue_a', 'queue_b']);
+
+        $tester = $this->runCommandTester(['--mode' => 'bulk']);
+        $output = $tester->getDisplay();
+
+        $this->assertStringContainsString('starting 2 parallel workers', $output);
+        $this->assertStringContainsString('queue_a', $output);
+        $this->assertStringContainsString('queue_b', $output);
+    }
+
+    public function testTwoQueuesFromBatchModeTriggerParallelWorkers(): void
+    {
+        $this->mockRepository
+            ->expects($this->once())
+            ->method('getDistinctBatchQueueNames')
+            ->willReturn(['queue_a_batch', 'queue_b_batch']);
+
+        $tester = $this->runCommandTester(['--mode' => 'batch']);
+        $output = $tester->getDisplay();
+
+        $this->assertStringContainsString('starting 2 parallel workers', $output);
+        $this->assertStringContainsString('queue_a_batch', $output);
+        $this->assertStringContainsString('queue_b_batch', $output);
+    }
+
+    public function testThreeQueuesOutputsCorrectWorkerCount(): void
+    {
+        $this->mockRepository
+            ->method('getDistinctBulkQueueNames')
+            ->willReturn(['q1', 'q2', 'q3']);
+
+        $tester = $this->runCommandTester(['--mode' => 'bulk']);
+
+        $this->assertStringContainsString('starting 3 parallel workers', $tester->getDisplay());
+    }
+
+    public function testParallelModeOutputIncludesLimitPerWorker(): void
+    {
+        $this->mockRepository
+            ->method('getDistinctBulkQueueNames')
+            ->willReturn(['queue_a', 'queue_b']);
+
+        $tester = $this->runCommandTester(['--mode' => 'bulk', '--limit' => '25']);
+
+        $this->assertStringContainsString('limit=25 each', $tester->getDisplay());
+    }
+
+    public function testParallelModeOutputsWorkerStartedMessageForEachQueue(): void
+    {
+        $this->mockRepository
+            ->method('getDistinctBulkQueueNames')
+            ->willReturn(['queue_a', 'queue_b']);
+
+        $tester = $this->runCommandTester(['--mode' => 'bulk']);
+        $output = $tester->getDisplay();
+
+        $this->assertStringContainsString('worker started for queue "queue_a"', $output);
+        $this->assertStringContainsString('worker started for queue "queue_b"', $output);
+    }
+
+    /**
+     * Fila única em --mode=bulk deve continuar usando runConsumer (sub-comando interno),
+     * NÃO runParallel. Isso garante que a regressão não ocorre para o caso 1-número.
+     */
+    public function testSingleQueueFromBulkModeDoesNotTriggerParallel(): void
+    {
+        $this->mockRepository
+            ->method('getDistinctBulkQueueNames')
+            ->willReturn(['queue_a']);
+
+        $tester = $this->runCommandTester(['--mode' => 'bulk']);
+        $output = $tester->getDisplay();
+
+        $this->assertStringNotContainsString('parallel workers', $output);
+        // sub-comando interno foi chamado → receivers está capturado
+        $this->assertEquals(['whatsapp'], $this->capturedArgs['receivers']);
+    }
+
+    /**
+     * --queue explícito (fila única) nunca ativa o modo paralelo,
+     * mesmo que o repositório tivesse múltiplas filas.
+     */
+    public function testExplicitQueueOptionNeverTriggersParallel(): void
+    {
+        // Repositório NÃO deve ser consultado quando --queue está presente
+        $this->mockRepository->expects($this->never())->method('getDistinctBulkQueueNames');
+
+        $tester = $this->runCommandTester(['--queue' => 'queue_a']);
+        $output = $tester->getDisplay();
+
+        $this->assertStringNotContainsString('parallel workers', $output);
+        $this->assertEquals(['queue_a'], $this->capturedArgs['--queues']);
+    }
+
 }
