@@ -160,11 +160,21 @@ class ConsumeWhatsAppCommand extends Command
             if ($process->isSuccessful()) {
                 $output->writeln(sprintf('<info>DialogHSM: worker finished for queue "%s"</info>', $queue));
             } else {
-                $output->writeln(sprintf(
-                    '<error>DialogHSM: worker failed for queue "%s" (exit: %d)</error>',
-                    $queue,
-                    $process->getExitCode() ?? -1
-                ));
+                $processOutput = $process->getOutput().$process->getErrorOutput();
+
+                if (str_contains($processOutput, 'NOT_FOUND') || str_contains($processOutput, 'no queue')) {
+                    $output->writeln(sprintf(
+                        '<error>DialogHSM: fila "%s" não encontrada no RabbitMQ. Verifique o campo de fila do número WhatsApp no Mautic (Plugins > WhatsApp Numbers).</error>',
+                        $queue
+                    ));
+                } else {
+                    $output->writeln(sprintf(
+                        '<error>DialogHSM: worker failed for queue "%s" (exit: %d)</error>',
+                        $queue,
+                        $process->getExitCode() ?? -1
+                    ));
+                }
+
                 $exitCode = Command::FAILURE;
             }
         }
@@ -196,7 +206,21 @@ class ConsumeWhatsAppCommand extends Command
         $subInput = new ArrayInput($subArgs);
         $subInput->setInteractive(false);
 
-        return $subCommand->run($subInput, $output);
+        try {
+            return $subCommand->run($subInput, $output);
+        } catch (\Throwable $e) {
+            if (str_contains($e->getMessage(), 'NOT_FOUND') || str_contains($e->getMessage(), 'no queue')) {
+                $queue = $queues[0] ?? 'desconhecida';
+                $output->writeln(sprintf(
+                    '<error>DialogHSM: fila "%s" não encontrada no RabbitMQ. Verifique o campo de fila do número WhatsApp no Mautic (Plugins > WhatsApp Numbers).</error>',
+                    $queue
+                ));
+
+                return Command::FAILURE;
+            }
+
+            throw $e;
+        }
     }
 
     /**
