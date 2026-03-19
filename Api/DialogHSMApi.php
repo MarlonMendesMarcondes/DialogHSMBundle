@@ -34,12 +34,14 @@ class DialogHSMApi
             'template' => $payload['template']['name'] ?? '',
         ]);
 
+        $isMeta  = str_contains($url, 'graph.facebook.com');
+        $headers = $isMeta
+            ? ['Authorization' => 'Bearer '.$apiKey, 'Content-Type' => 'application/json']
+            : ['D360-API-KEY' => $apiKey, 'Content-Type' => 'application/json'];
+
         try {
             $response = $this->httpClient->request('POST', $url, [
-                'headers' => [
-                    'D360-API-KEY' => $apiKey,
-                    'Content-Type' => 'application/json',
-                ],
+                'headers' => $headers,
                 'json'        => $payload,
                 'http_errors' => false,
             ]);
