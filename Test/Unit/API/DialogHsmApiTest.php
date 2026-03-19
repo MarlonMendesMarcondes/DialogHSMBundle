@@ -487,6 +487,135 @@ class DialogHsmApiTest extends TestCase
         $this->assertLessThan($buttonIndex, $ltoIndex, 'limited_time_offer deve aparecer antes dos buttons');
     }
 
+    // --- Meta Cloud API (Facebook Graph) ---
+
+    public function testMetaCloudUrlUsesAuthorizationBearerHeader(): void
+    {
+        $capturedHeaders = null;
+        $mockResponse    = new Response(200, [], json_encode(['messages' => [['id' => 'wamid.abc']]]));
+
+        $this->mockClient
+            ->method('request')
+            ->willReturnCallback(function (string $method, string $url, array $options) use (&$capturedHeaders, $mockResponse) {
+                $capturedHeaders = $options['headers'];
+
+                return $mockResponse;
+            });
+
+        $this->api->sendMessage(
+            'EAABsToken123',
+            'https://graph.facebook.com/v18.0/123456789/messages',
+            '11999999999',
+            ['content' => 'template', 'language' => 'pt_BR']
+        );
+
+        $this->assertArrayHasKey('Authorization', $capturedHeaders);
+        $this->assertEquals('Bearer EAABsToken123', $capturedHeaders['Authorization']);
+        $this->assertArrayNotHasKey('D360-API-KEY', $capturedHeaders);
+    }
+
+    public function testDialog360UrlUsesD360ApiKeyHeader(): void
+    {
+        $capturedHeaders = null;
+        $mockResponse    = new Response(200, [], json_encode(['messages' => [['id' => 'abc']]]));
+
+        $this->mockClient
+            ->method('request')
+            ->willReturnCallback(function (string $method, string $url, array $options) use (&$capturedHeaders, $mockResponse) {
+                $capturedHeaders = $options['headers'];
+
+                return $mockResponse;
+            });
+
+        $this->api->sendMessage(
+            'MY_360_KEY',
+            'https://waba-v2.360dialog.io/messages',
+            '11999999999',
+            ['content' => 'template', 'language' => 'pt_BR']
+        );
+
+        $this->assertArrayHasKey('D360-API-KEY', $capturedHeaders);
+        $this->assertEquals('MY_360_KEY', $capturedHeaders['D360-API-KEY']);
+        $this->assertArrayNotHasKey('Authorization', $capturedHeaders);
+    }
+
+    public function testMetaCloudSuccessResponse(): void
+    {
+        $mockResponse = new Response(200, [], json_encode([
+            'messaging_product' => 'whatsapp',
+            'contacts'          => [['input' => '5511999999999', 'wa_id' => '5511999999999']],
+            'messages'          => [['id' => 'wamid.HBgN']],
+        ]));
+
+        $this->mockClient->method('request')->willReturn($mockResponse);
+
+        $result = $this->api->sendMessage(
+            'EAABsToken123',
+            'https://graph.facebook.com/v18.0/123456789/messages',
+            '11999999999',
+            ['content' => 'template', 'language' => 'pt_BR']
+        );
+
+        $this->assertTrue($result['success']);
+        $this->assertEquals(200, $result['http_status']);
+        $this->assertNull($result['error']);
+        $this->assertEquals('wamid.HBgN', $result['response']['messages'][0]['id']);
+    }
+
+    public function testMetaCloudHttpError401(): void
+    {
+        $mockResponse = new Response(401, [], json_encode([
+            'error' => ['message' => 'Invalid OAuth access token', 'code' => 190],
+        ]));
+
+        $this->mockClient->method('request')->willReturn($mockResponse);
+
+        $result = $this->api->sendMessage(
+            'token_invalido',
+            'https://graph.facebook.com/v18.0/123456789/messages',
+            '11999999999',
+            ['content' => 'template', 'language' => 'pt_BR']
+        );
+
+        $this->assertFalse($result['success']);
+        $this->assertEquals(401, $result['http_status']);
+        $this->assertStringContainsString('401', $result['error']);
+        $this->assertStringContainsString('Invalid OAuth access token', $result['error']);
+    }
+
+    public function testMetaCloudPayloadFormatIsIdenticalTo360dialog(): void
+    {
+        $payloadDialog = null;
+        $payloadMeta   = null;
+        $mockResponse  = new Response(200, [], json_encode(['messages' => [['id' => 'abc']]]));
+
+        $this->mockClient
+            ->expects($this->exactly(2))
+            ->method('request')
+            ->willReturnCallback(function (string $method, string $url, array $options) use (&$payloadDialog, &$payloadMeta, $mockResponse) {
+                if (str_contains($url, 'graph.facebook.com')) {
+                    $payloadMeta = $options['json'];
+                } else {
+                    $payloadDialog = $options['json'];
+                }
+
+                return $mockResponse;
+            });
+
+        $payloadData = [
+            'content'     => 'template_promo',
+            'language'    => 'pt_BR',
+            'vars'        => 'nome',
+            'nome'        => 'Carlos',
+            'url_arquivo' => 'https://example.com/img.jpg',
+        ];
+
+        $this->api->sendMessage('KEY_360', 'https://waba-v2.360dialog.io/messages', '11999999999', $payloadData);
+        $this->api->sendMessage('TOKEN_META', 'https://graph.facebook.com/v18.0/999/messages', '11999999999', $payloadData);
+
+        $this->assertEquals($payloadDialog, $payloadMeta, 'O payload enviado deve ser idêntico para ambos os provedores');
+    }
+
     public function testLimitedTimeOfferWithAllComponents(): void
     {
         $capturedPayload = null;
