@@ -13,6 +13,7 @@ class SendWhatsAppMessage
         public readonly string $baseUrl,
         public readonly array $payloadData,
         public readonly string $templateName,
+        public readonly string $whatsAppNumberName = '',
     ) {
     }
 }

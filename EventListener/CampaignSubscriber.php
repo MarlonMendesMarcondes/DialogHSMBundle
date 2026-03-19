@@ -159,12 +159,13 @@ class CampaignSubscriber implements EventSubscriberInterface
 
             try {
                 $success = $sender(new SendWhatsAppMessage(
-                    leadId:       $contact->getId(),
-                    phone:        $phone,
-                    apiKey:       $apiKey,
-                    baseUrl:      $baseUrl,
-                    payloadData:  $payloadData,
-                    templateName: $templateName,
+                    leadId:             $contact->getId(),
+                    phone:              $phone,
+                    apiKey:             $apiKey,
+                    baseUrl:            $baseUrl,
+                    payloadData:        $payloadData,
+                    templateName:       $templateName,
+                    whatsAppNumberName: $whatsAppNumber->getName() ?? '',
                 ), $whatsAppNumber);
             } catch (\Throwable $e) {
                 $this->logger->error('DialogHSM: Exceção durante envio', [
