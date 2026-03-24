@@ -3,8 +3,10 @@
 declare(strict_types=1);
 
 use Doctrine\DBAL\Connection;
+use Doctrine\ORM\AbstractQuery;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\Mapping\ClassMetadata;
+use Doctrine\ORM\QueryBuilder;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use PHPUnit\Framework\MockObject\MockObject;
@@ -16,6 +18,8 @@ class MessageLogRepositoryTest extends TestCase
     private Connection&MockObject $mockConnection;
     private ClassMetadata&MockObject $mockClassMetadata;
     private MessageLogRepository&MockObject $repository;
+    private QueryBuilder&MockObject $mockQueryBuilder;
+    private AbstractQuery&MockObject $mockQuery;
 
     protected function setUp(): void
     {
@@ -29,15 +33,133 @@ class MessageLogRepositoryTest extends TestCase
             ->willReturn($this->mockClassMetadata);
         $this->mockClassMetadata->method('getTableName')->willReturn('dialog_hsm_message_log');
 
+        $this->mockQuery = $this->createMock(AbstractQuery::class);
+
+        $this->mockQueryBuilder = $this->createMock(QueryBuilder::class);
+        $this->mockQueryBuilder->method('select')->willReturnSelf();
+        $this->mockQueryBuilder->method('orderBy')->willReturnSelf();
+        $this->mockQueryBuilder->method('addOrderBy')->willReturnSelf();
+        $this->mockQueryBuilder->method('setFirstResult')->willReturnSelf();
+        $this->mockQueryBuilder->method('setMaxResults')->willReturnSelf();
+        $this->mockQueryBuilder->method('getQuery')->willReturn($this->mockQuery);
+
         // Bypass CommonRepository constructor (requires ManagerRegistry);
-        // only mock getEntityManager() so prune() runs its real logic.
+        // mock getEntityManager() + createQueryBuilder() for getLogs/countAll.
         $this->repository = $this->getMockBuilder(MessageLogRepository::class)
             ->disableOriginalConstructor()
-            ->onlyMethods(['getEntityManager'])
+            ->onlyMethods(['getEntityManager', 'createQueryBuilder'])
             ->getMock();
 
         $this->repository->method('getEntityManager')->willReturn($this->mockEntityManager);
+        $this->repository->method('createQueryBuilder')->willReturn($this->mockQueryBuilder);
     }
+
+    // =========================================================================
+    // getLogs
+    // =========================================================================
+
+    public function testGetLogsReturnsResultArray(): void
+    {
+        $log1 = new MessageLog();
+        $log2 = new MessageLog();
+
+        $this->mockQuery->method('getResult')->willReturn([$log1, $log2]);
+
+        $result = $this->repository->getLogs();
+
+        $this->assertCount(2, $result);
+        $this->assertSame($log1, $result[0]);
+    }
+
+    public function testGetLogsReturnsEmptyArrayWhenNoLogs(): void
+    {
+        $this->mockQuery->method('getResult')->willReturn([]);
+
+        $result = $this->repository->getLogs();
+
+        $this->assertEmpty($result);
+    }
+
+    public function testGetLogsDefaultStartIsZero(): void
+    {
+        $this->mockQueryBuilder
+            ->expects($this->once())
+            ->method('setFirstResult')
+            ->with(0)
+            ->willReturnSelf();
+
+        $this->mockQuery->method('getResult')->willReturn([]);
+
+        $this->repository->getLogs();
+    }
+
+    public function testGetLogsDefaultLimitIs50(): void
+    {
+        $this->mockQueryBuilder
+            ->expects($this->once())
+            ->method('setMaxResults')
+            ->with(50)
+            ->willReturnSelf();
+
+        $this->mockQuery->method('getResult')->willReturn([]);
+
+        $this->repository->getLogs();
+    }
+
+    public function testGetLogsRespectsCustomStartAndLimit(): void
+    {
+        $this->mockQueryBuilder
+            ->expects($this->once())
+            ->method('setFirstResult')
+            ->with(100)
+            ->willReturnSelf();
+
+        $this->mockQueryBuilder
+            ->expects($this->once())
+            ->method('setMaxResults')
+            ->with(25)
+            ->willReturnSelf();
+
+        $this->mockQuery->method('getResult')->willReturn([]);
+
+        $this->repository->getLogs(100, 25);
+    }
+
+    // =========================================================================
+    // countAll
+    // =========================================================================
+
+    public function testCountAllReturnsInteger(): void
+    {
+        $this->mockQuery->method('getSingleScalarResult')->willReturn('42');
+
+        $result = $this->repository->countAll();
+
+        $this->assertSame(42, $result);
+    }
+
+    public function testCountAllCastsResultToInt(): void
+    {
+        $this->mockQuery->method('getSingleScalarResult')->willReturn('0');
+
+        $result = $this->repository->countAll();
+
+        $this->assertIsInt($result);
+        $this->assertSame(0, $result);
+    }
+
+    public function testCountAllWithLargeNumber(): void
+    {
+        $this->mockQuery->method('getSingleScalarResult')->willReturn('999999');
+
+        $result = $this->repository->countAll();
+
+        $this->assertSame(999999, $result);
+    }
+
+    // =========================================================================
+    // prune
+    // =========================================================================
 
     public function testPruneDoesNothingWhenCountBelowLimit(): void
     {

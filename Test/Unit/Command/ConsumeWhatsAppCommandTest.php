@@ -517,4 +517,24 @@ class ConsumeWhatsAppCommandTest extends TestCase
         $this->assertSame(Command::FAILURE, $tester->getStatusCode());
     }
 
+    public function testRunParallelShowsFinishedMessageWhenProcessSucceeds(): void
+    {
+        // Dois ou mais filas aciona runParallel (onde está a mensagem "finished")
+        $this->mockRepository
+            ->method('getDistinctBulkQueueNames')
+            ->willReturn(['fila_a', 'fila_b']);
+
+        $processFactory = function (): \Symfony\Component\Process\Process {
+            return new \Symfony\Component\Process\Process([
+                'bash', '-c', 'echo "worker done" && exit 0',
+            ]);
+        };
+
+        $tester = $this->runCommandTester(['--mode' => 'bulk'], null, $processFactory);
+        $output = $tester->getDisplay();
+
+        $this->assertStringContainsString('worker finished for queue', $output);
+        $this->assertSame(Command::SUCCESS, $tester->getStatusCode());
+    }
+
 }
