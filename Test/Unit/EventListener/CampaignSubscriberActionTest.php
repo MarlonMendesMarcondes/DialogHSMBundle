@@ -1274,6 +1274,119 @@ class CampaignSubscriberActionTest extends TestCase
         $this->assertLessThan(1.0, $elapsed, 'Redis nunca deve dormir independente do send_delay');
     }
 
+    // -------------------------------------------------------------------------
+    // Testes: buildPayloadFromConfig — cobre os `continue` no loop
+    // -------------------------------------------------------------------------
+
+    public function testPayloadSkipsNonArrayItemsButKeepsValidOnes(): void
+    {
+        // Lista com item inválido (string) antes de um item válido
+        $this->enableIntegration();
+
+        $this->mockNumberModel
+            ->method('getEntity')
+            ->willReturn($this->buildWhatsAppNumber());
+
+        $contact = $this->buildContact('11999999999', 1);
+        $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact], [
+            'payload_data' => [
+                'list' => [
+                    'not_an_array',                            // item inválido — deve ser ignorado (continue)
+                    ['label' => 'content', 'value' => 'tpl'], // item válido
+                ],
+            ],
+        ]);
+
+        $capturedPayload = null;
+        $this->mockHandler
+            ->expects($this->once())
+            ->method('__invoke')
+            ->willReturnCallback(function (object $msg) use (&$capturedPayload) {
+                $capturedPayload = $msg->payloadData;
+
+                return ['success' => true, 'error' => null, 'http_status' => 200, 'response' => null];
+            });
+
+        $event->method('pass');
+        $this->subscriber->onCampaignTriggerAction($event);
+
+        // O item inválido foi pulado; o válido foi processado
+        $this->assertArrayHasKey('content', $capturedPayload);
+    }
+
+    public function testPayloadSkipsItemsMissingLabelOrValue(): void
+    {
+        // Item sem chave 'label' → continue
+        $this->enableIntegration();
+
+        $this->mockNumberModel
+            ->method('getEntity')
+            ->willReturn($this->buildWhatsAppNumber());
+
+        $contact = $this->buildContact('11999999999', 1);
+        $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact], [
+            'payload_data' => [
+                'list' => [
+                    ['value' => 'sem_label'],                  // sem 'label' → continue
+                    ['label' => 'content', 'value' => 'tpl'],  // válido
+                ],
+            ],
+        ]);
+
+        $capturedPayload = null;
+        $this->mockHandler
+            ->expects($this->once())
+            ->method('__invoke')
+            ->willReturnCallback(function (object $msg) use (&$capturedPayload) {
+                $capturedPayload = $msg->payloadData;
+
+                return ['success' => true, 'error' => null, 'http_status' => 200, 'response' => null];
+            });
+
+        $event->method('pass');
+        $this->subscriber->onCampaignTriggerAction($event);
+
+        $this->assertArrayHasKey('content', $capturedPayload);
+        $this->assertArrayNotHasKey('', $capturedPayload);
+    }
+
+    public function testPayloadSkipsItemsWithEmptyLabel(): void
+    {
+        // Item com label vazio após trim → continue (segundo guard)
+        $this->enableIntegration();
+
+        $this->mockNumberModel
+            ->method('getEntity')
+            ->willReturn($this->buildWhatsAppNumber());
+
+        $contact = $this->buildContact('11999999999', 1);
+        $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact], [
+            'payload_data' => [
+                'list' => [
+                    ['label' => '   ', 'value' => 'v1'],       // label vazio → continue
+                    ['label' => 'content', 'value' => 'tpl'],  // válido
+                ],
+            ],
+        ]);
+
+        $capturedPayload = null;
+        $this->mockHandler
+            ->expects($this->once())
+            ->method('__invoke')
+            ->willReturnCallback(function (object $msg) use (&$capturedPayload) {
+                $capturedPayload = $msg->payloadData;
+
+                return ['success' => true, 'error' => null, 'http_status' => 200, 'response' => null];
+            });
+
+        $event->method('pass');
+        $this->subscriber->onCampaignTriggerAction($event);
+
+        $this->assertArrayHasKey('content', $capturedPayload);
+        $this->assertArrayNotHasKey('', $capturedPayload);
+        $this->assertArrayNotHasKey('   ', $capturedPayload);
+    }
+
     public function testDirectSendWithNullTransportUsesInlineHandler(): void
     {
         $this->enableIntegration();
