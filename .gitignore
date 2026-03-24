@@ -1,1 +1,7 @@
 .phpunit.result.cache
+
+# Artefatos do Infection (mutation testing)
+infection.log
+infection.html
+infection-summary.log
+infection.json5
