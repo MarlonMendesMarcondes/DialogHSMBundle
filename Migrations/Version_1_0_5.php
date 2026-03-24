@@ -59,9 +59,12 @@ class Version_1_0_5 extends AbstractMigration
                      is_required, is_fixed, is_visible, is_short_visible, is_listable,
                      is_publicly_updatable, is_unique_identifer, is_index,
                      field_order, column_is_not_created, original_is_published_value)
-                VALUES
-                    (1, '{$now}', '{$label}', '{$alias}', '{$type}', 'core', 'lead',
-                     0, 0, 1, 0, 1, 0, 0, 0, {$order}, 0, 1)
+                SELECT 1, '{$now}', '{$label}', '{$alias}', '{$type}', 'core', 'lead',
+                       0, 0, 1, 0, 1, 0, 0, 0, {$order}, 0, 1
+                FROM DUAL
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM `{$table}` WHERE alias = '{$alias}'
+                )
             ");
         }
     }

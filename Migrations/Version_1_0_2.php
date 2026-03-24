@@ -29,6 +29,6 @@ class Version_1_0_2 extends AbstractMigration
     {
         $tableName = $this->concatPrefix('dialog_hsm_message_log');
 
-        $this->addSql("ALTER TABLE `{$tableName}` ADD COLUMN `http_status_code` INT DEFAULT NULL AFTER `status`");
+        $this->addSql("ALTER TABLE `{$tableName}` ADD COLUMN IF NOT EXISTS `http_status_code` INT DEFAULT NULL AFTER `status`");
     }
 }

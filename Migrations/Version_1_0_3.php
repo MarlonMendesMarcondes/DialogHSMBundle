@@ -29,6 +29,6 @@ class Version_1_0_3 extends AbstractMigration
     {
         $tableName = $this->concatPrefix('dialog_hsm_numbers');
 
-        $this->addSql("ALTER TABLE `{$tableName}` ADD COLUMN `base_url` VARCHAR(500) DEFAULT NULL AFTER `api_key`");
+        $this->addSql("ALTER TABLE `{$tableName}` ADD COLUMN IF NOT EXISTS `base_url` VARCHAR(500) DEFAULT NULL AFTER `api_key`");
     }
 }
