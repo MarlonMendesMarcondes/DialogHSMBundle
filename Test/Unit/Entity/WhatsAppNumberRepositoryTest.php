@@ -36,6 +36,21 @@ class WhatsAppNumberRepositoryTest extends TestCase
     }
 
     // -------------------------------------------------------------------------
+    // getDefaultOrder (protected — testado via reflexão)
+    // -------------------------------------------------------------------------
+
+    public function testGetDefaultOrderReturnsSortByNameAsc(): void
+    {
+        $ref = new \ReflectionMethod(WhatsAppNumberRepository::class, 'getDefaultOrder');
+        $ref->setAccessible(true);
+
+        $result = $ref->invoke($this->repository);
+
+        $this->assertCount(1, $result, 'Deve haver exatamente uma regra de ordenação');
+        $this->assertSame(['wn.name', 'ASC'], $result[0]);
+    }
+
+    // -------------------------------------------------------------------------
     // getDistinctBulkQueueNames
     // -------------------------------------------------------------------------
 
@@ -165,6 +180,111 @@ class WhatsAppNumberRepositoryTest extends TestCase
     // -------------------------------------------------------------------------
     // Testes cruzados: bulk e batch são independentes
     // -------------------------------------------------------------------------
+
+    // -------------------------------------------------------------------------
+    // getNumberList
+    // -------------------------------------------------------------------------
+
+    public function testGetNumberListReturnsResultsWithNoSearch(): void
+    {
+        $this->mockQueryBuilder->method('orderBy')->willReturnSelf();
+        $this->mockQueryBuilder->method('setFirstResult')->willReturnSelf();
+        $this->mockQueryBuilder->method('setMaxResults')->willReturnSelf();
+
+        $this->mockQuery
+            ->method('getArrayResult')
+            ->willReturn([
+                ['id' => 1, 'name' => 'Vendas', 'phoneNumber' => '+5511'],
+                ['id' => 2, 'name' => 'Suporte', 'phoneNumber' => '+5521'],
+            ]);
+
+        $result = $this->repository->getNumberList();
+
+        $this->assertCount(2, $result);
+        $this->assertSame('Vendas', $result[0]['name']);
+    }
+
+    public function testGetNumberListWithStringSearchAddsLikeClause(): void
+    {
+        $this->mockQueryBuilder->method('orderBy')->willReturnSelf();
+        $this->mockQueryBuilder->method('setFirstResult')->willReturnSelf();
+        $this->mockQueryBuilder->method('setMaxResults')->willReturnSelf();
+        $this->mockQueryBuilder->method('expr')->willReturn(
+            $this->createMock(\Doctrine\ORM\Query\Expr::class)
+        );
+
+        $this->mockQueryBuilder
+            ->expects($this->atLeastOnce())
+            ->method('setParameter');
+
+        $this->mockQuery->method('getArrayResult')->willReturn([]);
+
+        $result = $this->repository->getNumberList('Vendas');
+        $this->assertIsArray($result);
+    }
+
+    public function testGetNumberListWithArraySearchAddsInClause(): void
+    {
+        $this->mockQueryBuilder->method('orderBy')->willReturnSelf();
+        $this->mockQueryBuilder->method('setFirstResult')->willReturnSelf();
+        $this->mockQueryBuilder->method('setMaxResults')->willReturnSelf();
+        $this->mockQueryBuilder->method('expr')->willReturn(
+            $this->createMock(\Doctrine\ORM\Query\Expr::class)
+        );
+
+        $this->mockQueryBuilder
+            ->expects($this->atLeastOnce())
+            ->method('setParameter');
+
+        $this->mockQuery->method('getArrayResult')->willReturn([['id' => 1]]);
+
+        $result = $this->repository->getNumberList([1, 2, 3]);
+        $this->assertCount(1, $result);
+    }
+
+    public function testGetNumberListWithZeroLimitSkipsPagination(): void
+    {
+        $this->mockQueryBuilder->method('orderBy')->willReturnSelf();
+
+        // setFirstResult/setMaxResults NÃO devem ser chamados quando limit=0
+        $this->mockQueryBuilder->expects($this->never())->method('setFirstResult');
+        $this->mockQueryBuilder->expects($this->never())->method('setMaxResults');
+
+        $this->mockQuery->method('getArrayResult')->willReturn([]);
+
+        $this->repository->getNumberList('', 0, 0);
+    }
+
+    public function testGetNumberListDefaultLimitIs10(): void
+    {
+        $this->mockQueryBuilder->method('orderBy')->willReturnSelf();
+        $this->mockQueryBuilder->method('setFirstResult')->willReturnSelf();
+
+        $this->mockQueryBuilder
+            ->expects($this->once())
+            ->method('setMaxResults')
+            ->with(10)
+            ->willReturnSelf();
+
+        $this->mockQuery->method('getArrayResult')->willReturn([]);
+
+        $this->repository->getNumberList();
+    }
+
+    public function testGetNumberListWithEmptyArraySearchSkipsSearchClause(): void
+    {
+        // search=[] é empty() → não aplica where
+        $this->mockQueryBuilder->method('orderBy')->willReturnSelf();
+        $this->mockQueryBuilder->method('setFirstResult')->willReturnSelf();
+        $this->mockQueryBuilder->method('setMaxResults')->willReturnSelf();
+
+        // andWhere só deve ser chamado para isPublished, não para search
+        $this->mockQueryBuilder->expects($this->once())->method('andWhere');
+
+        $this->mockQuery->method('getArrayResult')->willReturn([]);
+
+        $this->repository->getNumberList([]);
+    }
 
     public function testBulkAndBatchUseIndependentQueryBuilders(): void
     {

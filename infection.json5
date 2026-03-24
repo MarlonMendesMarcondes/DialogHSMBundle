@@ -1,0 +1,30 @@
+{
+    "timeout": 30,
+    "source": {
+        "directories": [
+            "Api",
+            "Command",
+            "Entity",
+            "EventListener",
+            "Message",
+            "MessageHandler",
+            "Migrations"
+        ]
+    },
+    "phpUnit": {
+        "configDir": ".",
+        "customPath": "/var/www/html/vendor/bin/phpunit"
+    },
+    "bootstrap": "/var/www/html/vendor/autoload.php",
+    "mutators": {
+        "@default": true
+    },
+    "minMsi": 100,
+    "minCoveredMsi": 100,
+    "logs": {
+        "text": "infection.log",
+        "html": "infection.html",
+        "summary": "infection-summary.log"
+    },
+    "tmpDir": "/tmp"
+}
