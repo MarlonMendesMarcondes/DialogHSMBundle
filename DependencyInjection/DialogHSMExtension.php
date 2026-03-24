@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MauticPlugin\DialogHSMBundle\DependencyInjection;
 
+use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppDirectMessage;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use Symfony\Component\Config\FileLocator;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
@@ -19,6 +20,7 @@ class DialogHSMExtension extends Extension implements PrependExtensionInterface
         // RabbitMQ is not configured. Without this, Symfony throws at compile time
         // if MAUTIC_MESSENGER_DSN_WHATSAPP is absent — breaking the entire app.
         $container->setParameter('env(MAUTIC_MESSENGER_DSN_WHATSAPP)', 'null://null');
+        $container->setParameter('env(MAUTIC_MESSENGER_DSN_WHATSAPP_DIRECT)', 'null://null');
 
         $container->prependExtensionConfig('framework', [
             'messenger' => [
@@ -33,9 +35,16 @@ class DialogHSMExtension extends Extension implements PrependExtensionInterface
                             'max_retries' => 0,
                         ],
                     ],
+                    'whatsapp_direct' => [
+                        'dsn'            => '%env(MAUTIC_MESSENGER_DSN_WHATSAPP_DIRECT)%',
+                        'retry_strategy' => [
+                            'max_retries' => 0,
+                        ],
+                    ],
                 ],
                 'routing' => [
-                    SendWhatsAppMessage::class => 'whatsapp',
+                    SendWhatsAppMessage::class     => 'whatsapp',
+                    SendWhatsAppDirectMessage::class => 'whatsapp_direct',
                 ],
             ],
         ]);

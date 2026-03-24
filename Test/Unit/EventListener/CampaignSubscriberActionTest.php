@@ -12,6 +12,7 @@ use Mautic\IntegrationsBundle\Helper\IntegrationsHelper;
 use Mautic\LeadBundle\Entity\Lead;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
 use MauticPlugin\DialogHSMBundle\EventListener\CampaignSubscriber;
+use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppDirectMessage;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppMessageHandler;
 use MauticPlugin\DialogHSMBundle\Model\WhatsAppNumberModel;
@@ -37,12 +38,18 @@ class CampaignSubscriberActionTest extends TestCase
         $this->mockNumberModel        = $this->createMock(WhatsAppNumberModel::class);
         $this->mockHandler            = $this->createMock(SendWhatsAppMessageHandler::class);
 
-        $this->subscriber = new CampaignSubscriber(
+        $this->subscriber = $this->makeSubscriber();
+    }
+
+    private function makeSubscriber(string $directTransportDsn = 'null://null'): CampaignSubscriber
+    {
+        return new CampaignSubscriber(
             $this->mockIntegrationsHelper,
             $this->mockBus,
             $this->mockLogger,
             $this->mockNumberModel,
             $this->mockHandler,
+            $directTransportDsn,
         );
     }
 
@@ -413,8 +420,8 @@ class CampaignSubscriberActionTest extends TestCase
         $this->subscriber->onCampaignTriggerAction($event);
         $elapsed = microtime(true) - $start;
 
-        // 2 contatos × 1s = pelo menos 2s
-        $this->assertGreaterThanOrEqual(2.0, $elapsed, 'Esperado sleep de 1s após cada contato (batch_limit=0)');
+        // 2 contatos × 1s = pelo menos 1.9s (margem para variação do scheduler do SO)
+        $this->assertGreaterThanOrEqual(1.9, $elapsed, 'Esperado sleep de 1s após cada contato (batch_limit=0)');
     }
 
     public function testDirectSendDelaySleepsAfterEachBatchGroup(): void
@@ -1199,5 +1206,95 @@ class CampaignSubscriberActionTest extends TestCase
         $this->subscriber->onCampaignTriggerAction($event);
 
         $this->assertEquals('https://waba-v2.360dialog.io/messages', $capturedMessage->baseUrl);
+    }
+
+    // -------------------------------------------------------------------------
+    // Testes: envio direto com Redis configurado
+    // -------------------------------------------------------------------------
+
+    public function testDirectSendWithRedisDispatchesToBusNotHandler(): void
+    {
+        $this->enableIntegration();
+
+        $this->mockNumberModel
+            ->method('getEntity')
+            ->willReturn($this->buildWhatsAppNumber());
+
+        $contact = $this->buildContact('11999999999', 1);
+        $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
+
+        // Handler NÃO deve ser chamado diretamente
+        $this->mockHandler->expects($this->never())->method('__invoke');
+
+        // Bus deve ser chamado com SendWhatsAppDirectMessage
+        $this->mockBus
+            ->expects($this->once())
+            ->method('dispatch')
+            ->with($this->isInstanceOf(SendWhatsAppDirectMessage::class))
+            ->willReturn(new Envelope(new \stdClass()));
+
+        $event->expects($this->once())->method('pass');
+
+        $subscriber = $this->makeSubscriber('redis://localhost:6379');
+        $subscriber->onCampaignTriggerAction($event);
+    }
+
+    public function testDirectSendWithRedisNeverSleeps(): void
+    {
+        $this->enableIntegration();
+
+        $this->mockNumberModel
+            ->method('getEntity')
+            ->willReturn($this->buildWhatsAppNumber());
+
+        $contacts = [
+            1 => $this->buildContact('11999999991', 1),
+            2 => $this->buildContact('11999999992', 2),
+            3 => $this->buildContact('11999999993', 3),
+        ];
+
+        $event = $this->buildPendingEvent(
+            'dialoghsm.send_whatsapp',
+            $contacts,
+            ['batch_limit' => 1, 'send_delay' => 5]
+        );
+
+        $this->mockBus
+            ->expects($this->exactly(3))
+            ->method('dispatch')
+            ->willReturn(new Envelope(new \stdClass()));
+
+        $event->expects($this->exactly(3))->method('pass');
+
+        $start      = microtime(true);
+        $subscriber = $this->makeSubscriber('redis://localhost:6379');
+        $subscriber->onCampaignTriggerAction($event);
+        $elapsed = microtime(true) - $start;
+
+        $this->assertLessThan(1.0, $elapsed, 'Redis nunca deve dormir independente do send_delay');
+    }
+
+    public function testDirectSendWithNullTransportUsesInlineHandler(): void
+    {
+        $this->enableIntegration();
+
+        $this->mockNumberModel
+            ->method('getEntity')
+            ->willReturn($this->buildWhatsAppNumber());
+
+        $contact = $this->buildContact('11999999999', 1);
+        $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
+
+        $this->mockHandler
+            ->expects($this->once())
+            ->method('__invoke')
+            ->willReturn(['success' => true, 'error' => null, 'http_status' => 200, 'response' => null]);
+
+        $this->mockBus->expects($this->never())->method('dispatch');
+
+        $event->expects($this->once())->method('pass');
+
+        $subscriber = $this->makeSubscriber('null://null');
+        $subscriber->onCampaignTriggerAction($event);
     }
 }

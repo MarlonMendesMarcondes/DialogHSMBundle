@@ -14,6 +14,7 @@ use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
 use MauticPlugin\DialogHSMBundle\Form\Type\SendWhatsAppQueueType;
 use MauticPlugin\DialogHSMBundle\Form\Type\SendWhatsAppType;
 use MauticPlugin\DialogHSMBundle\Integration\DialogHSMIntegration;
+use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppDirectMessage;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppMessageHandler;
 use MauticPlugin\DialogHSMBundle\Model\WhatsAppNumberModel;
@@ -30,6 +31,7 @@ class CampaignSubscriber implements EventSubscriberInterface
         private LoggerInterface $logger,
         private WhatsAppNumberModel $whatsAppNumberModel,
         private SendWhatsAppMessageHandler $handler,
+        private string $directTransportDsn = 'null://null',
     ) {
     }
 
@@ -73,6 +75,41 @@ class CampaignSubscriber implements EventSubscriberInterface
             return;
         }
 
+        // Se Redis configurado: publica mensagem no stream; worker consome e chama a API
+        if ($this->isRedisTransport($this->directTransportDsn)) {
+            $config     = $event->getEvent()->getProperties();
+            $sendDelay  = (int) ($config['send_delay'] ?? 0);
+            $batchLimit = (int) ($config['batch_limit'] ?? 0);
+
+            // rateDelaySeconds: distribui o delay do form por mensagem individual
+            // Exemplo: send_delay=2s, batch_limit=10 → 2/10 = 0.2s por mensagem
+            $rateDelaySeconds = $sendDelay > 0
+                ? (float) $sendDelay / max($batchLimit, 1)
+                : 0.0;
+
+            $this->processContacts(
+                $event,
+                function (SendWhatsAppMessage $message, WhatsAppNumber $number) use ($rateDelaySeconds): bool {
+                    $this->bus->dispatch(new SendWhatsAppDirectMessage(
+                        leadId:             $message->leadId,
+                        phone:              $message->phone,
+                        apiKey:             $message->apiKey,
+                        baseUrl:            $message->baseUrl,
+                        payloadData:        $message->payloadData,
+                        templateName:       $message->templateName,
+                        whatsAppNumberName: $message->whatsAppNumberName,
+                        rateDelaySeconds:   $rateDelaySeconds,
+                    ));
+
+                    return true;
+                },
+                applyBatchSleep: false
+            );
+
+            return;
+        }
+
+        // Inline: chama a API diretamente no worker do Mautic
         $this->processContacts($event, function (SendWhatsAppMessage $message, WhatsAppNumber $number): bool {
             $result = ($this->handler)($message);
 
@@ -254,6 +291,11 @@ class CampaignSubscriber implements EventSubscriberInterface
         }
 
         return $number;
+    }
+
+    private function isRedisTransport(string $dsn): bool
+    {
+        return str_starts_with($dsn, 'redis://') || str_starts_with($dsn, 'rediss://');
     }
 
     private function resolveBaseUrl(WhatsAppNumber $number, object $integration): string
