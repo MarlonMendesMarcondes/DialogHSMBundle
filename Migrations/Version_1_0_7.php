@@ -32,7 +32,7 @@ class Version_1_0_7 extends AbstractMigration
         $tableName = $this->concatPrefix('dialog_hsm_numbers');
 
         $this->addSql("ALTER TABLE `{$tableName}`
-            ADD COLUMN `batch_queue_name` VARCHAR(100) DEFAULT NULL AFTER `queue_name`
+            ADD COLUMN IF NOT EXISTS `batch_queue_name` VARCHAR(100) DEFAULT NULL AFTER `queue_name`
         ");
     }
 }

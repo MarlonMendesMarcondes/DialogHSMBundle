@@ -32,7 +32,7 @@ class Version_1_0_6 extends AbstractMigration
         $tableName = $this->concatPrefix('dialog_hsm_numbers');
 
         $this->addSql("ALTER TABLE `{$tableName}`
-            ADD COLUMN `queue_name` VARCHAR(100) DEFAULT NULL AFTER `base_url`
+            ADD COLUMN IF NOT EXISTS `queue_name` VARCHAR(100) DEFAULT NULL AFTER `base_url`
         ");
     }
 }
