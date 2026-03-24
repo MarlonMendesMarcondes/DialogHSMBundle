@@ -19,6 +19,11 @@ return function (ContainerConfigurator $configurator): void {
     $services->load('MauticPlugin\\DialogHSMBundle\\Entity\\', '../Entity/*Repository.php');
 
     $services->alias('mautic.dialoghsm.model.whatsappnumber', \MauticPlugin\DialogHSMBundle\Model\WhatsAppNumberModel::class);
+
+    $services->set(\MauticPlugin\DialogHSMBundle\EventListener\CampaignSubscriber::class)
+        ->autowire()
+        ->autoconfigure()
+        ->arg('$directTransportDsn', '%env(MAUTIC_MESSENGER_DSN_WHATSAPP_DIRECT)%');
     
         // Ensure controllers with constructor dependencies are instantiated from the container
         $services->set(\MauticPlugin\DialogHSMBundle\Controller\WhatsAppNumberController::class)
