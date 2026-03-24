@@ -29,7 +29,7 @@ class Version_1_0_8 extends AbstractMigration
         $tableName = $this->concatPrefix('dialog_hsm_message_log');
 
         $this->addSql("ALTER TABLE `{$tableName}`
-            ADD COLUMN `sender_name` VARCHAR(255) DEFAULT NULL AFTER `lead_id`
+            ADD COLUMN IF NOT EXISTS `sender_name` VARCHAR(255) DEFAULT NULL AFTER `lead_id`
         ");
     }
 }
