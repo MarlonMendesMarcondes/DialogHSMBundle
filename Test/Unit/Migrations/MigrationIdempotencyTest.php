@@ -197,6 +197,12 @@ class MigrationIdempotencyTest extends TestCase
         $this->assertFalse($this->callProtected($migration, 'isApplicable', $this->schemaWithTable(['base_url'])));
     }
 
+    public function testV103NotApplicableWhenTableAbsent(): void
+    {
+        $migration = $this->migration(Version_1_0_3::class);
+        $this->assertFalse($this->callProtected($migration, 'isApplicable', $this->schemaWithoutTable()));
+    }
+
     public function testV103SqlIsIdempotent(): void
     {
         $sql = implode(' ', $this->collectSql($this->migration(Version_1_0_3::class)));
@@ -239,6 +245,12 @@ class MigrationIdempotencyTest extends TestCase
         $this->assertTrue(
             $this->callProtected($migration, 'isApplicable', $this->schemaWithTable(['dialoghsm_status']))
         );
+    }
+
+    public function testV104NotApplicableWhenTableAbsent(): void
+    {
+        $migration = $this->migration(Version_1_0_4::class);
+        $this->assertFalse($this->callProtected($migration, 'isApplicable', $this->schemaWithoutTable()));
     }
 
     public function testV104SqlUsesIfNotExistsAndWhereNotExists(): void
@@ -293,6 +305,19 @@ class MigrationIdempotencyTest extends TestCase
         $this->assertStringContainsString('dialoghsm_last_sent', $sql);
     }
 
+    public function testV105NotApplicableWhenTableAbsent(): void
+    {
+        $migration = $this->migration(Version_1_0_5::class);
+        $this->assertFalse($this->callProtected($migration, 'isApplicable', $this->schemaWithoutTable()));
+    }
+
+    public function testV105NotApplicableWhenColumnAbsent(): void
+    {
+        // Tabela existe mas não tem a coluna dialoghsm_status → retorna false (pré-requisito não atendido)
+        $migration = $this->migration(Version_1_0_5::class);
+        $this->assertFalse($this->callProtected($migration, 'isApplicable', $this->schemaWithTable([])));
+    }
+
     // =========================================================================
     // Version_1_0_6 — adiciona queue_name
     // =========================================================================
@@ -307,6 +332,12 @@ class MigrationIdempotencyTest extends TestCase
     {
         $migration = $this->migration(Version_1_0_6::class);
         $this->assertFalse($this->callProtected($migration, 'isApplicable', $this->schemaWithTable(['queue_name'])));
+    }
+
+    public function testV106NotApplicableWhenTableAbsent(): void
+    {
+        $migration = $this->migration(Version_1_0_6::class);
+        $this->assertFalse($this->callProtected($migration, 'isApplicable', $this->schemaWithoutTable()));
     }
 
     public function testV106SqlIsIdempotent(): void
@@ -332,6 +363,12 @@ class MigrationIdempotencyTest extends TestCase
         $this->assertFalse($this->callProtected($migration, 'isApplicable', $this->schemaWithTable(['batch_queue_name'])));
     }
 
+    public function testV107NotApplicableWhenTableAbsent(): void
+    {
+        $migration = $this->migration(Version_1_0_7::class);
+        $this->assertFalse($this->callProtected($migration, 'isApplicable', $this->schemaWithoutTable()));
+    }
+
     public function testV107SqlIsIdempotent(): void
     {
         $sql = implode(' ', $this->collectSql($this->migration(Version_1_0_7::class)));
@@ -353,6 +390,12 @@ class MigrationIdempotencyTest extends TestCase
     {
         $migration = $this->migration(Version_1_0_8::class);
         $this->assertFalse($this->callProtected($migration, 'isApplicable', $this->schemaWithTable(['sender_name'])));
+    }
+
+    public function testV108NotApplicableWhenTableAbsent(): void
+    {
+        $migration = $this->migration(Version_1_0_8::class);
+        $this->assertFalse($this->callProtected($migration, 'isApplicable', $this->schemaWithoutTable()));
     }
 
     public function testV108SqlIsIdempotent(): void
