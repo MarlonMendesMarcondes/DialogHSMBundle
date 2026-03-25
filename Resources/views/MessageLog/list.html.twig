@@ -56,6 +56,8 @@
                     <td>
                         {% if item.getStatus() == 'sent' %}
                             <span class="label label-success">{{ item.getStatus() }}</span>
+                        {% elseif item.getStatus() == 'dlq' %}
+                            <span class="label label-warning">DLQ</span>
                         {% else %}
                             <span class="label label-danger">{{ item.getStatus() }}</span>
                         {% endif %}

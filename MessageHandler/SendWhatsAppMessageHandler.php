@@ -57,7 +57,7 @@ class SendWhatsAppMessageHandler implements MessageHandlerInterface
         $log->setSenderName($senderName ?: null);
         $log->setTemplateName($templateName);
         $log->setPhoneNumber($phone);
-        $log->setStatus($result['success'] ? 'sent' : 'failed');
+        $log->setStatus($result['success'] ? MessageLog::STATUS_SENT : MessageLog::STATUS_FAILED);
         $log->setHttpStatusCode($result['http_status'] ?? null);
         $log->setApiResponse(!empty($result['response']) ? json_encode($result['response']) : null);
         $log->setErrorMessage($result['error'] ?? null);

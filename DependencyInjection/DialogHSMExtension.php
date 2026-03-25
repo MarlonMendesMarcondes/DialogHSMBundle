@@ -21,9 +21,11 @@ class DialogHSMExtension extends Extension implements PrependExtensionInterface
         // if MAUTIC_MESSENGER_DSN_WHATSAPP is absent — breaking the entire app.
         $container->setParameter('env(MAUTIC_MESSENGER_DSN_WHATSAPP)', 'null://null');
         $container->setParameter('env(MAUTIC_MESSENGER_DSN_WHATSAPP_DIRECT)', 'null://null');
+        $container->setParameter('env(MAUTIC_MESSENGER_DSN_WHATSAPP_FAILED)', 'null://null');
 
         $container->prependExtensionConfig('framework', [
             'messenger' => [
+                'failure_transport' => 'whatsapp_failed',
                 'transports' => [
                     'whatsapp' => [
                         'dsn'             => '%env(MAUTIC_MESSENGER_DSN_WHATSAPP)%',
@@ -32,18 +34,30 @@ class DialogHSMExtension extends Extension implements PrependExtensionInterface
                             'exchange'   => ['name' => '', 'type' => 'direct'],
                         ],
                         'retry_strategy'  => [
-                            'max_retries' => 0,
+                            'max_retries'  => 3,
+                            'delay'        => 5000,
+                            'multiplier'   => 2,
+                            'max_delay'    => 60000,
                         ],
                     ],
                     'whatsapp_direct' => [
                         'dsn'            => '%env(MAUTIC_MESSENGER_DSN_WHATSAPP_DIRECT)%',
                         'retry_strategy' => [
-                            'max_retries' => 0,
+                            'max_retries' => 3,
+                            'delay'       => 5000,
+                            'multiplier'  => 2,
+                            'max_delay'   => 60000,
+                        ],
+                    ],
+                    'whatsapp_failed' => [
+                        'dsn'     => '%env(MAUTIC_MESSENGER_DSN_WHATSAPP_FAILED)%',
+                        'options' => [
+                            'auto_setup' => false,
                         ],
                     ],
                 ],
                 'routing' => [
-                    SendWhatsAppMessage::class     => 'whatsapp',
+                    SendWhatsAppMessage::class       => 'whatsapp',
                     SendWhatsAppDirectMessage::class => 'whatsapp_direct',
                 ],
             ],
