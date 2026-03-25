@@ -10,6 +10,10 @@ use Mautic\CoreBundle\Doctrine\Mapping\ClassMetadataBuilder;
 
 class MessageLog
 {
+    public const STATUS_SENT   = 'sent';
+    public const STATUS_FAILED = 'failed';
+    public const STATUS_DLQ    = 'dlq';
+
     private ?int $id = null;
     private ?int $leadId = null;
     private ?string $senderName = null;
