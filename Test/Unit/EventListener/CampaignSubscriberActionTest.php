@@ -95,7 +95,7 @@ class CampaignSubscriberActionTest extends TestCase
         return $mock;
     }
 
-    private function buildContact(string $phone = '11999999999', int $id = 1): Lead&MockObject
+    private function buildContact(string $phone = '+5511999999999', int $id = 1): Lead&MockObject
     {
         $mock = $this->createMock(Lead::class);
         $mock->method('getLeadPhoneNumber')->willReturn($phone);
@@ -145,7 +145,7 @@ class CampaignSubscriberActionTest extends TestCase
             ->method('getEntity')
             ->willReturn($this->buildWhatsAppNumber());
 
-        $contact = $this->buildContact('11999999999', 1);
+        $contact = $this->buildContact('+5511999999999', 1);
         $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
 
         // Handler deve ser chamado uma vez e retornar sucesso
@@ -173,7 +173,7 @@ class CampaignSubscriberActionTest extends TestCase
             ->method('getEntity')
             ->willReturn($this->buildWhatsAppNumber());
 
-        $contact = $this->buildContact('11999999999', 1);
+        $contact = $this->buildContact('+5511999999999', 1);
         $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp_queue', [1 => $contact]);
 
         // Bus deve ser chamado uma vez
@@ -246,7 +246,7 @@ class CampaignSubscriberActionTest extends TestCase
         $this->subscriber->onCampaignTriggerAction($event);
     }
 
-    public function testDirectSendPassesWithErrorWhenContactHasNoPhone(): void
+    public function testDirectSendFailsWhenContactHasNoPhone(): void
     {
         $this->enableIntegration();
 
@@ -258,8 +258,29 @@ class CampaignSubscriberActionTest extends TestCase
         $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
 
         $event->expects($this->once())
-            ->method('passWithError')
-            ->with($this->anything(), 'dialoghsm.campaign.error.missing_phone');
+            ->method('fail')
+            ->with($this->anything(), 'dialoghsm.campaign.error.invalid_phone');
+
+        $this->mockHandler->expects($this->never())->method('__invoke');
+
+        $this->subscriber->onCampaignTriggerAction($event);
+    }
+
+    public function testDirectSendFailsWhenPhoneIsNotE164(): void
+    {
+        $this->enableIntegration();
+
+        $this->mockNumberModel
+            ->method('getEntity')
+            ->willReturn($this->buildWhatsAppNumber());
+
+        // Sem +, número inválido (não E.164)
+        $contact = $this->buildContact(phone: '5511999999999');
+        $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
+
+        $event->expects($this->once())
+            ->method('fail')
+            ->with($this->anything(), 'dialoghsm.campaign.error.invalid_phone');
 
         $this->mockHandler->expects($this->never())->method('__invoke');
 
@@ -275,9 +296,9 @@ class CampaignSubscriberActionTest extends TestCase
             ->willReturn($this->buildWhatsAppNumber());
 
         $contacts = [
-            1 => $this->buildContact('11999999991', 1),
-            2 => $this->buildContact('11999999992', 2),
-            3 => $this->buildContact('11999999993', 3),
+            1 => $this->buildContact('+5511999999991', 1),
+            2 => $this->buildContact('+5511999999992', 2),
+            3 => $this->buildContact('+5511999999993', 3),
         ];
 
         $event = $this->buildPendingEvent('dialoghsm.send_whatsapp', $contacts);
@@ -303,9 +324,9 @@ class CampaignSubscriberActionTest extends TestCase
             ->willReturn($this->buildWhatsAppNumber());
 
         $contacts = [
-            1 => $this->buildContact('11999999991', 1),
-            2 => $this->buildContact('11999999992', 2),
-            3 => $this->buildContact('11999999993', 3),
+            1 => $this->buildContact('+5511999999991', 1),
+            2 => $this->buildContact('+5511999999992', 2),
+            3 => $this->buildContact('+5511999999993', 3),
         ];
 
         // batch_limit=2: agrupa envios, mas todos os 3 contatos devem ser processados
@@ -333,7 +354,7 @@ class CampaignSubscriberActionTest extends TestCase
             ->method('getEntity')
             ->willReturn($this->buildWhatsAppNumber());
 
-        $contact = $this->buildContact('11999999999', 1);
+        $contact = $this->buildContact('+5511999999999', 1);
         $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
 
         $this->mockHandler
@@ -363,9 +384,9 @@ class CampaignSubscriberActionTest extends TestCase
             ->willReturn($this->buildWhatsAppNumber());
 
         $contacts = [
-            1 => $this->buildContact('11999999991', 1),
-            2 => $this->buildContact('11999999992', 2),
-            3 => $this->buildContact('11999999993', 3),
+            1 => $this->buildContact('+5511999999991', 1),
+            2 => $this->buildContact('+5511999999992', 2),
+            3 => $this->buildContact('+5511999999993', 3),
         ];
 
         $event = $this->buildPendingEvent(
@@ -399,8 +420,8 @@ class CampaignSubscriberActionTest extends TestCase
             ->willReturn($this->buildWhatsAppNumber());
 
         $contacts = [
-            1 => $this->buildContact('11999999991', 1),
-            2 => $this->buildContact('11999999992', 2),
+            1 => $this->buildContact('+5511999999991', 1),
+            2 => $this->buildContact('+5511999999992', 2),
         ];
 
         $event = $this->buildPendingEvent(
@@ -434,10 +455,10 @@ class CampaignSubscriberActionTest extends TestCase
             ->willReturn($this->buildWhatsAppNumber());
 
         $contacts = [
-            1 => $this->buildContact('11999999991', 1),
-            2 => $this->buildContact('11999999992', 2),
-            3 => $this->buildContact('11999999993', 3),
-            4 => $this->buildContact('11999999994', 4),
+            1 => $this->buildContact('+5511999999991', 1),
+            2 => $this->buildContact('+5511999999992', 2),
+            3 => $this->buildContact('+5511999999993', 3),
+            4 => $this->buildContact('+5511999999994', 4),
         ];
 
         $event = $this->buildPendingEvent(
@@ -471,9 +492,9 @@ class CampaignSubscriberActionTest extends TestCase
             ->willReturn($this->buildWhatsAppNumber());
 
         $contacts = [
-            1 => $this->buildContact('11999999991', 1),
-            2 => $this->buildContact('11999999992', 2),
-            3 => $this->buildContact('11999999993', 3),
+            1 => $this->buildContact('+5511999999991', 1),
+            2 => $this->buildContact('+5511999999992', 2),
+            3 => $this->buildContact('+5511999999993', 3),
         ];
 
         $event = $this->buildPendingEvent(
@@ -508,9 +529,9 @@ class CampaignSubscriberActionTest extends TestCase
             ->willReturn($this->buildWhatsAppNumber());
 
         $contacts = [
-            1 => $this->buildContact('11999999991', 1),
-            2 => $this->buildContact('11999999992', 2),
-            3 => $this->buildContact('11999999993', 3),
+            1 => $this->buildContact('+5511999999991', 1),
+            2 => $this->buildContact('+5511999999992', 2),
+            3 => $this->buildContact('+5511999999993', 3),
         ];
 
         $event = $this->buildPendingEvent(
@@ -543,10 +564,10 @@ class CampaignSubscriberActionTest extends TestCase
             ->willReturn($this->buildWhatsAppNumber());
 
         $contacts = [
-            1 => $this->buildContact('11999999991', 1),
-            2 => $this->buildContact('11999999992', 2),
-            3 => $this->buildContact('11999999993', 3),
-            4 => $this->buildContact('11999999994', 4),
+            1 => $this->buildContact('+5511999999991', 1),
+            2 => $this->buildContact('+5511999999992', 2),
+            3 => $this->buildContact('+5511999999993', 3),
+            4 => $this->buildContact('+5511999999994', 4),
         ];
 
         $event = $this->buildPendingEvent(
@@ -572,9 +593,9 @@ class CampaignSubscriberActionTest extends TestCase
         $this->subscriber->onCampaignTriggerAction($event);
     }
 
-    public function testDirectSendSkipsContactWithoutPhoneButContinuesBatch(): void
+    public function testDirectSendSkipsContactWithInvalidPhoneButContinuesBatch(): void
     {
-        // Contato sem telefone no meio do lote → não interrompe os demais
+        // Contato com telefone inválido (sem +) no meio do lote → não interrompe os demais
         $this->enableIntegration();
 
         $this->mockNumberModel
@@ -582,9 +603,9 @@ class CampaignSubscriberActionTest extends TestCase
             ->willReturn($this->buildWhatsAppNumber());
 
         $contacts = [
-            1 => $this->buildContact('11999999991', 1),
-            2 => $this->buildContact('', 2),             // sem telefone
-            3 => $this->buildContact('11999999993', 3),
+            1 => $this->buildContact('+5511999999991', 1),
+            2 => $this->buildContact('', 2),              // sem telefone → inválido
+            3 => $this->buildContact('+5511999999993', 3),
         ];
 
         $event = $this->buildPendingEvent(
@@ -593,7 +614,7 @@ class CampaignSubscriberActionTest extends TestCase
             ['batch_limit' => 2, 'send_delay' => 0]
         );
 
-        // Handler chamado apenas 2 vezes (contatos com telefone)
+        // Handler chamado apenas 2 vezes (contatos com telefone válido)
         $this->mockHandler
             ->expects($this->exactly(2))
             ->method('__invoke')
@@ -601,8 +622,8 @@ class CampaignSubscriberActionTest extends TestCase
 
         $event->expects($this->exactly(2))->method('pass');
         $event->expects($this->once())
-            ->method('passWithError')
-            ->with($this->anything(), 'dialoghsm.campaign.error.missing_phone');
+            ->method('fail')
+            ->with($this->anything(), 'dialoghsm.campaign.error.invalid_phone');
 
         $this->subscriber->onCampaignTriggerAction($event);
     }
@@ -621,9 +642,9 @@ class CampaignSubscriberActionTest extends TestCase
             ->willReturn($this->buildWhatsAppNumber());
 
         $contacts = [
-            1 => $this->buildContact('11999999991', 1),
-            2 => $this->buildContact('11999999992', 2),
-            3 => $this->buildContact('11999999993', 3),
+            1 => $this->buildContact('+5511999999991', 1),
+            2 => $this->buildContact('+5511999999992', 2),
+            3 => $this->buildContact('+5511999999993', 3),
         ];
 
         $event = $this->buildPendingEvent(
@@ -658,7 +679,7 @@ class CampaignSubscriberActionTest extends TestCase
             ->method('getEntity')
             ->willReturn($this->buildWhatsAppNumber('VALID_API_KEY_12345', 'https://api.360dialog.com/v1/messages'));
 
-        $contact = $this->buildContact('11888888888', 5);
+        $contact = $this->buildContact('+5511888888888', 5);
         $event   = $this->buildPendingEvent(
             'dialoghsm.send_whatsapp_queue',
             [5 => $contact],
@@ -680,7 +701,7 @@ class CampaignSubscriberActionTest extends TestCase
         $this->subscriber->onCampaignTriggerActionQueue($event);
 
         $this->assertInstanceOf(SendWhatsAppMessage::class, $capturedMessage);
-        $this->assertEquals('11888888888', $capturedMessage->phone);
+        $this->assertEquals('+5511888888888', $capturedMessage->phone);
         $this->assertEquals('VALID_API_KEY_12345', $capturedMessage->apiKey);
         $this->assertEquals('https://api.360dialog.com/v1/messages', $capturedMessage->baseUrl);
         $this->assertEquals(5, $capturedMessage->leadId);
@@ -695,7 +716,7 @@ class CampaignSubscriberActionTest extends TestCase
             ->method('getEntity')
             ->willReturn($this->buildWhatsAppNumber());
 
-        $contact = $this->buildContact('11999999999', 1);
+        $contact = $this->buildContact('+5511999999999', 1);
         $event   = $this->buildPendingEvent(
             'dialoghsm.send_whatsapp_queue',
             [1 => $contact],
@@ -722,9 +743,9 @@ class CampaignSubscriberActionTest extends TestCase
             ->willReturn($this->buildWhatsAppNumber());
 
         $contacts = [
-            1 => $this->buildContact('11999999991', 1),
-            2 => $this->buildContact('11999999992', 2),
-            3 => $this->buildContact('11999999993', 3),
+            1 => $this->buildContact('+5511999999991', 1),
+            2 => $this->buildContact('+5511999999992', 2),
+            3 => $this->buildContact('+5511999999993', 3),
         ];
 
         $event = $this->buildPendingEvent(
@@ -759,9 +780,9 @@ class CampaignSubscriberActionTest extends TestCase
             ->willReturn($this->buildWhatsAppNumber());
 
         $contacts = [
-            1 => $this->buildContact('11999999991', 1),
-            2 => $this->buildContact('11999999992', 2),
-            3 => $this->buildContact('11999999993', 3),
+            1 => $this->buildContact('+5511999999991', 1),
+            2 => $this->buildContact('+5511999999992', 2),
+            3 => $this->buildContact('+5511999999993', 3),
         ];
 
         // batch_limit=2 + send_delay=0: todos os 3 contatos despachados (queue nunca dorme)
@@ -797,7 +818,7 @@ class CampaignSubscriberActionTest extends TestCase
 
         $this->mockNumberModel->method('getEntity')->willReturn($number);
 
-        $contact = $this->buildContact('11999999999', 1);
+        $contact = $this->buildContact('+5511999999999', 1);
         $event   = $this->buildPendingEvent(
             'dialoghsm.send_whatsapp_queue',
             [1 => $contact],
@@ -832,7 +853,7 @@ class CampaignSubscriberActionTest extends TestCase
 
         $this->mockNumberModel->method('getEntity')->willReturn($number);
 
-        $contact = $this->buildContact('11999999999', 1);
+        $contact = $this->buildContact('+5511999999999', 1);
         $event   = $this->buildPendingEvent(
             'dialoghsm.send_whatsapp_queue',
             [1 => $contact],
@@ -868,7 +889,7 @@ class CampaignSubscriberActionTest extends TestCase
 
         $this->mockNumberModel->method('getEntity')->willReturn($number);
 
-        $contact = $this->buildContact('11999999999', 1);
+        $contact = $this->buildContact('+5511999999999', 1);
         $event   = $this->buildPendingEvent(
             'dialoghsm.send_whatsapp_queue',
             [1 => $contact],
@@ -904,7 +925,7 @@ class CampaignSubscriberActionTest extends TestCase
 
         $this->mockNumberModel->method('getEntity')->willReturn($number);
 
-        $contact = $this->buildContact('11999999999', 1);
+        $contact = $this->buildContact('+5511999999999', 1);
         $event   = $this->buildPendingEvent(
             'dialoghsm.send_whatsapp_queue',
             [1 => $contact],
@@ -945,7 +966,7 @@ class CampaignSubscriberActionTest extends TestCase
         $this->subscriber->onCampaignTriggerActionQueue($event);
     }
 
-    public function testQueueSendPassesWithErrorWhenContactHasNoPhone(): void
+    public function testQueueSendFailsWhenContactHasInvalidPhone(): void
     {
         $this->enableIntegration();
 
@@ -957,8 +978,8 @@ class CampaignSubscriberActionTest extends TestCase
         $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp_queue', [1 => $contact]);
 
         $event->expects($this->once())
-            ->method('passWithError')
-            ->with($this->anything(), 'dialoghsm.campaign.error.missing_phone');
+            ->method('fail')
+            ->with($this->anything(), 'dialoghsm.campaign.error.invalid_phone');
 
         $this->mockBus->expects($this->never())->method('dispatch');
 
@@ -973,7 +994,7 @@ class CampaignSubscriberActionTest extends TestCase
             ->method('getEntity')
             ->willReturn($this->buildWhatsAppNumber('VALID_API_KEY_12345', 'https://api.360dialog.com/v1/messages'));
 
-        $contact = $this->buildContact('11888888888', 5);
+        $contact = $this->buildContact('+5511888888888', 5);
         $event   = $this->buildPendingEvent(
             'dialoghsm.send_whatsapp',
             [5 => $contact],
@@ -993,7 +1014,7 @@ class CampaignSubscriberActionTest extends TestCase
         $this->subscriber->onCampaignTriggerAction($event);
 
         $this->assertInstanceOf(SendWhatsAppMessage::class, $capturedMessage);
-        $this->assertEquals('11888888888', $capturedMessage->phone);
+        $this->assertEquals('+5511888888888', $capturedMessage->phone);
         $this->assertEquals('VALID_API_KEY_12345', $capturedMessage->apiKey);
         $this->assertEquals('https://api.360dialog.com/v1/messages', $capturedMessage->baseUrl);
         $this->assertEquals(5, $capturedMessage->leadId);
@@ -1071,7 +1092,7 @@ class CampaignSubscriberActionTest extends TestCase
             ->method('getEntity')
             ->willReturn($this->buildWhatsAppNumber());
 
-        $contact = $this->buildContact('11999999999', 1);
+        $contact = $this->buildContact('+5511999999999', 1);
         $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
 
         // Handler lança exceção → subscriber captura e trata como falha
@@ -1144,7 +1165,7 @@ class CampaignSubscriberActionTest extends TestCase
         $number = $this->buildWhatsAppNumber('VALID_API_KEY_12345', ''); // sem baseUrl no número
         $this->mockNumberModel->method('getEntity')->willReturn($number);
 
-        $contact = $this->buildContact('11999999999', 1);
+        $contact = $this->buildContact('+5511999999999', 1);
         $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
 
         $this->mockHandler
@@ -1167,7 +1188,7 @@ class CampaignSubscriberActionTest extends TestCase
         $number = $this->buildWhatsAppNumber('VALID_API_KEY_12345', ''); // sem baseUrl
         $this->mockNumberModel->method('getEntity')->willReturn($number);
 
-        $contact = $this->buildContact('11999999999', 1);
+        $contact = $this->buildContact('+5511999999999', 1);
         $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
 
         $capturedMessage = null;
@@ -1191,7 +1212,7 @@ class CampaignSubscriberActionTest extends TestCase
         $number = $this->buildWhatsAppNumber('VALID_API_KEY_12345', ''); // sem baseUrl
         $this->mockNumberModel->method('getEntity')->willReturn($number);
 
-        $contact = $this->buildContact('11999999999', 1);
+        $contact = $this->buildContact('+5511999999999', 1);
         $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
 
         $capturedMessage = null;
@@ -1220,7 +1241,7 @@ class CampaignSubscriberActionTest extends TestCase
             ->method('getEntity')
             ->willReturn($this->buildWhatsAppNumber());
 
-        $contact = $this->buildContact('11999999999', 1);
+        $contact = $this->buildContact('+5511999999999', 1);
         $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
 
         // Handler NÃO deve ser chamado diretamente
@@ -1248,9 +1269,9 @@ class CampaignSubscriberActionTest extends TestCase
             ->willReturn($this->buildWhatsAppNumber());
 
         $contacts = [
-            1 => $this->buildContact('11999999991', 1),
-            2 => $this->buildContact('11999999992', 2),
-            3 => $this->buildContact('11999999993', 3),
+            1 => $this->buildContact('+5511999999991', 1),
+            2 => $this->buildContact('+5511999999992', 2),
+            3 => $this->buildContact('+5511999999993', 3),
         ];
 
         $event = $this->buildPendingEvent(
@@ -1287,7 +1308,7 @@ class CampaignSubscriberActionTest extends TestCase
             ->method('getEntity')
             ->willReturn($this->buildWhatsAppNumber());
 
-        $contact = $this->buildContact('11999999999', 1);
+        $contact = $this->buildContact('+5511999999999', 1);
         $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact], [
             'payload_data' => [
                 'list' => [
@@ -1323,7 +1344,7 @@ class CampaignSubscriberActionTest extends TestCase
             ->method('getEntity')
             ->willReturn($this->buildWhatsAppNumber());
 
-        $contact = $this->buildContact('11999999999', 1);
+        $contact = $this->buildContact('+5511999999999', 1);
         $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact], [
             'payload_data' => [
                 'list' => [
@@ -1359,7 +1380,7 @@ class CampaignSubscriberActionTest extends TestCase
             ->method('getEntity')
             ->willReturn($this->buildWhatsAppNumber());
 
-        $contact = $this->buildContact('11999999999', 1);
+        $contact = $this->buildContact('+5511999999999', 1);
         $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact], [
             'payload_data' => [
                 'list' => [
@@ -1395,7 +1416,7 @@ class CampaignSubscriberActionTest extends TestCase
             ->method('getEntity')
             ->willReturn($this->buildWhatsAppNumber());
 
-        $contact = $this->buildContact('11999999999', 1);
+        $contact = $this->buildContact('+5511999999999', 1);
         $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
 
         $this->mockHandler
@@ -1409,5 +1430,90 @@ class CampaignSubscriberActionTest extends TestCase
 
         $subscriber = $this->makeSubscriber('null://null');
         $subscriber->onCampaignTriggerAction($event);
+    }
+
+    // -------------------------------------------------------------------------
+    // Testes: validação E.164
+    // -------------------------------------------------------------------------
+
+    /**
+     * @dataProvider validE164Provider
+     */
+    public function testDirectSendAcceptsValidE164Phone(string $phone): void
+    {
+        $this->enableIntegration();
+
+        $this->mockNumberModel
+            ->method('getEntity')
+            ->willReturn($this->buildWhatsAppNumber());
+
+        $contact = $this->buildContact(phone: $phone);
+        $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
+
+        $this->mockHandler
+            ->expects($this->once())
+            ->method('__invoke')
+            ->willReturn(['success' => true, 'error' => null, 'http_status' => 200, 'response' => null]);
+
+        $event->expects($this->never())->method('fail');
+        $event->expects($this->once())->method('pass');
+
+        $this->subscriber->onCampaignTriggerAction($event);
+    }
+
+    /**
+     * @return array<string, array{string}>
+     */
+    public static function validE164Provider(): array
+    {
+        return [
+            'brasil celular'    => ['+5511999999999'],
+            'brasil fixo'       => ['+551133334444'],
+            'EUA'               => ['+12025551234'],
+            'mínimo 7 dígitos'  => ['+1234567'],
+            'máximo 15 dígitos' => ['+123456789012345'],
+        ];
+    }
+
+    /**
+     * @dataProvider invalidE164Provider
+     */
+    public function testDirectSendRejectsInvalidE164Phone(string $phone): void
+    {
+        $this->enableIntegration();
+
+        $this->mockNumberModel
+            ->method('getEntity')
+            ->willReturn($this->buildWhatsAppNumber());
+
+        $contact = $this->buildContact(phone: $phone);
+        $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
+
+        $event->expects($this->once())
+            ->method('fail')
+            ->with($this->anything(), 'dialoghsm.campaign.error.invalid_phone');
+
+        $this->mockHandler->expects($this->never())->method('__invoke');
+
+        $this->subscriber->onCampaignTriggerAction($event);
+    }
+
+    /**
+     * @return array<string, array{string}>
+     */
+    public static function invalidE164Provider(): array
+    {
+        return [
+            'vazio'               => [''],
+            'sem +'               => ['5511999999999'],
+            'só +'                => ['+'],
+            'apenas zeros'        => ['+0000000'],
+            'começa com +0'       => ['+0123456789'],
+            'curto demais'        => ['+12345'],
+            'longo demais'        => ['+1234567890123456'],
+            'letras'              => ['+5511abc9999'],
+            'espaços'             => ['+55 11 99999 9999'],
+            'traços'              => ['+55-11-99999-9999'],
+        ];
     }
 }
