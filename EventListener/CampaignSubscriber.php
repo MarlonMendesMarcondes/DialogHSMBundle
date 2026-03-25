@@ -182,10 +182,10 @@ class CampaignSubscriber implements EventSubscriberInterface
         foreach ($contacts as $logId => $contact) {
             $phone = $contact->getLeadPhoneNumber();
 
-            if (empty($phone)) {
-                $event->passWithError(
+            if (!$this->isValidE164($phone)) {
+                $event->fail(
                     $event->getPending()->get($logId),
-                    'dialoghsm.campaign.error.missing_phone'
+                    'dialoghsm.campaign.error.invalid_phone'
                 );
                 continue;
             }
@@ -261,6 +261,15 @@ class CampaignSubscriber implements EventSubscriberInterface
         }
 
         return $result;
+    }
+
+    /**
+     * Valida formato E.164: começa com +, seguido de 7 a 15 dígitos.
+     * Números vazios, sem prefixo + ou com quantidade errada de dígitos são rejeitados.
+     */
+    private function isValidE164(string $phone): bool
+    {
+        return (bool) preg_match('/^\+[1-9]\d{6,14}$/', $phone);
     }
 
     /**

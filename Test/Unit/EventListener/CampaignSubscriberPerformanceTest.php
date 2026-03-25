@@ -97,7 +97,7 @@ class CampaignSubscriberPerformanceTest extends TestCase
         $contacts = [];
         for ($i = 1; $i <= $count; ++$i) {
             $mock = $this->createMock(Lead::class);
-            $mock->method('getLeadPhoneNumber')->willReturn("119{$i}");
+            $mock->method('getLeadPhoneNumber')->willReturn("+5511900{$i}");
             $mock->method('getId')->willReturn($i);
             $mock->method('getProfileFields')->willReturn([]);
             $contacts[$i] = $mock;
