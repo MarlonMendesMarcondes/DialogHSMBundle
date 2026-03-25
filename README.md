@@ -79,7 +79,7 @@ Acesse **Canais → Números WhatsApp → Novo**.
 | Campo          | Descrição                                                                            | Obrigatório |
 |----------------|--------------------------------------------------------------------------------------|-------------|
 | **Nome**       | Identificador amigável (ex: `Comercial SP`)                                          | ✅          |
-| **Telefone**   | Número remetente no formato internacional (ex: `+5511999999999`)                     | ✅          |
+| **Telefone**   | Número remetente no formato E.164 (ex: `+5511999999999`)                             | ✅          |
 | **API Key**    | Chave D360-API-KEY fornecida pela 360dialog                                          | ✅          |
 | **URL Base**   | URL customizada da API. Se vazio, usa a URL global configurada no plugin             | ❌          |
 | **Fila Massiva (RabbitMQ)** | Nome da fila para envio massivo em qualquer horário (ex: `queue`)       | ❌          |
@@ -137,6 +137,14 @@ MAUTIC_MESSENGER_DSN_WHATSAPP=amqp://user:password@localhost:5672/%2f
 
 > Em Docker, substitua `localhost` pelo nome do serviço RabbitMQ (ex: `rabbitmq`).
 
+**Dead Letter Queue (opcional):** mensagens que falharam em todas as 3 tentativas de reenvio são marcadas como `dlq` no log. Por padrão são descartadas. Para armazená-las em uma fila separada:
+
+```bash
+MAUTIC_MESSENGER_DSN_WHATSAPP_FAILED=amqp://user:password@localhost:5672/%2f?queues[]=whatsapp_failed
+```
+
+Sem essa variável o comportamento é idêntico — apenas o status no log muda para `dlq`.
+
 ### 2. Criar as filas no RabbitMQ
 
 Crie as filas com os **mesmos nomes** configurados nos campos *Fila Massiva* e *Fila Batch* de cada número:
@@ -193,7 +201,7 @@ Acesse **Canais → Logs de Envio** para auditar todos os envios realizados pelo
 | **Contato**   | Link para o perfil do contato no Mautic                |
 | **Telefone**  | Número de destino                                      |
 | **Template**  | Nome do template HSM enviado                           |
-| **Status**    | `sent` (verde) ou `failed` (vermelho)                  |
+| **Status**    | `sent` (verde), `failed` (vermelho) ou `dlq` (amarelo) |
 | **HTTP**      | Código de resposta da API 360dialog                    |
 | **Erro**      | Mensagem de erro quando o envio falha                  |
 
@@ -212,6 +220,10 @@ php bin/console cache:clear
 - Verifique se o plugin está publicado em Configurações → Plugins
 - Confirme que a API Key do número está correta
 - Consulte os logs: `var/logs/mautic_prod-YYYY-MM-DD.php`
+
+**Contatos não recebem mensagem (status `failed` com `invalid_phone`):**
+- O telefone do contato deve estar no formato E.164: `+` seguido do código do país sem zeros à esquerda, ex: `+5511999999999`
+- Números sem `+`, com espaços ou com código de país `0xx` são rejeitados antes do envio
 
 **Consumer não finaliza:**
 - Sempre use `--time-limit` ao rodar manualmente
