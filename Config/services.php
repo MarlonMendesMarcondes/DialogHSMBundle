@@ -20,6 +20,10 @@ return function (ContainerConfigurator $configurator): void {
 
     $services->alias('mautic.dialoghsm.model.whatsappnumber', \MauticPlugin\DialogHSMBundle\Model\WhatsAppNumberModel::class);
 
+    $services->set(\MauticPlugin\DialogHSMBundle\Security\Permissions\DialogHSMPermissions::class)
+        ->autowire()
+        ->tag('mautic.permissions');
+
     $services->set(\MauticPlugin\DialogHSMBundle\EventListener\CampaignSubscriber::class)
         ->autowire()
         ->autoconfigure()
