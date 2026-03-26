@@ -4,14 +4,15 @@ declare(strict_types=1);
 
 namespace MauticPlugin\DialogHSMBundle\Security\Permissions;
 
+use Mautic\CoreBundle\Helper\CoreParametersHelper;
 use Mautic\CoreBundle\Security\Permissions\AbstractPermissions;
 use Symfony\Component\Form\FormBuilderInterface;
 
 class DialogHSMPermissions extends AbstractPermissions
 {
-    public function __construct($params)
+    public function __construct(CoreParametersHelper $coreParametersHelper)
     {
-        parent::__construct($params);
+        parent::__construct($coreParametersHelper->all());
 
         $this->addStandardPermissions('numbers');
     }
