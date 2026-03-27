@@ -21,7 +21,7 @@ class DialogHSMApi
      *
      * @param array<string, string> $payloadData key-value pairs configurados na campanha
      *
-     * @return array{success: bool, response: array|null, error: string|null, http_status: int|null}
+     * @return array{success: bool, response: array|null, error: string|null, http_status: int|null, wamid: string|null}
      */
     public function sendMessage(string $apiKey, string $baseUrl, string $mobile, array $payloadData): array
     {
@@ -51,9 +51,12 @@ class DialogHSMApi
 
 
             if ($statusCode >= 200 && $statusCode < 300) {
+                $wamid = $responseBody['messages'][0]['id'] ?? null;
+
                 $this->logger->info('DialogHSM: Mensagem enviada com sucesso', [
                     'http_status' => $statusCode,
                     'template'    => $payload['template']['name'] ?? '',
+                    'wamid'       => $wamid,
                 ]);
 
                 return [
@@ -61,6 +64,7 @@ class DialogHSMApi
                     'response'    => $responseBody,
                     'error'       => null,
                     'http_status' => $statusCode,
+                    'wamid'       => $wamid,
                 ];
             }
 
@@ -80,6 +84,7 @@ class DialogHSMApi
                 'response'    => $responseBody,
                 'error'       => "HTTP {$statusCode}: {$errorDetail}",
                 'http_status' => $statusCode,
+                'wamid'       => null,
             ];
         } catch (RequestException $e) {
             $statusCode   = null;
@@ -100,6 +105,7 @@ class DialogHSMApi
                 'response'    => $responseBody,
                 'error'       => $e->getMessage(),
                 'http_status' => $statusCode,
+                'wamid'       => null,
             ];
         } catch (\Throwable $e) {
             $this->logger->error('DialogHSM: Erro inesperado', [
@@ -111,6 +117,7 @@ class DialogHSMApi
                 'response'    => null,
                 'error'       => $e->getMessage(),
                 'http_status' => null,
+                'wamid'       => null,
             ];
         }
     }

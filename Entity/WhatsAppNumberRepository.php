@@ -63,6 +63,11 @@ class WhatsAppNumberRepository extends CommonRepository
         return array_values(array_filter(array_column($rows, 'q')));
     }
 
+    public function findByWebhookToken(string $token): ?WhatsAppNumber
+    {
+        return $this->findOneBy(['webhookToken' => $token]);
+    }
+
     /**
      * @param string|array $search
      *

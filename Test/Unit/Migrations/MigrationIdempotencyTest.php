@@ -18,6 +18,7 @@ use MauticPlugin\DialogHSMBundle\Migrations\Version_1_0_6;
 use MauticPlugin\DialogHSMBundle\Migrations\Version_1_0_7;
 use MauticPlugin\DialogHSMBundle\Migrations\Version_1_0_8;
 use MauticPlugin\DialogHSMBundle\Migrations\Version_1_1_0;
+use MauticPlugin\DialogHSMBundle\Migrations\Version_1_1_1;
 use Mautic\IntegrationsBundle\Migration\AbstractMigration;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
@@ -256,6 +257,7 @@ class MigrationIdempotencyTest extends TestCase
 
     public function testV104SqlUsesIfNotExistsAndWhereNotExists(): void
     {
+        // false = coluna não encontrada no INFORMATION_SCHEMA → ADD COLUMN é gerado
         $this->mockConn->method('fetchOne')->willReturn('0');
 
         $sql = implode(' ', $this->collectSql($this->migration(Version_1_0_4::class)));
@@ -441,11 +443,58 @@ class MigrationIdempotencyTest extends TestCase
         $this->assertStringContainsString('campaign_event_id', $sql);
     }
 
-    public function testV110SqlAddsIndexWithIfNotExists(): void
+    public function testV110SqlAddsIndex(): void
     {
         $sql = implode(' ', $this->collectSql($this->migration(Version_1_1_0::class)));
         $this->assertStringContainsStringIgnoringCase('ADD INDEX IF NOT EXISTS', $sql);
         $this->assertStringContainsString('campaign_id_idx', $sql);
+    }
+
+    // =========================================================================
+    // Version_1_1_1 — adiciona wamid e webhook_token
+    // =========================================================================
+
+    public function testV120ApplicableWhenWamidAbsent(): void
+    {
+        $migration = $this->migration(Version_1_1_1::class);
+        $this->assertTrue($this->callProtected($migration, 'isApplicable', $this->schemaWithTable([])));
+    }
+
+    public function testV120NotApplicableWhenWamidPresent(): void
+    {
+        $migration = $this->migration(Version_1_1_1::class);
+        $this->assertFalse($this->callProtected($migration, 'isApplicable', $this->schemaWithTable(['wamid'])));
+    }
+
+    public function testV120NotApplicableWhenTableAbsent(): void
+    {
+        $migration = $this->migration(Version_1_1_1::class);
+        $this->assertFalse($this->callProtected($migration, 'isApplicable', $this->schemaWithoutTable()));
+    }
+
+    public function testV120SqlAddsWamidColumn(): void
+    {
+        $sql = implode(' ', $this->collectSql($this->migration(Version_1_1_1::class)));
+        $this->assertStringContainsStringIgnoringCase('ADD COLUMN IF NOT EXISTS', $sql);
+        $this->assertStringContainsString('wamid', $sql);
+    }
+
+    public function testV120SqlAddsWamidIndex(): void
+    {
+        $sql = implode(' ', $this->collectSql($this->migration(Version_1_1_1::class)));
+        $this->assertStringContainsString('wamid_idx', $sql);
+    }
+
+    public function testV120SqlAddsWebhookTokenColumn(): void
+    {
+        $sql = implode(' ', $this->collectSql($this->migration(Version_1_1_1::class)));
+        $this->assertStringContainsString('webhook_token', $sql);
+    }
+
+    public function testV120SqlAddsWebhookTokenUniqueIndex(): void
+    {
+        $sql = implode(' ', $this->collectSql($this->migration(Version_1_1_1::class)));
+        $this->assertStringContainsString('webhook_token_uniq', $sql);
     }
 
     // =========================================================================
@@ -476,6 +525,7 @@ class MigrationIdempotencyTest extends TestCase
             [Version_1_0_7::class],
             [Version_1_0_8::class],
             [Version_1_1_0::class],
+            [Version_1_1_1::class],
         ];
     }
 }

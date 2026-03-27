@@ -38,6 +38,11 @@ class MessageLogRepository extends CommonRepository
             ->getSingleScalarResult();
     }
 
+    public function findByWamid(string $wamid): ?MessageLog
+    {
+        return $this->findOneBy(['wamid' => $wamid]);
+    }
+
     /**
      * Remove os registros mais antigos, mantendo no máximo $maxRecords.
      */
