@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace MauticPlugin\DialogHSMBundle\EventListener;
 
+use Doctrine\ORM\EntityManagerInterface;
 use Mautic\CampaignBundle\CampaignEvents;
 use Mautic\CampaignBundle\Event\CampaignBuilderEvent;
 use Mautic\CampaignBundle\Event\PendingEvent;
 use Mautic\IntegrationsBundle\Helper\IntegrationsHelper;
 use Mautic\LeadBundle\Helper\TokenHelper;
 use MauticPlugin\DialogHSMBundle\DialogHSMEvents;
+use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
 use MauticPlugin\DialogHSMBundle\Form\Type\SendWhatsAppQueueType;
 use MauticPlugin\DialogHSMBundle\Form\Type\SendWhatsAppType;
@@ -31,6 +33,7 @@ class CampaignSubscriber implements EventSubscriberInterface
         private LoggerInterface $logger,
         private WhatsAppNumberModel $whatsAppNumberModel,
         private SendWhatsAppMessageHandler $handler,
+        private EntityManagerInterface $entityManager,
         private string $directTransportDsn = 'null://null',
     ) {
     }
@@ -144,23 +147,22 @@ class CampaignSubscriber implements EventSubscriberInterface
     {
         $integration = $this->fetchEnabledIntegration();
 
+        $campaignEvent   = $event->getEvent();
+        $campaignId      = $campaignEvent->getCampaign()?->getId();
+        $campaignEventId = $campaignEvent->getId();
+        $config          = $campaignEvent->getProperties();
+        $numberId        = (int) ($config['whatsapp_number'] ?? 0);
+
         if (null === $integration) {
-            $event->failAll('dialoghsm.campaign.error.integration_disabled');
+            $this->failAllWithLog($event, $campaignId, $campaignEventId, null, 'dialoghsm.campaign.error.integration_disabled', 'integration_disabled');
 
             return;
         }
 
-        $campaignEvent  = $event->getEvent();
-        $campaignId     = $campaignEvent->getCampaign()?->getId();
-        $campaignEventId = $campaignEvent->getId();
-
-        $config = $campaignEvent->getProperties();
-
-        $numberId       = (int) ($config['whatsapp_number'] ?? 0);
         $whatsAppNumber = $this->getWhatsAppNumber($numberId);
 
         if (null === $whatsAppNumber) {
-            $event->failAll('dialoghsm.campaign.error.missing_number');
+            $this->failAllWithLog($event, $campaignId, $campaignEventId, null, 'dialoghsm.campaign.error.missing_number', 'number_not_found');
 
             return;
         }
@@ -169,7 +171,7 @@ class CampaignSubscriber implements EventSubscriberInterface
         $baseUrl = $this->resolveBaseUrl($whatsAppNumber, $integration);
 
         if (empty($apiKey)) {
-            $event->failAll('dialoghsm.campaign.error.missing_api_key');
+            $this->failAllWithLog($event, $campaignId, $campaignEventId, $whatsAppNumber, 'dialoghsm.campaign.error.missing_api_key', 'missing_api_key');
 
             return;
         }
@@ -184,19 +186,29 @@ class CampaignSubscriber implements EventSubscriberInterface
         $sentCount      = 0;
 
         foreach ($contacts as $logId => $contact) {
-            $phone = $contact->getLeadPhoneNumber();
+            $phone = $this->normalizePhone($contact->getLeadPhoneNumber() ?? '');
+
+            // Payload construído aqui (antes da validação) para ter templateName disponível nos logs de erro.
+            $profileFields = $contact->getProfileFields();
+            $payloadData   = $this->buildPayloadFromConfig($config, $profileFields);
+            $templateName  = $payloadData['content'] ?? $payloadData['template'] ?? 'unknown';
 
             if (!$this->isValidE164($phone)) {
+                $this->persistFailureLog(
+                    $contact->getId(),
+                    $phone ?: 'unknown',
+                    $templateName,
+                    $whatsAppNumber->getName() ?? '',
+                    'invalid_phone: '.($phone ?: '(empty)'),
+                    $campaignId,
+                    $campaignEventId,
+                );
                 $event->fail(
                     $event->getPending()->get($logId),
                     'dialoghsm.campaign.error.invalid_phone'
                 );
                 continue;
             }
-
-            $profileFields = $contact->getProfileFields();
-            $payloadData   = $this->buildPayloadFromConfig($config, $profileFields);
-            $templateName  = $payloadData['content'] ?? $payloadData['template'] ?? 'unknown';
 
             try {
                 $success = $sender(new SendWhatsAppMessage(
@@ -215,6 +227,15 @@ class CampaignSubscriber implements EventSubscriberInterface
                     'lead_id' => $contact->getId(),
                     'error'   => $e->getMessage(),
                 ]);
+                $this->persistFailureLog(
+                    $contact->getId(),
+                    $phone,
+                    $templateName,
+                    $whatsAppNumber->getName() ?? '',
+                    $e->getMessage(),
+                    $campaignId,
+                    $campaignEventId,
+                );
                 $success = false;
             }
 
@@ -232,6 +253,72 @@ class CampaignSubscriber implements EventSubscriberInterface
             if ($applyBatchSleep && $sendDelay > 0 && $sentCount % $effectiveBatch === 0) {
                 usleep($sendDelay * 1_000_000);
             }
+        }
+    }
+
+    /**
+     * Chama failAll e cria um log de falha por contato.
+     * Garante que nenhum envio seja silenciado sem registro.
+     */
+    private function failAllWithLog(
+        PendingEvent $event,
+        ?int $campaignId,
+        ?int $campaignEventId,
+        ?WhatsAppNumber $number,
+        string $failMessage,
+        string $errorReason,
+    ): void {
+        foreach ($event->getContacts() as $contact) {
+            $phone = $contact->getLeadPhoneNumber() ?: 'unknown';
+            $this->persistFailureLog(
+                $contact->getId(),
+                $phone,
+                'unknown',
+                $number?->getName() ?? '',
+                $errorReason,
+                $campaignId,
+                $campaignEventId,
+            );
+        }
+
+        $event->failAll($failMessage);
+    }
+
+    /**
+     * Persiste um MessageLog de falha sem depender do handler.
+     * Usado quando o envio falha antes de chegar à API (validação, exceção, etc.).
+     */
+    private function persistFailureLog(
+        int $leadId,
+        string $phone,
+        string $templateName,
+        string $senderName,
+        string $errorMessage,
+        ?int $campaignId,
+        ?int $campaignEventId,
+    ): void {
+        try {
+            $log = new MessageLog();
+            $log->setLeadId($leadId);
+            $log->setCampaignId($campaignId);
+            $log->setCampaignEventId($campaignEventId);
+            $log->setSenderName($senderName ?: null);
+            $log->setTemplateName($templateName);
+            $log->setPhoneNumber($phone);
+            $log->setWamid(null);
+            $log->setStatus(MessageLog::STATUS_FAILED);
+            $log->setHttpStatusCode(null);
+            $log->setApiResponse(null);
+            $log->setErrorMessage(mb_substr($errorMessage, 0, 500));
+            $log->setDateSent(new \DateTime());
+
+            $this->entityManager->persist($log);
+            $this->entityManager->flush();
+        } catch (\Throwable $e) {
+            $this->logger->warning('DialogHSM: Falha ao registrar log de erro de campanha', [
+                'lead_id' => $leadId,
+                'error'   => $e->getMessage(),
+            ]);
         }
     }
 
@@ -267,6 +354,19 @@ class CampaignSubscriber implements EventSubscriberInterface
         }
 
         return $result;
+    }
+
+    /**
+     * Normaliza o telefone removendo apenas caracteres de formatação: espaços, hífens, parênteses e pontos.
+     * Letras são preservadas (para que a validação E.164 as rejeite corretamente).
+     * Exemplos:
+     *   "+55 44 999067833"     → "+5544999067833"
+     *   "+55 (11) 9.8765-4321" → "+5511987654321"
+     *   "+5511abc9999"         → "+5511abc9999"   (mantido, será rejeitado pelo E.164)
+     */
+    private function normalizePhone(string $phone): string
+    {
+        return preg_replace('/[ \-().]/u', '', trim($phone)) ?? $phone;
     }
 
     /**

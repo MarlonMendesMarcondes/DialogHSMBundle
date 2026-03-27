@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Doctrine\Common\Collections\ArrayCollection;
+use Doctrine\ORM\EntityManagerInterface;
 use Mautic\CampaignBundle\Entity\Event as CampaignEvent;
 use Mautic\CampaignBundle\Entity\LeadEventLog;
 use Mautic\CampaignBundle\Event\PendingEvent;
@@ -40,6 +41,7 @@ class CampaignSubscriberPerformanceTest extends TestCase
     private LoggerInterface&MockObject       $mockLogger;
     private WhatsAppNumberModel&MockObject   $mockNumberModel;
     private SendWhatsAppMessageHandler&MockObject $mockHandler;
+    private EntityManagerInterface&MockObject $mockEntityManager;
 
     protected function setUp(): void
     {
@@ -48,6 +50,7 @@ class CampaignSubscriberPerformanceTest extends TestCase
         $this->mockLogger             = $this->createMock(LoggerInterface::class);
         $this->mockNumberModel        = $this->createMock(WhatsAppNumberModel::class);
         $this->mockHandler            = $this->createMock(SendWhatsAppMessageHandler::class);
+        $this->mockEntityManager      = $this->createMock(EntityManagerInterface::class);
     }
 
     // -------------------------------------------------------------------------
@@ -62,6 +65,7 @@ class CampaignSubscriberPerformanceTest extends TestCase
             $this->mockLogger,
             $this->mockNumberModel,
             $this->mockHandler,
+            $this->mockEntityManager,
             $directTransportDsn,
         );
     }
