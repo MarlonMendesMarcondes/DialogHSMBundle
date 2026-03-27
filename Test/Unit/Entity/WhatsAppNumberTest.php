@@ -248,6 +248,28 @@ class WhatsAppNumberTest extends TestCase
     // =========================================================================
     // loadMetadata — verifica que é chamado sem exceções
     // =========================================================================
+    // webhookToken
+    // =========================================================================
+
+    public function testGetWebhookTokenReturnsNullByDefault(): void
+    {
+        $this->assertNull($this->makeNumber()->getWebhookToken());
+    }
+
+    public function testSetWebhookTokenStoresValue(): void
+    {
+        $token  = bin2hex(random_bytes(32));
+        $number = $this->makeNumber()->setWebhookToken($token);
+        $this->assertSame($token, $number->getWebhookToken());
+    }
+
+    public function testSetWebhookTokenReturnsSelf(): void
+    {
+        $number = $this->makeNumber();
+        $this->assertSame($number, $number->setWebhookToken('abc123'));
+    }
+
+    // =========================================================================
 
     public function testLoadMetadataRunsWithoutException(): void
     {

@@ -16,9 +16,14 @@ use Symfony\Component\Form\FormBuilderInterface;
 use Symfony\Component\Form\FormEvent;
 use Symfony\Component\Form\FormEvents;
 use Symfony\Component\OptionsResolver\OptionsResolver;
+use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 
 class WhatsAppNumberType extends AbstractType
 {
+    public function __construct(private UrlGeneratorInterface $router)
+    {
+    }
+
     public function buildForm(FormBuilderInterface $builder, array $options): void
     {
         $builder->addEventSubscriber(new CleanFormSubscriber(['baseUrl' => 'url']));
@@ -116,6 +121,36 @@ class WhatsAppNumberType extends AbstractType
                 ],
                 'required' => false,
                 'help'     => 'dialoghsm.number.batch_queue_name.help',
+            ]
+        );
+
+        $entity = $builder->getData();
+        $token  = $entity instanceof WhatsAppNumber ? $entity->getWebhookToken() : null;
+
+        if (null !== $token) {
+            $webhookUrl = $this->router->generate(
+                'mautic_dialoghsm_webhook',
+                ['token' => $token],
+                UrlGeneratorInterface::ABSOLUTE_URL
+            );
+        } else {
+            $webhookUrl = null;
+        }
+
+        $builder->add(
+            'webhookUrl',
+            TextType::class,
+            [
+                'label'      => 'dialoghsm.number.webhook_url',
+                'label_attr' => ['class' => 'control-label'],
+                'attr'       => [
+                    'class'    => 'form-control',
+                    'readonly' => true,
+                ],
+                'data'     => $webhookUrl ?? 'dialoghsm.number.webhook_url.pending',
+                'mapped'   => false,
+                'required' => false,
+                'help'     => 'dialoghsm.number.webhook_url.help',
             ]
         );
 

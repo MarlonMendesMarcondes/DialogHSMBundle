@@ -23,7 +23,13 @@ return [
                 'defaults'   => ['page' => 1],
             ],
         ],
-        'public' => [],
+        'public' => [
+            'mautic_dialoghsm_webhook' => [
+                'path'       => '/dialoghsm/webhook/{token}',
+                'controller' => 'MauticPlugin\DialogHSMBundle\Controller\WebhookController::handleAction',
+                'methods'    => ['POST'],
+            ],
+        ],
         'api'    => [],
     ],
     'menu' => [
