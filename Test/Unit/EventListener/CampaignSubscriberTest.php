@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Doctrine\ORM\EntityManagerInterface;
 use Mautic\CampaignBundle\Event\CampaignBuilderEvent;
 use Mautic\IntegrationsBundle\Helper\IntegrationsHelper;
 use MauticPlugin\DialogHSMBundle\EventListener\CampaignSubscriber;
@@ -21,6 +22,7 @@ class CampaignSubscriberTest extends TestCase
             $this->createMock(LoggerInterface::class),
             $this->createMock(WhatsAppNumberModel::class),
             $this->createMock(SendWhatsAppMessageHandler::class),
+            $this->createMock(EntityManagerInterface::class),
         );
     }
 

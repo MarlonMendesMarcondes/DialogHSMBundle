@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Doctrine\Common\Collections\ArrayCollection;
+use Doctrine\ORM\EntityManagerInterface;
 use Mautic\CampaignBundle\Entity\Event as CampaignEvent;
 use Symfony\Component\Messenger\Bridge\Amqp\Transport\AmqpStamp;
 use Symfony\Component\Messenger\Envelope;
@@ -28,6 +29,7 @@ class CampaignSubscriberActionTest extends TestCase
     private LoggerInterface&MockObject $mockLogger;
     private WhatsAppNumberModel&MockObject $mockNumberModel;
     private SendWhatsAppMessageHandler&MockObject $mockHandler;
+    private EntityManagerInterface&MockObject $mockEntityManager;
     private CampaignSubscriber $subscriber;
 
     protected function setUp(): void
@@ -37,6 +39,7 @@ class CampaignSubscriberActionTest extends TestCase
         $this->mockLogger             = $this->createMock(LoggerInterface::class);
         $this->mockNumberModel        = $this->createMock(WhatsAppNumberModel::class);
         $this->mockHandler            = $this->createMock(SendWhatsAppMessageHandler::class);
+        $this->mockEntityManager      = $this->createMock(EntityManagerInterface::class);
 
         $this->subscriber = $this->makeSubscriber();
     }
@@ -49,6 +52,7 @@ class CampaignSubscriberActionTest extends TestCase
             $this->mockLogger,
             $this->mockNumberModel,
             $this->mockHandler,
+            $this->mockEntityManager,
             $directTransportDsn,
         );
     }
@@ -1472,11 +1476,16 @@ class CampaignSubscriberActionTest extends TestCase
     public static function validE164Provider(): array
     {
         return [
-            'brasil celular'    => ['+5511999999999'],
-            'brasil fixo'       => ['+551133334444'],
-            'EUA'               => ['+12025551234'],
-            'mínimo 7 dígitos'  => ['+1234567'],
-            'máximo 15 dígitos' => ['+123456789012345'],
+            'brasil celular'                  => ['+5511999999999'],
+            'brasil fixo'                     => ['+551133334444'],
+            'EUA'                             => ['+12025551234'],
+            'mínimo 7 dígitos'                => ['+1234567'],
+            'máximo 15 dígitos'               => ['+123456789012345'],
+            // Normalizados automaticamente
+            'com espaços (caso produção)'     => ['+55 44 999067833'],
+            'com espaços brasil celular'      => ['+55 11 99999 9999'],
+            'com traços'                      => ['+55-11-99999-9999'],
+            'com parênteses e espaços'        => ['+55 (11) 98765-4321'],
         ];
     }
 
@@ -1559,16 +1568,44 @@ class CampaignSubscriberActionTest extends TestCase
     public static function invalidE164Provider(): array
     {
         return [
-            'vazio'               => [''],
-            'sem +'               => ['5511999999999'],
-            'só +'                => ['+'],
-            'apenas zeros'        => ['+0000000'],
-            'começa com +0'       => ['+0123456789'],
-            'curto demais'        => ['+12345'],
-            'longo demais'        => ['+1234567890123456'],
-            'letras'              => ['+5511abc9999'],
-            'espaços'             => ['+55 11 99999 9999'],
-            'traços'              => ['+55-11-99999-9999'],
+            'vazio'           => [''],
+            'sem +'           => ['5511999999999'],
+            'só +'            => ['+'],
+            'apenas zeros'    => ['+0000000'],
+            'começa com +0'   => ['+0123456789'],
+            'curto demais'    => ['+12345'],
+            'longo demais'    => ['+1234567890123456'],
+            'letras'          => ['+5511abc9999'],
         ];
+    }
+
+    /**
+     * Garante que o telefone normalizado é passado ao handler, não o original com espaços.
+     */
+    public function testNormalizedPhoneIsUsedInMessage(): void
+    {
+        $this->enableIntegration();
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
+
+        $captured = null;
+        $this->mockHandler
+            ->method('__invoke')
+            ->willReturnCallback(function (SendWhatsAppMessage $msg) use (&$captured): array {
+                $captured = $msg;
+
+                return ['success' => true];
+            });
+
+        // Telefone com espaços — caso real de produção
+        $contact = $this->buildContact('+55 44 999067833', 1);
+        $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
+
+        $event->expects($this->never())->method('fail');
+        $event->expects($this->once())->method('pass');
+
+        $this->subscriber->onCampaignTriggerAction($event);
+
+        $this->assertNotNull($captured);
+        $this->assertSame('+5544999067833', $captured->phone);
     }
 }
