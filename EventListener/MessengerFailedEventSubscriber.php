@@ -39,6 +39,8 @@ class MessengerFailedEventSubscriber implements EventSubscriberInterface
         try {
             $log = new MessageLog();
             $log->setLeadId($message->leadId);
+            $log->setCampaignId($message->campaignId);
+            $log->setCampaignEventId($message->campaignEventId);
             $log->setSenderName($message->whatsAppNumberName ?: null);
             $log->setTemplateName($message->templateName);
             $log->setPhoneNumber($message->phone);

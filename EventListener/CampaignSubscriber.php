@@ -150,7 +150,11 @@ class CampaignSubscriber implements EventSubscriberInterface
             return;
         }
 
-        $config = $event->getEvent()->getProperties();
+        $campaignEvent  = $event->getEvent();
+        $campaignId     = $campaignEvent->getCampaign()?->getId();
+        $campaignEventId = $campaignEvent->getId();
+
+        $config = $campaignEvent->getProperties();
 
         $numberId       = (int) ($config['whatsapp_number'] ?? 0);
         $whatsAppNumber = $this->getWhatsAppNumber($numberId);
@@ -203,6 +207,8 @@ class CampaignSubscriber implements EventSubscriberInterface
                     payloadData:        $payloadData,
                     templateName:       $templateName,
                     whatsAppNumberName: $whatsAppNumber->getName() ?? '',
+                    campaignId:         $campaignId,
+                    campaignEventId:    $campaignEventId,
                 ), $whatsAppNumber);
             } catch (\Throwable $e) {
                 $this->logger->error('DialogHSM: Exceção durante envio', [

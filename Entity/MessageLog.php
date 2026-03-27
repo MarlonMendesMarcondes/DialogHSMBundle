@@ -16,6 +16,8 @@ class MessageLog
 
     private ?int $id = null;
     private ?int $leadId = null;
+    private ?int $campaignId = null;
+    private ?int $campaignEventId = null;
     private ?string $senderName = null;
     private ?string $templateName = null;
     private ?string $phoneNumber = null;
@@ -44,6 +46,18 @@ class MessageLog
         $builder
             ->createField('leadId', Types::INTEGER)
             ->columnName('lead_id')
+            ->build();
+
+        $builder
+            ->createField('campaignId', Types::INTEGER)
+            ->columnName('campaign_id')
+            ->nullable()
+            ->build();
+
+        $builder
+            ->createField('campaignEventId', Types::INTEGER)
+            ->columnName('campaign_event_id')
+            ->nullable()
             ->build();
 
         $builder
@@ -107,6 +121,30 @@ class MessageLog
     public function setLeadId(int $leadId): self
     {
         $this->leadId = $leadId;
+
+        return $this;
+    }
+
+    public function getCampaignId(): ?int
+    {
+        return $this->campaignId;
+    }
+
+    public function setCampaignId(?int $campaignId): self
+    {
+        $this->campaignId = $campaignId;
+
+        return $this;
+    }
+
+    public function getCampaignEventId(): ?int
+    {
+        return $this->campaignEventId;
+    }
+
+    public function setCampaignEventId(?int $campaignEventId): self
+    {
+        $this->campaignEventId = $campaignEventId;
 
         return $this;
     }
