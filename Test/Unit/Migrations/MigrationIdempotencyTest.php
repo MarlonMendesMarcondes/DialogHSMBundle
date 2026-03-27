@@ -17,6 +17,7 @@ use MauticPlugin\DialogHSMBundle\Migrations\Version_1_0_5;
 use MauticPlugin\DialogHSMBundle\Migrations\Version_1_0_6;
 use MauticPlugin\DialogHSMBundle\Migrations\Version_1_0_7;
 use MauticPlugin\DialogHSMBundle\Migrations\Version_1_0_8;
+use MauticPlugin\DialogHSMBundle\Migrations\Version_1_1_0;
 use Mautic\IntegrationsBundle\Migration\AbstractMigration;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
@@ -406,6 +407,48 @@ class MigrationIdempotencyTest extends TestCase
     }
 
     // =========================================================================
+    // Version_1_1_0 — adiciona campaign_id e campaign_event_id
+    // =========================================================================
+
+    public function testV110ApplicableWhenColumnAbsent(): void
+    {
+        $migration = $this->migration(Version_1_1_0::class);
+        $this->assertTrue($this->callProtected($migration, 'isApplicable', $this->schemaWithTable([])));
+    }
+
+    public function testV110NotApplicableWhenColumnPresent(): void
+    {
+        $migration = $this->migration(Version_1_1_0::class);
+        $this->assertFalse($this->callProtected($migration, 'isApplicable', $this->schemaWithTable(['campaign_id'])));
+    }
+
+    public function testV110NotApplicableWhenTableAbsent(): void
+    {
+        $migration = $this->migration(Version_1_1_0::class);
+        $this->assertFalse($this->callProtected($migration, 'isApplicable', $this->schemaWithoutTable()));
+    }
+
+    public function testV110SqlAddsCampaignIdColumn(): void
+    {
+        $sql = implode(' ', $this->collectSql($this->migration(Version_1_1_0::class)));
+        $this->assertStringContainsStringIgnoringCase('ADD COLUMN IF NOT EXISTS', $sql);
+        $this->assertStringContainsString('campaign_id', $sql);
+    }
+
+    public function testV110SqlAddsCampaignEventIdColumn(): void
+    {
+        $sql = implode(' ', $this->collectSql($this->migration(Version_1_1_0::class)));
+        $this->assertStringContainsString('campaign_event_id', $sql);
+    }
+
+    public function testV110SqlAddsIndexWithIfNotExists(): void
+    {
+        $sql = implode(' ', $this->collectSql($this->migration(Version_1_1_0::class)));
+        $this->assertStringContainsStringIgnoringCase('ADD INDEX IF NOT EXISTS', $sql);
+        $this->assertStringContainsString('campaign_id_idx', $sql);
+    }
+
+    // =========================================================================
     // Contrato geral: nenhuma migration gera SQL vazio
     // =========================================================================
 
@@ -432,6 +475,7 @@ class MigrationIdempotencyTest extends TestCase
             [Version_1_0_6::class],
             [Version_1_0_7::class],
             [Version_1_0_8::class],
+            [Version_1_1_0::class],
         ];
     }
 }

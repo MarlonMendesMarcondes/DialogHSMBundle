@@ -117,8 +117,13 @@ class CampaignSubscriberActionTest extends TestCase
             'batch_limit'     => 0,
         ];
 
+        $mockCampaign = $this->createMock(\Mautic\CampaignBundle\Entity\Campaign::class);
+        $mockCampaign->method('getId')->willReturn(10);
+
         $mockCampaignEvent = $this->createMock(CampaignEvent::class);
         $mockCampaignEvent->method('getProperties')->willReturn(array_merge($defaultConfig, $config));
+        $mockCampaignEvent->method('getId')->willReturn(20);
+        $mockCampaignEvent->method('getCampaign')->willReturn($mockCampaign);
 
         $mockLog     = $this->createMock(LeadEventLog::class);
         $mockPending = $this->createMock(ArrayCollection::class);
@@ -1496,6 +1501,56 @@ class CampaignSubscriberActionTest extends TestCase
         $this->mockHandler->expects($this->never())->method('__invoke');
 
         $this->subscriber->onCampaignTriggerAction($event);
+    }
+
+    // -------------------------------------------------------------------------
+    // Testes: correlação campanha → log (v1.1.3)
+    // -------------------------------------------------------------------------
+
+    public function testDirectSendMessageCarriesCampaignId(): void
+    {
+        $this->enableIntegration();
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
+
+        $captured = null;
+        $this->mockHandler
+            ->method('__invoke')
+            ->willReturnCallback(function (SendWhatsAppMessage $msg) use (&$captured): array {
+                $captured = $msg;
+
+                return ['success' => true];
+            });
+
+        $contact = $this->buildContact('+5511999999999', 1);
+        $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
+        $this->subscriber->onCampaignTriggerAction($event);
+
+        $this->assertNotNull($captured);
+        $this->assertSame(10, $captured->campaignId);
+        $this->assertSame(20, $captured->campaignEventId);
+    }
+
+    public function testQueueSendMessageCarriesCampaignId(): void
+    {
+        $this->enableIntegration();
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
+
+        $captured = null;
+        $this->mockBus
+            ->method('dispatch')
+            ->willReturnCallback(function (SendWhatsAppMessage $msg) use (&$captured): \Symfony\Component\Messenger\Envelope {
+                $captured = $msg;
+
+                return new \Symfony\Component\Messenger\Envelope($msg);
+            });
+
+        $contact = $this->buildContact('+5511999999999', 1);
+        $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp_queue', [1 => $contact]);
+        $this->subscriber->onCampaignTriggerActionQueue($event);
+
+        $this->assertNotNull($captured);
+        $this->assertSame(10, $captured->campaignId);
+        $this->assertSame(20, $captured->campaignEventId);
     }
 
     /**

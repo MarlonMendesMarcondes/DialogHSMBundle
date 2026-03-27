@@ -14,6 +14,8 @@ class SendWhatsAppMessage
         public readonly array $payloadData,
         public readonly string $templateName,
         public readonly string $whatsAppNumberName = '',
+        public readonly ?int $campaignId = null,
+        public readonly ?int $campaignEventId = null,
     ) {
     }
 }
