@@ -36,6 +36,7 @@
                 <th class="col-dialoghsm-lead">{{ 'dialoghsm.log.lead_id'|trans }}</th>
                 <th class="col-dialoghsm-phone">{{ 'dialoghsm.log.phone'|trans }}</th>
                 <th class="col-dialoghsm-template">{{ 'dialoghsm.log.template'|trans }}</th>
+                <th class="col-dialoghsm-campaign">{{ 'dialoghsm.log.campaign'|trans }}</th>
                 <th class="col-dialoghsm-status">{{ 'dialoghsm.log.status'|trans }}</th>
                 <th class="col-dialoghsm-http">HTTP</th>
                 <th class="col-dialoghsm-error">{{ 'dialoghsm.log.error'|trans }}</th>
@@ -53,6 +54,15 @@
                     </td>
                     <td>{{ item.getPhoneNumber() }}</td>
                     <td>{{ item.getTemplateName() }}</td>
+                    <td>
+                        {% if item.getCampaignId() is not null %}
+                            <a href="{{ path('mautic_campaign_action', {'objectAction': 'view', 'objectId': item.getCampaignId()}) }}" target="_blank">
+                                #{{ item.getCampaignId() }}
+                            </a>
+                        {% else %}
+                            <span class="text-muted">—</span>
+                        {% endif %}
+                    </td>
                     <td>
                         {% if item.getStatus() == 'sent' %}
                             <span class="label label-success">{{ item.getStatus() }}</span>

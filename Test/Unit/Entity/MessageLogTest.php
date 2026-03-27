@@ -39,6 +39,52 @@ class MessageLogTest extends TestCase
         $this->assertSame($log, $log->setLeadId(1));
     }
 
+    public function testGetCampaignIdReturnsNullByDefault(): void
+    {
+        $this->assertNull($this->makeLog()->getCampaignId());
+    }
+
+    public function testSetCampaignIdStoresValue(): void
+    {
+        $log = $this->makeLog()->setCampaignId(7);
+        $this->assertSame(7, $log->getCampaignId());
+    }
+
+    public function testSetCampaignIdAcceptsNull(): void
+    {
+        $log = $this->makeLog()->setCampaignId(7)->setCampaignId(null);
+        $this->assertNull($log->getCampaignId());
+    }
+
+    public function testSetCampaignIdReturnsSelf(): void
+    {
+        $log = $this->makeLog();
+        $this->assertSame($log, $log->setCampaignId(1));
+    }
+
+    public function testGetCampaignEventIdReturnsNullByDefault(): void
+    {
+        $this->assertNull($this->makeLog()->getCampaignEventId());
+    }
+
+    public function testSetCampaignEventIdStoresValue(): void
+    {
+        $log = $this->makeLog()->setCampaignEventId(99);
+        $this->assertSame(99, $log->getCampaignEventId());
+    }
+
+    public function testSetCampaignEventIdAcceptsNull(): void
+    {
+        $log = $this->makeLog()->setCampaignEventId(99)->setCampaignEventId(null);
+        $this->assertNull($log->getCampaignEventId());
+    }
+
+    public function testSetCampaignEventIdReturnsSelf(): void
+    {
+        $log = $this->makeLog();
+        $this->assertSame($log, $log->setCampaignEventId(1));
+    }
+
     public function testGetSenderNameReturnsNullByDefault(): void
     {
         $this->assertNull($this->makeLog()->getSenderName());
