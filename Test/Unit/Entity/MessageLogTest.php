@@ -247,6 +247,46 @@ class MessageLogTest extends TestCase
     }
 
     // =========================================================================
+    // wamid
+    // =========================================================================
+
+    public function testGetWamidReturnsNullByDefault(): void
+    {
+        $this->assertNull($this->makeLog()->getWamid());
+    }
+
+    public function testSetWamidStoresValue(): void
+    {
+        $log = $this->makeLog()->setWamid('wamid.HBgLNTUxMTk');
+        $this->assertSame('wamid.HBgLNTUxMTk', $log->getWamid());
+    }
+
+    public function testSetWamidAcceptsNull(): void
+    {
+        $log = $this->makeLog()->setWamid('wamid.abc')->setWamid(null);
+        $this->assertNull($log->getWamid());
+    }
+
+    public function testSetWamidReturnsSelf(): void
+    {
+        $log = $this->makeLog();
+        $this->assertSame($log, $log->setWamid('wamid.xyz'));
+    }
+
+    // =========================================================================
+    // Constantes de status
+    // =========================================================================
+
+    public function testStatusConstantsExist(): void
+    {
+        $this->assertSame('sent', MessageLog::STATUS_SENT);
+        $this->assertSame('delivered', MessageLog::STATUS_DELIVERED);
+        $this->assertSame('read', MessageLog::STATUS_READ);
+        $this->assertSame('failed', MessageLog::STATUS_FAILED);
+        $this->assertSame('dlq', MessageLog::STATUS_DLQ);
+    }
+
+    // =========================================================================
     // loadMetadata — verifica que é chamado sem exceções
     // =========================================================================
 

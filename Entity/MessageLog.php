@@ -10,11 +10,14 @@ use Mautic\CoreBundle\Doctrine\Mapping\ClassMetadataBuilder;
 
 class MessageLog
 {
-    public const STATUS_SENT   = 'sent';
-    public const STATUS_FAILED = 'failed';
-    public const STATUS_DLQ    = 'dlq';
+    public const STATUS_SENT      = 'sent';
+    public const STATUS_DELIVERED = 'delivered';
+    public const STATUS_READ      = 'read';
+    public const STATUS_FAILED    = 'failed';
+    public const STATUS_DLQ       = 'dlq';
 
     private ?int $id = null;
+    private ?string $wamid = null;
     private ?int $leadId = null;
     private ?int $campaignId = null;
     private ?int $campaignEventId = null;
@@ -38,10 +41,18 @@ class MessageLog
             ->setTable('dialog_hsm_message_log')
             ->setCustomRepositoryClass(MessageLogRepository::class)
             ->addIndex(['lead_id'], 'lead_id_idx')
+            ->addIndex(['wamid'], 'wamid_idx')
             ->addIndex(['status'], 'status_idx')
             ->addIndex(['date_sent'], 'date_sent_idx');
 
         $builder->addId();
+
+        $builder
+            ->createField('wamid', Types::STRING)
+            ->columnName('wamid')
+            ->length(255)
+            ->nullable()
+            ->build();
 
         $builder
             ->createField('leadId', Types::INTEGER)
@@ -111,6 +122,18 @@ class MessageLog
     public function getId(): ?int
     {
         return $this->id;
+    }
+
+    public function getWamid(): ?string
+    {
+        return $this->wamid;
+    }
+
+    public function setWamid(?string $wamid): self
+    {
+        $this->wamid = $wamid;
+
+        return $this;
     }
 
     public function getLeadId(): ?int

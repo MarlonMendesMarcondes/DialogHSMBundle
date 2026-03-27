@@ -52,6 +52,15 @@ class WhatsAppNumberModel extends FormModel implements AjaxLookupModelInterface
         return parent::getEntity($id);
     }
 
+    public function saveEntity($entity, $unlock = true): void
+    {
+        if ($entity instanceof WhatsAppNumber && null === $entity->getWebhookToken()) {
+            $entity->setWebhookToken(bin2hex(random_bytes(32)));
+        }
+
+        parent::saveEntity($entity, $unlock);
+    }
+
     /**
      * @param string $filter
      * @param int    $limit
