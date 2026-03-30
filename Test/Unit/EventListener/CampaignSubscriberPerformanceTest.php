@@ -11,7 +11,7 @@ use Mautic\IntegrationsBundle\Helper\IntegrationsHelper;
 use Mautic\LeadBundle\Entity\Lead;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
 use MauticPlugin\DialogHSMBundle\EventListener\CampaignSubscriber;
-use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppDirectMessage;
+use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppDirectBatchMessage;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppMessageHandler;
 use MauticPlugin\DialogHSMBundle\Model\WhatsAppNumberModel;
@@ -265,7 +265,7 @@ class CampaignSubscriberPerformanceTest extends TestCase
     // Performance: dispatch não cria objetos desnecessários
     // -------------------------------------------------------------------------
 
-    public function testRedisDispatchMessageTypeIsSendWhatsAppDirectMessage(): void
+    public function testRedisDispatchesSingleBatchMessageWithAllContacts(): void
     {
         $this->mockIntegrationsHelper
             ->method('getIntegration')
@@ -275,8 +275,8 @@ class CampaignSubscriberPerformanceTest extends TestCase
             ->method('getEntity')
             ->willReturn($this->makeNumber());
 
-        $volume      = 50;
-        $dispatched  = [];
+        $volume     = 50;
+        $dispatched = [];
 
         $this->mockBus
             ->method('dispatch')
@@ -292,15 +292,14 @@ class CampaignSubscriberPerformanceTest extends TestCase
 
         $subscriber->onCampaignTriggerAction($event);
 
-        $this->assertCount($volume, $dispatched);
-
-        foreach ($dispatched as $msg) {
-            $this->assertInstanceOf(
-                SendWhatsAppDirectMessage::class,
-                $msg,
-                'Todos os objetos despachados devem ser SendWhatsAppDirectMessage'
-            );
-        }
+        // Um único dispatch com todos os contatos no lote
+        $this->assertCount(1, $dispatched);
+        $this->assertInstanceOf(
+            SendWhatsAppDirectBatchMessage::class,
+            $dispatched[0],
+            'Redis deve despachar um único SendWhatsAppDirectBatchMessage por execução de campanha'
+        );
+        $this->assertCount($volume, $dispatched[0]->items, 'O lote deve conter todos os contatos');
     }
 
     // -------------------------------------------------------------------------
