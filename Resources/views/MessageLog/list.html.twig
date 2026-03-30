@@ -24,7 +24,7 @@
                     <select name="dialoghsm_log_filter[status]" id="filter-status" class="form-control input-sm">
                         <option value="">{{ 'dialoghsm.log.filter.status.all'|trans }}</option>
                         {% for s in ['sent', 'delivered', 'read', 'failed', 'dlq'] %}
-                            <option value="{{ s }}" {% if (filters.status ?? '') == s %}selected{% endif %}>{{ s }}</option>
+                            <option value="{{ s }}" {% if (filters.status ?? '') == s %}selected{% endif %}>{{ ('dialoghsm.log.status.' ~ s)|trans }}</option>
                         {% endfor %}
                     </select>
                 </div>
@@ -125,15 +125,15 @@
                     </td>
                     <td>
                         {% if item.getStatus() == 'sent' %}
-                            <span class="label label-success">{{ item.getStatus() }}</span>
+                            <span class="label label-success">{{ 'dialoghsm.log.status.sent'|trans }}</span>
                         {% elseif item.getStatus() == 'delivered' %}
-                            <span class="label label-info">{{ item.getStatus() }}</span>
+                            <span class="label label-info">{{ 'dialoghsm.log.status.delivered'|trans }}</span>
                         {% elseif item.getStatus() == 'read' %}
-                            <span class="label label-primary">{{ item.getStatus() }}</span>
+                            <span class="label label-primary">{{ 'dialoghsm.log.status.read'|trans }}</span>
                         {% elseif item.getStatus() == 'dlq' %}
-                            <span class="label label-warning">DLQ</span>
+                            <span class="label label-warning">{{ 'dialoghsm.log.status.dlq'|trans }}</span>
                         {% else %}
-                            <span class="label label-danger">{{ item.getStatus() }}</span>
+                            <span class="label label-danger">{{ ('dialoghsm.log.status.' ~ item.getStatus())|trans }}</span>
                         {% endif %}
                     </td>
                     <td>
