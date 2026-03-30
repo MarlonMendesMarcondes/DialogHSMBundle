@@ -17,11 +17,16 @@ class MessageLogRepository extends CommonRepository
     }
 
     /**
+     * @param array{status?:string, dateFrom?:string, dateTo?:string, senderName?:string, contact?:string} $filters
+     *
      * @return MessageLog[]
      */
-    public function getLogs(int $start = 0, int $limit = 50): array
+    public function getLogs(int $start = 0, int $limit = 50, array $filters = []): array
     {
-        return $this->createQueryBuilder('dhml')
+        $qb = $this->createQueryBuilder('dhml');
+        $this->applyFilters($qb, $filters);
+
+        return $qb
             ->orderBy('dhml.dateSent', 'DESC')
             ->addOrderBy('dhml.id', 'DESC')
             ->setFirstResult($start)
@@ -30,12 +35,53 @@ class MessageLogRepository extends CommonRepository
             ->getResult();
     }
 
-    public function countAll(): int
+    /**
+     * @param array{status?:string, dateFrom?:string, dateTo?:string, senderName?:string, contact?:string} $filters
+     */
+    public function countAll(array $filters = []): int
     {
-        return (int) $this->createQueryBuilder('dhml')
-            ->select('COUNT(dhml.id)')
-            ->getQuery()
-            ->getSingleScalarResult();
+        $qb = $this->createQueryBuilder('dhml')
+            ->select('COUNT(dhml.id)');
+        $this->applyFilters($qb, $filters);
+
+        return (int) $qb->getQuery()->getSingleScalarResult();
+    }
+
+    /**
+     * @param array{status?:string, dateFrom?:string, dateTo?:string, senderName?:string, contact?:string} $filters
+     */
+    private function applyFilters(\Doctrine\ORM\QueryBuilder $qb, array $filters): void
+    {
+        if (!empty($filters['status'])) {
+            $qb->andWhere('dhml.status = :status')
+               ->setParameter('status', $filters['status']);
+        }
+
+        if (!empty($filters['dateFrom'])) {
+            $qb->andWhere('dhml.dateSent >= :dateFrom')
+               ->setParameter('dateFrom', new \DateTime($filters['dateFrom'] . ' 00:00:00'));
+        }
+
+        if (!empty($filters['dateTo'])) {
+            $qb->andWhere('dhml.dateSent <= :dateTo')
+               ->setParameter('dateTo', new \DateTime($filters['dateTo'] . ' 23:59:59'));
+        }
+
+        if (!empty($filters['senderName'])) {
+            $qb->andWhere('dhml.senderName LIKE :senderName')
+               ->setParameter('senderName', '%' . $filters['senderName'] . '%');
+        }
+
+        if (!empty($filters['contact'])) {
+            $contact = $filters['contact'];
+            if (ctype_digit($contact)) {
+                $qb->andWhere('dhml.leadId = :leadId')
+                   ->setParameter('leadId', (int) $contact);
+            } else {
+                $qb->andWhere('dhml.phoneNumber LIKE :phone')
+                   ->setParameter('phone', '%' . $contact . '%');
+            }
+        }
     }
 
     public function findByWamid(string $wamid): ?MessageLog
