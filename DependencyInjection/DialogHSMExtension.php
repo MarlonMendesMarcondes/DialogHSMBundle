@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace MauticPlugin\DialogHSMBundle\DependencyInjection;
 
-use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppDirectMessage;
+use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppDirectBatchMessage;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use Symfony\Component\Config\FileLocator;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
@@ -57,8 +57,8 @@ class DialogHSMExtension extends Extension implements PrependExtensionInterface
                     ],
                 ],
                 'routing' => [
-                    SendWhatsAppMessage::class       => 'whatsapp',
-                    SendWhatsAppDirectMessage::class => 'whatsapp_direct',
+                    SendWhatsAppMessage::class            => 'whatsapp',
+                    SendWhatsAppDirectBatchMessage::class => 'whatsapp_direct',
                 ],
             ],
         ]);
