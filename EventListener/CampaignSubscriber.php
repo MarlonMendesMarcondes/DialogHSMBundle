@@ -101,6 +101,8 @@ class CampaignSubscriber implements EventSubscriberInterface
                         payloadData:        $message->payloadData,
                         templateName:       $message->templateName,
                         whatsAppNumberName: $message->whatsAppNumberName,
+                        campaignId:         $message->campaignId,
+                        campaignEventId:    $message->campaignEventId,
                         rateDelaySeconds:   $rateDelaySeconds,
                     ));
 

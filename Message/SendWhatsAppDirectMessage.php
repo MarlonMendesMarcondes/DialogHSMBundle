@@ -22,8 +22,10 @@ class SendWhatsAppDirectMessage extends SendWhatsAppMessage
         array $payloadData,
         string $templateName,
         string $whatsAppNumberName = '',
+        ?int $campaignId = null,
+        ?int $campaignEventId = null,
         public readonly float $rateDelaySeconds = 0.0,
     ) {
-        parent::__construct($leadId, $phone, $apiKey, $baseUrl, $payloadData, $templateName, $whatsAppNumberName);
+        parent::__construct($leadId, $phone, $apiKey, $baseUrl, $payloadData, $templateName, $whatsAppNumberName, $campaignId, $campaignEventId);
     }
 }
