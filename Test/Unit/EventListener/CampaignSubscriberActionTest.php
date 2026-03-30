@@ -13,7 +13,7 @@ use Mautic\IntegrationsBundle\Helper\IntegrationsHelper;
 use Mautic\LeadBundle\Entity\Lead;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
 use MauticPlugin\DialogHSMBundle\EventListener\CampaignSubscriber;
-use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppDirectMessage;
+use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppDirectBatchMessage;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppMessageHandler;
 use MauticPlugin\DialogHSMBundle\Model\WhatsAppNumberModel;
@@ -1256,11 +1256,13 @@ class CampaignSubscriberActionTest extends TestCase
         // Handler NÃO deve ser chamado diretamente
         $this->mockHandler->expects($this->never())->method('__invoke');
 
-        // Bus deve ser chamado com SendWhatsAppDirectMessage
+        // Bus deve ser chamado UMA vez com SendWhatsAppDirectBatchMessage contendo 1 item
         $this->mockBus
             ->expects($this->once())
             ->method('dispatch')
-            ->with($this->isInstanceOf(SendWhatsAppDirectMessage::class))
+            ->with($this->callback(function ($msg) {
+                return $msg instanceof SendWhatsAppDirectBatchMessage && count($msg->items) === 1;
+            }))
             ->willReturn(new Envelope(new \stdClass()));
 
         $event->expects($this->once())->method('pass');
@@ -1289,9 +1291,16 @@ class CampaignSubscriberActionTest extends TestCase
             ['batch_limit' => 1, 'send_delay' => 5]
         );
 
+        // Um único dispatch de SendWhatsAppDirectBatchMessage com 3 itens e parâmetros corretos
         $this->mockBus
-            ->expects($this->exactly(3))
+            ->expects($this->once())
             ->method('dispatch')
+            ->with($this->callback(function ($msg) {
+                return $msg instanceof SendWhatsAppDirectBatchMessage
+                    && count($msg->items) === 3
+                    && $msg->batchLimit === 1
+                    && $msg->sendDelay === 5;
+            }))
             ->willReturn(new Envelope(new \stdClass()));
 
         $event->expects($this->exactly(3))->method('pass');
@@ -1301,7 +1310,7 @@ class CampaignSubscriberActionTest extends TestCase
         $subscriber->onCampaignTriggerAction($event);
         $elapsed = microtime(true) - $start;
 
-        $this->assertLessThan(1.0, $elapsed, 'Redis nunca deve dormir independente do send_delay');
+        $this->assertLessThan(1.0, $elapsed, 'CampaignSubscriber nunca deve dormir ao usar Redis');
     }
 
     // -------------------------------------------------------------------------

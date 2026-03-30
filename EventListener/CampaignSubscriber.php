@@ -16,7 +16,7 @@ use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
 use MauticPlugin\DialogHSMBundle\Form\Type\SendWhatsAppQueueType;
 use MauticPlugin\DialogHSMBundle\Form\Type\SendWhatsAppType;
 use MauticPlugin\DialogHSMBundle\Integration\DialogHSMIntegration;
-use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppDirectMessage;
+use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppDirectBatchMessage;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppMessageHandler;
 use MauticPlugin\DialogHSMBundle\Model\WhatsAppNumberModel;
@@ -78,38 +78,32 @@ class CampaignSubscriber implements EventSubscriberInterface
             return;
         }
 
-        // Se Redis configurado: publica mensagem no stream; worker consome e chama a API
+        // Se Redis configurado: coleta todos os itens e publica UM único entry no stream.
+        // O worker consome o lote inteiro em sequência com batch/delay, sem interferência
+        // de outros workers (cada execução de campanha = um worker dedicado).
         if ($this->isRedisTransport($this->directTransportDsn)) {
             $config     = $event->getEvent()->getProperties();
             $sendDelay  = (int) ($config['send_delay'] ?? 0);
             $batchLimit = (int) ($config['batch_limit'] ?? 0);
 
-            // rateDelaySeconds: distribui o delay do form por mensagem individual
-            // Exemplo: send_delay=2s, batch_limit=10 → 2/10 = 0.2s por mensagem
-            $rateDelaySeconds = $sendDelay > 0
-                ? (float) $sendDelay / max($batchLimit, 1)
-                : 0.0;
-
+            $items = [];
             $this->processContacts(
                 $event,
-                function (SendWhatsAppMessage $message, WhatsAppNumber $number) use ($rateDelaySeconds): bool {
-                    $this->bus->dispatch(new SendWhatsAppDirectMessage(
-                        leadId:             $message->leadId,
-                        phone:              $message->phone,
-                        apiKey:             $message->apiKey,
-                        baseUrl:            $message->baseUrl,
-                        payloadData:        $message->payloadData,
-                        templateName:       $message->templateName,
-                        whatsAppNumberName: $message->whatsAppNumberName,
-                        campaignId:         $message->campaignId,
-                        campaignEventId:    $message->campaignEventId,
-                        rateDelaySeconds:   $rateDelaySeconds,
-                    ));
+                function (SendWhatsAppMessage $message, WhatsAppNumber $number) use (&$items): bool {
+                    $items[] = $message;
 
                     return true;
                 },
                 applyBatchSleep: false
             );
+
+            if (!empty($items)) {
+                $this->bus->dispatch(new SendWhatsAppDirectBatchMessage(
+                    items:      $items,
+                    batchLimit: $batchLimit,
+                    sendDelay:  $sendDelay,
+                ));
+            }
 
             return;
         }
