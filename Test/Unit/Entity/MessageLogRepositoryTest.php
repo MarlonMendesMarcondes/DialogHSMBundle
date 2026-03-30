@@ -41,6 +41,8 @@ class MessageLogRepositoryTest extends TestCase
         $this->mockQueryBuilder->method('addOrderBy')->willReturnSelf();
         $this->mockQueryBuilder->method('setFirstResult')->willReturnSelf();
         $this->mockQueryBuilder->method('setMaxResults')->willReturnSelf();
+        $this->mockQueryBuilder->method('andWhere')->willReturnSelf();
+        $this->mockQueryBuilder->method('setParameter')->willReturnSelf();
         $this->mockQueryBuilder->method('getQuery')->willReturn($this->mockQuery);
 
         // Bypass CommonRepository constructor (requires ManagerRegistry);
@@ -263,5 +265,150 @@ class MessageLogRepositoryTest extends TestCase
             ->method('executeStatement');
 
         $this->repository->prune(maxRecords: 500);
+    }
+
+    // =========================================================================
+    // Filtros: getLogs com filtros
+    // =========================================================================
+
+    public function testGetLogsWithStatusFilterAppliesAndWhere(): void
+    {
+        $this->mockQueryBuilder
+            ->expects($this->once())
+            ->method('andWhere')
+            ->with('dhml.status = :status')
+            ->willReturnSelf();
+
+        $this->mockQueryBuilder
+            ->expects($this->once())
+            ->method('setParameter')
+            ->with('status', 'sent')
+            ->willReturnSelf();
+
+        $this->mockQuery->method('getResult')->willReturn([]);
+
+        $this->repository->getLogs(0, 50, ['status' => 'sent']);
+    }
+
+    public function testGetLogsWithSenderNameFilterUsesLike(): void
+    {
+        $this->mockQueryBuilder
+            ->expects($this->once())
+            ->method('andWhere')
+            ->with('dhml.senderName LIKE :senderName')
+            ->willReturnSelf();
+
+        $this->mockQueryBuilder
+            ->expects($this->once())
+            ->method('setParameter')
+            ->with('senderName', '%Numero%')
+            ->willReturnSelf();
+
+        $this->mockQuery->method('getResult')->willReturn([]);
+
+        $this->repository->getLogs(0, 50, ['senderName' => 'Numero']);
+    }
+
+    public function testGetLogsWithNumericContactFilterUsesLeadId(): void
+    {
+        $this->mockQueryBuilder
+            ->expects($this->once())
+            ->method('andWhere')
+            ->with('dhml.leadId = :leadId')
+            ->willReturnSelf();
+
+        $this->mockQueryBuilder
+            ->expects($this->once())
+            ->method('setParameter')
+            ->with('leadId', 42)
+            ->willReturnSelf();
+
+        $this->mockQuery->method('getResult')->willReturn([]);
+
+        $this->repository->getLogs(0, 50, ['contact' => '42']);
+    }
+
+    public function testGetLogsWithPhoneContactFilterUsesLike(): void
+    {
+        $this->mockQueryBuilder
+            ->expects($this->once())
+            ->method('andWhere')
+            ->with('dhml.phoneNumber LIKE :phone')
+            ->willReturnSelf();
+
+        $this->mockQueryBuilder
+            ->expects($this->once())
+            ->method('setParameter')
+            ->with('phone', '%+5511%')
+            ->willReturnSelf();
+
+        $this->mockQuery->method('getResult')->willReturn([]);
+
+        $this->repository->getLogs(0, 50, ['contact' => '+5511']);
+    }
+
+    public function testGetLogsWithDateFromFilter(): void
+    {
+        $this->mockQueryBuilder
+            ->expects($this->once())
+            ->method('andWhere')
+            ->with('dhml.dateSent >= :dateFrom')
+            ->willReturnSelf();
+
+        $this->mockQuery->method('getResult')->willReturn([]);
+
+        $this->repository->getLogs(0, 50, ['dateFrom' => '2025-01-01']);
+    }
+
+    public function testGetLogsWithDateToFilter(): void
+    {
+        $this->mockQueryBuilder
+            ->expects($this->once())
+            ->method('andWhere')
+            ->with('dhml.dateSent <= :dateTo')
+            ->willReturnSelf();
+
+        $this->mockQuery->method('getResult')->willReturn([]);
+
+        $this->repository->getLogs(0, 50, ['dateTo' => '2025-12-31']);
+    }
+
+    public function testGetLogsWithEmptyFiltersDoesNotCallAndWhere(): void
+    {
+        $this->mockQueryBuilder
+            ->expects($this->never())
+            ->method('andWhere');
+
+        $this->mockQuery->method('getResult')->willReturn([]);
+
+        $this->repository->getLogs(0, 50, []);
+    }
+
+    public function testCountAllWithStatusFilterAppliesCondition(): void
+    {
+        $this->mockQueryBuilder
+            ->expects($this->once())
+            ->method('andWhere')
+            ->with('dhml.status = :status')
+            ->willReturnSelf();
+
+        $this->mockQuery->method('getSingleScalarResult')->willReturn('7');
+
+        $result = $this->repository->countAll(['status' => 'failed']);
+
+        $this->assertSame(7, $result);
+    }
+
+    public function testCountAllWithEmptyFiltersReturnsInteger(): void
+    {
+        $this->mockQueryBuilder
+            ->expects($this->never())
+            ->method('andWhere');
+
+        $this->mockQuery->method('getSingleScalarResult')->willReturn('100');
+
+        $result = $this->repository->countAll([]);
+
+        $this->assertSame(100, $result);
     }
 }

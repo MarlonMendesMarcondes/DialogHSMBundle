@@ -16,6 +16,66 @@
             </div>
         </div>
 
+        {# ── Barra de Filtros ── #}
+        <div class="page-list-filter" style="padding: 10px 15px; background: #f9f9f9; border-bottom: 1px solid #ddd;">
+            <form method="post" action="{{ path('mautic_dialoghsm_log_index') }}" class="form-inline" id="dialoghsm-log-filter-form">
+                <div class="form-group" style="margin-right: 8px;">
+                    <label class="sr-only" for="filter-status">{{ 'dialoghsm.log.filter.status'|trans }}</label>
+                    <select name="dialoghsm_log_filter[status]" id="filter-status" class="form-control input-sm">
+                        <option value="">{{ 'dialoghsm.log.filter.status.all'|trans }}</option>
+                        {% for s in ['sent', 'delivered', 'read', 'failed', 'dlq'] %}
+                            <option value="{{ s }}" {% if (filters.status ?? '') == s %}selected{% endif %}>{{ s }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="form-group" style="margin-right: 8px;">
+                    <label class="sr-only" for="filter-date-from">{{ 'dialoghsm.log.filter.date_from'|trans }}</label>
+                    <input type="date" name="dialoghsm_log_filter[dateFrom]" id="filter-date-from"
+                           class="form-control input-sm"
+                           placeholder="{{ 'dialoghsm.log.filter.date_from'|trans }}"
+                           value="{{ filters.dateFrom ?? '' }}">
+                </div>
+
+                <div class="form-group" style="margin-right: 8px;">
+                    <label class="sr-only" for="filter-date-to">{{ 'dialoghsm.log.filter.date_to'|trans }}</label>
+                    <input type="date" name="dialoghsm_log_filter[dateTo]" id="filter-date-to"
+                           class="form-control input-sm"
+                           placeholder="{{ 'dialoghsm.log.filter.date_to'|trans }}"
+                           value="{{ filters.dateTo ?? '' }}">
+                </div>
+
+                <div class="form-group" style="margin-right: 8px;">
+                    <label class="sr-only" for="filter-sender">{{ 'dialoghsm.log.filter.sender'|trans }}</label>
+                    <input type="text" name="dialoghsm_log_filter[senderName]" id="filter-sender"
+                           class="form-control input-sm"
+                           placeholder="{{ 'dialoghsm.log.filter.sender'|trans }}"
+                           value="{{ filters.senderName ?? '' }}"
+                           style="width: 140px;">
+                </div>
+
+                <div class="form-group" style="margin-right: 8px;">
+                    <label class="sr-only" for="filter-contact">{{ 'dialoghsm.log.filter.contact'|trans }}</label>
+                    <input type="text" name="dialoghsm_log_filter[contact]" id="filter-contact"
+                           class="form-control input-sm"
+                           placeholder="{{ 'dialoghsm.log.filter.contact'|trans }}"
+                           value="{{ filters.contact ?? '' }}"
+                           style="width: 160px;">
+                </div>
+
+                <button type="submit" class="btn btn-primary btn-sm">
+                    <i class="ri-search-line"></i> {{ 'dialoghsm.log.filter.apply'|trans }}
+                </button>
+
+                {% if filters is not empty %}
+                    <a href="{{ path('mautic_dialoghsm_log_index') }}?clearFilters=1"
+                       class="btn btn-default btn-sm" style="margin-left: 4px;">
+                        <i class="ri-close-line"></i> {{ 'dialoghsm.log.filter.clear'|trans }}
+                    </a>
+                {% endif %}
+            </form>
+        </div>
+
         <div class="page-list">
             {{ block('listResults') }}
         </div>
@@ -66,6 +126,10 @@
                     <td>
                         {% if item.getStatus() == 'sent' %}
                             <span class="label label-success">{{ item.getStatus() }}</span>
+                        {% elseif item.getStatus() == 'delivered' %}
+                            <span class="label label-info">{{ item.getStatus() }}</span>
+                        {% elseif item.getStatus() == 'read' %}
+                            <span class="label label-primary">{{ item.getStatus() }}</span>
                         {% elseif item.getStatus() == 'dlq' %}
                             <span class="label label-warning">DLQ</span>
                         {% else %}
