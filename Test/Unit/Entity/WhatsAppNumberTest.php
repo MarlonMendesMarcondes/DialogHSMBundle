@@ -7,6 +7,7 @@ use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Validator\Constraints\Length;
 use Symfony\Component\Validator\Constraints\NotBlank;
+use Symfony\Component\Validator\Constraints\Regex;
 use Symfony\Component\Validator\Mapping\ClassMetadata as ValidatorClassMetadata;
 
 class WhatsAppNumberTest extends TestCase
@@ -246,6 +247,102 @@ class WhatsAppNumberTest extends TestCase
         $apiKeyConstraintTypes = array_map('get_class', $constraints['apiKey']);
         $this->assertContains(NotBlank::class, $apiKeyConstraintTypes);
         $this->assertContains(Length::class, $apiKeyConstraintTypes);
+    }
+
+    public function testLoadValidatorMetadataAddsRegexToQueueNames(): void
+    {
+        $constraints = [];
+
+        $metadata = $this->createMock(ValidatorClassMetadata::class);
+        $metadata
+            ->method('addPropertyConstraint')
+            ->willReturnCallback(function (string $property, $constraint) use (&$constraints): void {
+                $constraints[$property][] = $constraint;
+            });
+
+        WhatsAppNumber::loadValidatorMetadata($metadata);
+
+        $this->assertArrayHasKey('queueName', $constraints);
+        $this->assertArrayHasKey('batchQueueName', $constraints);
+        $this->assertInstanceOf(Regex::class, $constraints['queueName'][0]);
+        $this->assertInstanceOf(Regex::class, $constraints['batchQueueName'][0]);
+    }
+
+    /**
+     * @dataProvider validQueueNameProvider
+     */
+    public function testValidQueueNamesPassRegex(string $name): void
+    {
+        $constraints = [];
+
+        $metadata = $this->createMock(ValidatorClassMetadata::class);
+        $metadata
+            ->method('addPropertyConstraint')
+            ->willReturnCallback(function (string $property, $constraint) use (&$constraints): void {
+                $constraints[$property][] = $constraint;
+            });
+
+        WhatsAppNumber::loadValidatorMetadata($metadata);
+
+        /** @var Regex $regex */
+        $regex = $constraints['queueName'][0];
+        $this->assertMatchesRegularExpression($regex->pattern, $name);
+    }
+
+    /**
+     * @return array<string, array{string}>
+     */
+    public static function validQueueNameProvider(): array
+    {
+        return [
+            'simple'         => ['queue'],
+            'with-dot'       => ['queue.bulk'],
+            'with-hyphen'    => ['queue-bulk'],
+            'with-underscore'=> ['queue_bulk'],
+            'alphanumeric'   => ['queue123'],
+            'mixed'          => ['whatsapp.bulk-2024_v1'],
+        ];
+    }
+
+    /**
+     * @dataProvider invalidQueueNameProvider
+     */
+    public function testInvalidQueueNamesFailRegex(string $name): void
+    {
+        $constraints = [];
+
+        $metadata = $this->createMock(ValidatorClassMetadata::class);
+        $metadata
+            ->method('addPropertyConstraint')
+            ->willReturnCallback(function (string $property, $constraint) use (&$constraints): void {
+                $constraints[$property][] = $constraint;
+            });
+
+        WhatsAppNumber::loadValidatorMetadata($metadata);
+
+        /** @var Regex $regex */
+        $regex = $constraints['queueName'][0];
+        $this->assertDoesNotMatchRegularExpression($regex->pattern, $name);
+    }
+
+    /**
+     * @return array<string, array{string}>
+     */
+    public static function invalidQueueNameProvider(): array
+    {
+        return [
+            'space'          => ['queue bulk'],
+            'semicolon'      => ['queue;bulk'],
+            'ampersand'      => ['queue&bulk'],
+            'pipe'           => ['queue|bulk'],
+            'backtick'       => ['queue`bulk'],
+            'dollar'         => ['queue$bulk'],
+            'parenthesis'    => ['queue(bulk)'],
+            'slash'          => ['queue/bulk'],
+            'backslash'      => ['queue\\bulk'],
+            'quote'          => ["queue'bulk"],
+            'double-quote'   => ['queue"bulk'],
+        ];
     }
 
     public function testLoadValidatorMetadataApiKeyLengthMin(): void
