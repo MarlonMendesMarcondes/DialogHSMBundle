@@ -80,6 +80,21 @@ php bin/console cache:clear
 php bin/console mautic:plugins:reload
 ```
 
+> **Importante:** O `mautic:plugins:reload` só executa migrations quando a versão em `Config/config.php` é maior que a versão registrada no banco. Toda vez que uma migration for adicionada ao plugin, o campo `version` em `Config/config.php` **deve ser incrementado**. Sem isso, as migrations não rodam em produção.
+
+#### Se migrations ficaram para trás (emergência)
+
+Caso uma atualização tenha adicionado migrations sem incrementar a versão, force o re-run baixando a versão no banco e rodando o reload:
+
+```sql
+-- Execute no banco de produção antes do mautic:plugins:reload
+UPDATE plugins SET version = '0.0.0' WHERE bundle = 'DialogHSMBundle';
+```
+
+```bash
+php bin/console mautic:plugins:reload
+```
+
 ---
 
 ## Configuração Global do Plugin
