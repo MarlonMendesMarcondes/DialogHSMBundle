@@ -99,6 +99,28 @@ class WhatsAppNumberTest extends TestCase
         $this->assertSame($number, $number->setApiKey('key'));
     }
 
+    public function testSetApiKeyRawStoresValue(): void
+    {
+        $number = $this->makeNumber();
+        $number->setApiKeyRaw('ENC:base64|iv');
+        $this->assertSame('ENC:base64|iv', $number->getApiKey());
+    }
+
+    public function testSetApiKeyRawDoesNotTrackChange(): void
+    {
+        $number = $this->makeNumber();
+        $number->setApiKeyRaw('ENC:base64|iv');
+        $this->assertArrayNotHasKey('apiKey', $number->getChanges());
+    }
+
+    public function testSetApiKeyRawAcceptsNull(): void
+    {
+        $number = $this->makeNumber();
+        $number->setApiKey('some-key');
+        $number->setApiKeyRaw(null);
+        $this->assertNull($number->getApiKey());
+    }
+
     public function testGetBaseUrlReturnsNullByDefault(): void
     {
         $this->assertNull($this->makeNumber()->getBaseUrl());

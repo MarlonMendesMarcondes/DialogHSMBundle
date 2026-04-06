@@ -83,9 +83,11 @@ class ApiKeyEncryptionSubscriber
             return;
         }
 
-        $this->encryptAndCache($entity);
+        if (!$this->encryptAndCache($entity)) {
+            return; // nada foi alterado, changeset não precisa ser recomputado
+        }
 
-        // Reconstrói o changeset após modificar o campo
+        // Reconstrói o changeset somente se o campo foi de fato criptografado
         $em = $args->getObjectManager();
         $em->getUnitOfWork()->recomputeSingleEntityChangeSet(
             $em->getClassMetadata(WhatsAppNumber::class),
@@ -111,16 +113,19 @@ class ApiKeyEncryptionSubscriber
 
     /**
      * Criptografa a API key se ainda estiver em texto plano, guardando o original no cache.
+     * Retorna true se a criptografia foi realizada, false caso contrário.
      */
-    private function encryptAndCache(WhatsAppNumber $entity): void
+    private function encryptAndCache(WhatsAppNumber $entity): bool
     {
         $plain = $entity->getApiKey();
         if (!$plain || str_starts_with($plain, self::ENC_PREFIX)) {
-            return; // vazia ou já criptografada
+            return false; // vazia ou já criptografada
         }
 
         $this->plaintextCache[$entity] = $plain;
         $entity->setApiKeyRaw(self::ENC_PREFIX.$this->encryptionHelper->encrypt($plain));
+
+        return true;
     }
 
     /**
