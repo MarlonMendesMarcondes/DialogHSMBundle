@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MauticPlugin\DialogHSMBundle\Controller;
 
 use Doctrine\ORM\EntityManagerInterface;
+use Mautic\CacheBundle\Cache\CacheProviderInterface;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumberRepository;
@@ -27,16 +28,32 @@ class WebhookController extends AbstractController
         MessageLog::STATUS_READ      => 3,
     ];
 
+    /** Máximo de requisições por IP por janela de tempo. */
+    public const RATE_LIMIT     = 60;
+
+    /** Duração da janela em segundos. */
+    public const RATE_WINDOW    = 60;
+
     public function __construct(
         private WhatsAppNumberRepository $numberRepository,
         private MessageLogRepository $messageLogRepository,
         private EntityManagerInterface $entityManager,
         private LoggerInterface $logger,
+        private CacheProviderInterface $cache,
     ) {
     }
 
     public function handleAction(Request $request, string $token): Response
     {
+        // Rate limiting por IP (janela fixa)
+        if ($this->isRateLimited($request)) {
+            $this->logger->warning('DialogHSM Webhook: rate limit excedido', [
+                'ip' => $request->getClientIp(),
+            ]);
+
+            return new Response('Too Many Requests', Response::HTTP_TOO_MANY_REQUESTS);
+        }
+
         // Valida token
         $number = $this->numberRepository->findByWebhookToken($token);
 
@@ -91,6 +108,30 @@ class WebhookController extends AbstractController
         $this->entityManager->flush();
 
         return new Response('OK', Response::HTTP_OK);
+    }
+
+    /**
+     * Verifica se o IP excedeu o limite de requisições na janela atual.
+     * Usa janela fixa de RATE_WINDOW segundos com limite de RATE_LIMIT chamadas.
+     */
+    private function isRateLimited(Request $request): bool
+    {
+        $ip      = $request->getClientIp() ?? 'unknown';
+        $window  = (int) floor(time() / self::RATE_WINDOW);
+        $cacheKey = 'dialoghsm_wh_rl_'.sha1($ip).'_'.$window;
+
+        $item  = $this->cache->getItem($cacheKey);
+        $count = $item->isHit() ? (int) $item->get() : 0;
+
+        if ($count >= self::RATE_LIMIT) {
+            return true;
+        }
+
+        $item->set($count + 1);
+        $item->expiresAfter(self::RATE_WINDOW * 2); // TTL generoso para cobrir borda da janela
+        $this->cache->save($item);
+
+        return false;
     }
 
     /**
