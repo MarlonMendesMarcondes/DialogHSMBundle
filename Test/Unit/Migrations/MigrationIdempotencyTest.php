@@ -19,6 +19,7 @@ use MauticPlugin\DialogHSMBundle\Migrations\Version_1_0_7;
 use MauticPlugin\DialogHSMBundle\Migrations\Version_1_0_8;
 use MauticPlugin\DialogHSMBundle\Migrations\Version_1_1_0;
 use MauticPlugin\DialogHSMBundle\Migrations\Version_1_1_1;
+use MauticPlugin\DialogHSMBundle\Migrations\Version_1_2_0;
 use Mautic\IntegrationsBundle\Migration\AbstractMigration;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
@@ -498,6 +499,46 @@ class MigrationIdempotencyTest extends TestCase
     }
 
     // =========================================================================
+    // Version_1_2_0 — marcador de criptografia de api_key
+    // =========================================================================
+
+    public function testV120EncApplicableWhenSentinelColumnAbsent(): void
+    {
+        $migration = $this->migration(Version_1_2_0::class);
+        // Tabela existe com api_key mas sem api_key_enc_marker → aplicável
+        $this->assertTrue(
+            $this->callProtected($migration, 'isApplicable', $this->schemaWithTable(['api_key']))
+        );
+    }
+
+    public function testV120EncNotApplicableWhenSentinelColumnPresent(): void
+    {
+        $migration = $this->migration(Version_1_2_0::class);
+        $this->assertFalse(
+            $this->callProtected($migration, 'isApplicable', $this->schemaWithTable(['api_key', 'api_key_enc_marker']))
+        );
+    }
+
+    public function testV120EncNotApplicableWhenTableAbsent(): void
+    {
+        $migration = $this->migration(Version_1_2_0::class);
+        $this->assertFalse($this->callProtected($migration, 'isApplicable', $this->schemaWithoutTable()));
+    }
+
+    public function testV120EncSqlAddsMarkerColumn(): void
+    {
+        $sql = implode(' ', $this->collectSql($this->migration(Version_1_2_0::class)));
+        $this->assertStringContainsStringIgnoringCase('ADD COLUMN IF NOT EXISTS', $sql);
+        $this->assertStringContainsString('api_key_enc_marker', $sql);
+    }
+
+    public function testV120EncSqlTargetsNumbersTable(): void
+    {
+        $sql = implode(' ', $this->collectSql($this->migration(Version_1_2_0::class)));
+        $this->assertStringContainsString('dialog_hsm_numbers', $sql);
+    }
+
+    // =========================================================================
     // Contrato geral: nenhuma migration gera SQL vazio
     // =========================================================================
 
@@ -526,6 +567,7 @@ class MigrationIdempotencyTest extends TestCase
             [Version_1_0_8::class],
             [Version_1_1_0::class],
             [Version_1_1_1::class],
+            [Version_1_2_0::class],
         ];
     }
 }
