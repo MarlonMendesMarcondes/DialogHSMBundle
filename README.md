@@ -45,6 +45,27 @@ php bin/console mautic:plugins:reload
 > docker exec mautic_app php /var/www/html/bin/console mautic:plugins:reload
 > ```
 
+### 3. Criptografar API Keys existentes (obrigatório em atualizações)
+
+A partir da versão **1.2.0** as API Keys são armazenadas criptografadas. Após o `mautic:plugins:reload`, execute o comando abaixo para migrar os registros existentes:
+
+```bash
+php bin/console dialoghsm:encrypt-api-keys
+```
+
+> Com Docker:
+> ```bash
+> docker exec mautic_app php /var/www/html/bin/console dialoghsm:encrypt-api-keys
+> ```
+
+Use `--dry-run` para visualizar o que seria alterado sem efetuar mudanças:
+
+```bash
+php bin/console dialoghsm:encrypt-api-keys --dry-run
+```
+
+> Números criados após a atualização são criptografados automaticamente ao salvar. O comando é necessário apenas para migrar chaves já existentes no banco.
+
 ### 3. Ativar o plugin
 
 1. Acesse **Configurações → Plugins**
