@@ -9,6 +9,7 @@ use Mautic\CoreBundle\Doctrine\Mapping\ClassMetadataBuilder;
 use Mautic\CoreBundle\Entity\FormEntity;
 use Symfony\Component\Validator\Constraints\Length;
 use Symfony\Component\Validator\Constraints\NotBlank;
+use Symfony\Component\Validator\Constraints\Regex;
 use Symfony\Component\Validator\Mapping\ClassMetadata;
 
 class WhatsAppNumber extends FormEntity
@@ -75,6 +76,11 @@ class WhatsAppNumber extends FormEntity
 
     public static function loadValidatorMetadata(ClassMetadata $metadata): void
     {
+        $queueNameRegex = new Regex([
+            'pattern' => '/^[a-zA-Z0-9._\-]+$/',
+            'message' => 'dialoghsm.number.queue_name.invalid',
+        ]);
+
         $metadata->addPropertyConstraint('name', new NotBlank(['message' => 'mautic.core.name.required']));
         $metadata->addPropertyConstraint('phoneNumber', new NotBlank(['message' => 'dialoghsm.number.phone.required']));
         $metadata->addPropertyConstraint('apiKey', new NotBlank(['message' => 'API Key is required.']));
@@ -82,6 +88,8 @@ class WhatsAppNumber extends FormEntity
             'min'        => 20,
             'minMessage' => 'API Key is too short (minimum 20 characters). Please check and re-enter the key.',
         ]));
+        $metadata->addPropertyConstraint('queueName', $queueNameRegex);
+        $metadata->addPropertyConstraint('batchQueueName', $queueNameRegex);
     }
 
     public function getId(): ?int
