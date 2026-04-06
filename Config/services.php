@@ -28,6 +28,14 @@ return function (ContainerConfigurator $configurator): void {
         ->autowire()
         ->autoconfigure()
         ->arg('$directTransportDsn', '%env(MAUTIC_MESSENGER_DSN_WHATSAPP_DIRECT)%');
+
+    $services->set(\MauticPlugin\DialogHSMBundle\EventListener\ApiKeyEncryptionSubscriber::class)
+        ->autowire()
+        ->tag('doctrine.event_listener', ['event' => 'postLoad'])
+        ->tag('doctrine.event_listener', ['event' => 'prePersist'])
+        ->tag('doctrine.event_listener', ['event' => 'preUpdate'])
+        ->tag('doctrine.event_listener', ['event' => 'postPersist'])
+        ->tag('doctrine.event_listener', ['event' => 'postUpdate']);
     
         // Ensure controllers with constructor dependencies are instantiated from the container
         $services->set(\MauticPlugin\DialogHSMBundle\Controller\WhatsAppNumberController::class)

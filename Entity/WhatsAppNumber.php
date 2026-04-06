@@ -128,6 +128,17 @@ class WhatsAppNumber extends FormEntity
         return $this;
     }
 
+    /**
+     * Define a API key diretamente sem disparar rastreamento de alterações (isChanged).
+     * Uso exclusivo da camada de criptografia — não usar em código de negócio.
+     *
+     * @internal
+     */
+    public function setApiKeyRaw(?string $apiKey): void
+    {
+        $this->apiKey = $apiKey;
+    }
+
     public function getBaseUrl(): ?string
     {
         return $this->baseUrl;
