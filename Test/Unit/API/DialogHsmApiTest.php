@@ -660,5 +660,141 @@ class DialogHsmApiTest extends TestCase
             'limited_time_offer deve aparecer antes de button'
         );
     }
+
+    // =========================================================================
+    // SSRF Prevention
+    // =========================================================================
+
+    public function testHttpUrlIsRejected(): void
+    {
+        $capturedPayload = null;
+        $mockResponse    = new Response(200, [], json_encode(['message' => [['id' => 'abc']]]));
+
+        $this->mockClient
+            ->method('request')
+            ->willReturnCallback(function (string $method, string $url, array $options) use (&$capturedPayload, $mockResponse) {
+                $capturedPayload = $options['json'];
+
+                return $mockResponse;
+            });
+
+        $this->api->sendMessage('API_KEY', 'https://api.360dialog.com/v1/messages', '11999999999', [
+            'content'     => 'template',
+            'language'    => 'pt_BR',
+            'url_arquivo' => 'http://example.com/image.jpg', // HTTP, não HTTPS
+        ]);
+
+        // URL rejeitada → sem componente de header
+        $this->assertEmpty($capturedPayload['template']['components']);
+    }
+
+    public function testLocalhostUrlIsRejected(): void
+    {
+        $capturedPayload = null;
+        $mockResponse    = new Response(200, [], json_encode(['message' => [['id' => 'abc']]]));
+
+        $this->mockClient
+            ->method('request')
+            ->willReturnCallback(function (string $method, string $url, array $options) use (&$capturedPayload, $mockResponse) {
+                $capturedPayload = $options['json'];
+
+                return $mockResponse;
+            });
+
+        $this->api->sendMessage('API_KEY', 'https://api.360dialog.com/v1/messages', '11999999999', [
+            'content'     => 'template',
+            'language'    => 'pt_BR',
+            'url_arquivo' => 'https://localhost/image.jpg',
+        ]);
+
+        $this->assertEmpty($capturedPayload['template']['components']);
+    }
+
+    public function testPrivateIpUrlIsRejected(): void
+    {
+        $capturedPayload = null;
+        $mockResponse    = new Response(200, [], json_encode(['message' => [['id' => 'abc']]]));
+
+        $this->mockClient
+            ->method('request')
+            ->willReturnCallback(function (string $method, string $url, array $options) use (&$capturedPayload, $mockResponse) {
+                $capturedPayload = $options['json'];
+
+                return $mockResponse;
+            });
+
+        $this->api->sendMessage('API_KEY', 'https://api.360dialog.com/v1/messages', '11999999999', [
+            'content'     => 'template',
+            'language'    => 'pt_BR',
+            'url_arquivo' => 'https://192.168.1.100/image.jpg', // RFC1918
+        ]);
+
+        $this->assertEmpty($capturedPayload['template']['components']);
+    }
+
+    public function testLoopbackIpUrlIsRejected(): void
+    {
+        $capturedPayload = null;
+        $mockResponse    = new Response(200, [], json_encode(['message' => [['id' => 'abc']]]));
+
+        $this->mockClient
+            ->method('request')
+            ->willReturnCallback(function (string $method, string $url, array $options) use (&$capturedPayload, $mockResponse) {
+                $capturedPayload = $options['json'];
+
+                return $mockResponse;
+            });
+
+        $this->api->sendMessage('API_KEY', 'https://api.360dialog.com/v1/messages', '11999999999', [
+            'content'     => 'template',
+            'language'    => 'pt_BR',
+            'url_arquivo' => 'https://127.0.0.1/image.jpg',
+        ]);
+
+        $this->assertEmpty($capturedPayload['template']['components']);
+    }
+
+    public function testAwsMetadataIpUrlIsRejected(): void
+    {
+        $capturedPayload = null;
+        $mockResponse    = new Response(200, [], json_encode(['message' => [['id' => 'abc']]]));
+
+        $this->mockClient
+            ->method('request')
+            ->willReturnCallback(function (string $method, string $url, array $options) use (&$capturedPayload, $mockResponse) {
+                $capturedPayload = $options['json'];
+
+                return $mockResponse;
+            });
+
+        $this->api->sendMessage('API_KEY', 'https://api.360dialog.com/v1/messages', '11999999999', [
+            'content'     => 'template',
+            'language'    => 'pt_BR',
+            'url_arquivo' => 'https://169.254.169.254/latest/meta-data/image.jpg', // AWS metadata
+        ]);
+
+        $this->assertEmpty($capturedPayload['template']['components']);
+    }
+
+    public function testMalformedUrlIsRejected(): void
+    {
+        $capturedPayload = null;
+        $mockResponse    = new Response(200, [], json_encode(['message' => [['id' => 'abc']]]));
+
+        $this->mockClient
+            ->method('request')
+            ->willReturnCallback(function (string $method, string $url, array $options) use (&$capturedPayload, $mockResponse) {
+                $capturedPayload = $options['json'];
+
+                return $mockResponse;
+            });
+
+        $this->api->sendMessage('API_KEY', 'https://api.360dialog.com/v1/messages', '11999999999', [
+            'content'     => 'template',
+            'language'    => 'pt_BR',
+            'url_arquivo' => 'not-a-url',
+        ]);
+
+        $this->assertEmpty($capturedPayload['template']['components']);
+    }
 }
-?>

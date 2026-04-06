@@ -232,9 +232,18 @@ class DialogHSMApi
 
     /**
      * Monta o parâmetro de header baseado na extensão do arquivo.
+     * Retorna null se a URL for inválida ou aponte para endereços internos (SSRF).
      */
     private function buildHeaderParameter(string $url): ?array
     {
+        if (!$this->isSafeUrl($url)) {
+            $this->logger->warning('DialogHSM: URL de mídia rejeitada (SSRF ou esquema inválido)', [
+                'url' => $url,
+            ]);
+
+            return null;
+        }
+
         $lowerUrl = strtolower($url);
 
         if (preg_match('/\.(jpg|jpeg|png)$/', $lowerUrl)) {
@@ -259,5 +268,45 @@ class DialogHSMApi
         }
 
         return null;
+    }
+
+    /**
+     * Valida que a URL é segura para uso como mídia externa.
+     * Rejeita: esquemas não-HTTPS, IPs privados/loopback/link-local, hostnames internos.
+     */
+    private function isSafeUrl(string $url): bool
+    {
+        $parsed = parse_url($url);
+
+        if (!$parsed || !isset($parsed['scheme'], $parsed['host'])) {
+            return false;
+        }
+
+        if ('https' !== strtolower($parsed['scheme'])) {
+            return false;
+        }
+
+        $host = strtolower($parsed['host']);
+
+        // Rejeita localhost e variações
+        if (in_array($host, ['localhost', 'localhost.localdomain'], true)) {
+            return false;
+        }
+
+        // Resolve o host para IP e valida
+        $ip = filter_var($host, FILTER_VALIDATE_IP)
+            ? $host
+            : gethostbyname($host);
+
+        if (!filter_var($ip, FILTER_VALIDATE_IP)) {
+            return false;
+        }
+
+        // Rejeita IPs privados, loopback e link-local
+        if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+            return false;
+        }
+
+        return true;
     }
 }
