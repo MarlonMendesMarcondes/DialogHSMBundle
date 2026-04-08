@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 use Mautic\CoreBundle\DependencyInjection\MauticCoreExtension;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
-use function Symfony\Component\DependencyInjection\Loader\Configurator\service;
 
 return function (ContainerConfigurator $configurator): void {
     $services = $configurator->services()
@@ -49,9 +48,4 @@ return function (ContainerConfigurator $configurator): void {
             ->autowire()
             ->tag('controller.service_arguments');
 
-        $services->set(\MauticPlugin\DialogHSMBundle\Controller\WebhookController::class)
-            ->public()
-            ->autowire()
-            ->tag('controller.service_arguments')
-            ->arg('$cache', service('mautic.cache.provider'));
 };
