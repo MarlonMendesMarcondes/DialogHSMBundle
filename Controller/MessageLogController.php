@@ -16,6 +16,52 @@ class MessageLogController extends FormController
 
     private const FILTER_KEYS = ['status', 'dateFrom', 'dateTo', 'senderName', 'contact'];
 
+    public function dashboardAction(MessageLogRepository $messageLogRepository): Response
+    {
+        $now     = new \DateTime();
+        $from24h = (clone $now)->modify('-24 hours');
+        $from7d  = (clone $now)->modify('-7 days')->setTime(0, 0, 0);
+
+        $stats24h  = $messageLogRepository->getStatsByPeriod($from24h);
+        $stats7d   = $messageLogRepository->getStatsByPeriod($from7d);
+        $chartRaw  = $messageLogRepository->getChartData(7);
+
+        // Prepara dados para Chart.js
+        $labels   = array_keys($chartRaw);
+        $statuses = ['sent', 'delivered', 'read', 'failed', 'dlq'];
+        $datasets = [];
+        $colors   = [
+            'sent'      => 'rgba(92, 184, 92, 0.85)',
+            'delivered' => 'rgba(91, 192, 222, 0.85)',
+            'read'      => 'rgba(51, 122, 183, 0.85)',
+            'failed'    => 'rgba(217, 83, 79, 0.85)',
+            'dlq'       => 'rgba(240, 173, 78, 0.85)',
+        ];
+
+        foreach ($statuses as $status) {
+            $datasets[] = [
+                'label'           => $status,
+                'backgroundColor' => $colors[$status],
+                'data'            => array_values(array_map(fn ($day) => $day[$status], $chartRaw)),
+            ];
+        }
+
+        return $this->delegateView([
+            'viewParameters'  => [
+                'stats24h'  => $stats24h,
+                'stats7d'   => $stats7d,
+                'chartJson' => json_encode(['labels' => $labels, 'datasets' => $datasets]),
+                'tmpl'      => 'index',
+            ],
+            'contentTemplate' => '@DialogHSM/MessageLog/dashboard.html.twig',
+            'passthroughVars' => [
+                'activeLink'    => '#mautic_dialoghsm_dashboard',
+                'mauticContent' => 'dialoghsm_dashboard',
+                'route'         => $this->generateUrl('mautic_dialoghsm_dashboard'),
+            ],
+        ]);
+    }
+
     public function indexAction(Request $request, MessageLogRepository $messageLogRepository, int $page = 1): Response
     {
         $session = $request->getSession();
