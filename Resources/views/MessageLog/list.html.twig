@@ -23,7 +23,7 @@
                     <label class="sr-only" for="filter-status">{{ 'dialoghsm.log.filter.status'|trans }}</label>
                     <select name="dialoghsm_log_filter[status]" id="filter-status" class="form-control input-sm">
                         <option value="">{{ 'dialoghsm.log.filter.status.all'|trans }}</option>
-                        {% for s in ['sent', 'delivered', 'read', 'failed', 'dlq'] %}
+                        {% for s in ['sent', 'failed', 'dlq'] %}
                             <option value="{{ s }}" {% if (filters.status ?? '') == s %}selected{% endif %}>{{ ('dialoghsm.log.status.' ~ s)|trans }}</option>
                         {% endfor %}
                     </select>
