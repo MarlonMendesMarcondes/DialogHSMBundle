@@ -17,7 +17,7 @@
         </div>
 
         {# ── Barra de Filtros ── #}
-        <div class="page-list-filter" style="padding: 10px 15px; background: #f9f9f9; border-bottom: 1px solid #ddd;">
+        <div class="page-list-filter" style="padding: 10px 15px; background: var(--layer-01); border-bottom: 1px solid var(--border-subtle-01);">
             <form method="post" action="{{ path('mautic_dialoghsm_log_index') }}" class="form-inline" id="dialoghsm-log-filter-form">
                 <div class="form-group" style="margin-right: 8px;">
                     <label class="sr-only" for="filter-status">{{ 'dialoghsm.log.filter.status'|trans }}</label>
@@ -69,7 +69,7 @@
 
                 {% if filters is not empty %}
                     <a href="{{ path('mautic_dialoghsm_log_index') }}?clearFilters=1"
-                       class="btn btn-default btn-sm" style="margin-left: 4px;">
+                       class="btn btn-secondary btn-sm" style="margin-left: 4px;">
                         <i class="ri-close-line"></i> {{ 'dialoghsm.log.filter.clear'|trans }}
                     </a>
                 {% endif %}

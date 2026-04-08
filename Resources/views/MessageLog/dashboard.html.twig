@@ -4,24 +4,14 @@
 
 {% block content %}
 <style>
-.dialoghsm-card-label { font-size: 11px; margin-top: 4px; color: var(--dialoghsm-muted, #888); }
-@media (prefers-color-scheme: dark) {
-    :root { --dialoghsm-muted: #aaa; }
-    .btn-default { background-color: #2a2a2a !important; border-color: #555 !important; color: #ddd !important; }
-}
-body.dark-mode, [data-bs-theme="dark"], .dark {
-    --dialoghsm-muted: #aaa;
-}
-body.dark-mode .btn-default, [data-bs-theme="dark"] .btn-default, .dark .btn-default {
-    background-color: #2a2a2a !important; border-color: #555 !important; color: #ddd !important;
-}
+.dialoghsm-card-label { font-size: 11px; margin-top: 4px; color: var(--text-helper); }
 </style>
 <div class="row" style="margin-bottom: 20px;">
     <div class="col-xs-12" style="display: flex; flex-wrap: wrap; gap: 8px;">
-        <a href="{{ path('mautic_dialoghsm_log_index') }}" class="btn btn-default btn-sm">
+        <a href="{{ path('mautic_dialoghsm_log_index') }}" class="btn btn-secondary btn-sm">
             <i class="ri-list-unordered"></i> {{ 'dialoghsm.menu.logs'|trans }}
         </a>
-        <a href="{{ path('mautic_dialoghsm_number_index') }}" class="btn btn-default btn-sm">
+        <a href="{{ path('mautic_dialoghsm_number_index') }}" class="btn btn-secondary btn-sm">
             <i class="ri-phone-line"></i> {{ 'dialoghsm.menu.numbers'|trans }}
         </a>
     </div>
@@ -35,8 +25,9 @@ body.dark-mode .btn-default, [data-bs-theme="dark"] .btn-default, .dark .btn-def
     {{ _self.statCard('dialoghsm.dashboard.sent',   stats24h.sent,   'ri-checkbox-circle-line',  '#5cb85c') }}
     {{ _self.statCard('dialoghsm.dashboard.failed', stats24h.failed, 'ri-close-circle-line',     '#d9534f') }}
     {{ _self.statCard('dialoghsm.dashboard.dlq',    stats24h.dlq,    'ri-error-warning-line',    '#f0ad4e') }}
-    {% if stats24h.total > 0 %}
-        {% set rate = (stats24h.sent / stats24h.total * 100)|round(1) %}
+    {% set processed24h = stats24h.sent + stats24h.failed + stats24h.dlq %}
+    {% if processed24h > 0 %}
+        {% set rate = (stats24h.sent / processed24h * 100)|round(1) %}
     {% else %}
         {% set rate = 0 %}
     {% endif %}
@@ -51,8 +42,9 @@ body.dark-mode .btn-default, [data-bs-theme="dark"] .btn-default, .dark .btn-def
     {{ _self.statCard('dialoghsm.dashboard.sent',   stats7d.sent,   'ri-checkbox-circle-line',  '#5cb85c') }}
     {{ _self.statCard('dialoghsm.dashboard.failed', stats7d.failed, 'ri-close-circle-line', '#d9534f') }}
     {{ _self.statCard('dialoghsm.dashboard.dlq', stats7d.dlq, 'ri-error-warning-line', '#f0ad4e') }}
-    {% if stats7d.total > 0 %}
-        {% set rate7 = (stats7d.sent / stats7d.total * 100)|round(1) %}
+    {% set processed7d = stats7d.sent + stats7d.failed + stats7d.dlq %}
+    {% if processed7d > 0 %}
+        {% set rate7 = (stats7d.sent / processed7d * 100)|round(1) %}
     {% else %}
         {% set rate7 = 0 %}
     {% endif %}
