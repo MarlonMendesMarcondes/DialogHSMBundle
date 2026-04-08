@@ -22,6 +22,10 @@ return [
                 'controller' => 'MauticPlugin\DialogHSMBundle\Controller\MessageLogController::indexAction',
                 'defaults'   => ['page' => 1],
             ],
+            'mautic_dialoghsm_dashboard' => [
+                'path'       => '/dialoghsm/dashboard',
+                'controller' => 'MauticPlugin\DialogHSMBundle\Controller\MessageLogController::dashboardAction',
+            ],
         ],
         'public' => [
             'mautic_dialoghsm_webhook' => [
@@ -35,6 +39,11 @@ return [
     'menu' => [
         'main' => [
             'items' => [
+                'dialoghsm.menu.dashboard' => [
+                    'route'    => 'mautic_dialoghsm_dashboard',
+                    'parent'   => 'mautic.core.channels',
+                    'priority' => 0,
+                ],
                 'dialoghsm.menu.numbers' => [
                     'route'    => 'mautic_dialoghsm_number_index',
                     'parent'   => 'mautic.core.channels',
