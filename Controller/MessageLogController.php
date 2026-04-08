@@ -5,16 +5,39 @@ declare(strict_types=1);
 namespace MauticPlugin\DialogHSMBundle\Controller;
 
 use Mautic\CoreBundle\Controller\FormController;
+use Mautic\IntegrationsBundle\Helper\IntegrationsHelper;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
+use MauticPlugin\DialogHSMBundle\Integration\DialogHSMIntegration;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Contracts\Service\Attribute\Required;
 
 class MessageLogController extends FormController
 {
-    private const MAX_LOGS   = 10000;
-    private const PAGE_LIMIT = 50;
+    private const DEFAULT_MAX_LOGS = 10000;
+    private const PAGE_LIMIT       = 50;
 
     private const FILTER_KEYS = ['status', 'dateFrom', 'dateTo', 'senderName', 'contact'];
+
+    private IntegrationsHelper $integrationsHelper;
+
+    #[Required]
+    public function setIntegrationsHelper(IntegrationsHelper $integrationsHelper): void
+    {
+        $this->integrationsHelper = $integrationsHelper;
+    }
+
+    private function getMaxLogs(): int
+    {
+        try {
+            $integration = $this->integrationsHelper->getIntegration(DialogHSMIntegration::NAME);
+            $apiKeys     = $integration->getIntegrationConfiguration()->getApiKeys() ?? [];
+
+            return max(1_000, min(1_000_000, (int) ($apiKeys['log_max_records'] ?? self::DEFAULT_MAX_LOGS)));
+        } catch (\Throwable) {
+            return self::DEFAULT_MAX_LOGS;
+        }
+    }
 
     public function dashboardAction(MessageLogRepository $messageLogRepository): Response
     {
@@ -108,7 +131,7 @@ class MessageLogController extends FormController
             'viewParameters' => [
                 'items'      => $items,
                 'totalItems' => $total,
-                'maxLogs'    => self::MAX_LOGS,
+                'maxLogs'    => $this->getMaxLogs(),
                 'page'       => $page,
                 'limit'      => $limit,
                 'filters'    => $filters,
