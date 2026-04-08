@@ -99,7 +99,7 @@ class MessageLogRepository extends CommonRepository
             [$from->format('Y-m-d H:i:s')]
         );
 
-        $stats = ['total' => 0, 'sent' => 0, 'delivered' => 0, 'read' => 0, 'failed' => 0, 'dlq' => 0];
+        $stats = ['total' => 0, 'queued' => 0, 'sent' => 0, 'delivered' => 0, 'read' => 0, 'failed' => 0, 'dlq' => 0];
         foreach ($rows as $row) {
             $status       = (string) $row['status'];
             $count        = (int) $row['cnt'];
@@ -132,7 +132,7 @@ class MessageLogRepository extends CommonRepository
             [$from->format('Y-m-d H:i:s')]
         );
 
-        $empty = ['sent' => 0, 'delivered' => 0, 'read' => 0, 'failed' => 0, 'dlq' => 0];
+        $empty = ['queued' => 0, 'sent' => 0, 'delivered' => 0, 'read' => 0, 'failed' => 0, 'dlq' => 0];
         $data  = [];
 
         // Preenche todos os dias do período com zeros para o gráfico ficar contínuo
