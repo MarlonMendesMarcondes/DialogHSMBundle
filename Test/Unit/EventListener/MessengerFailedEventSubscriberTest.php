@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Doctrine\ORM\EntityManagerInterface;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
+use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\EventListener\MessengerFailedEventSubscriber;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use PHPUnit\Framework\MockObject\MockObject;
@@ -16,14 +17,19 @@ class MessengerFailedEventSubscriberTest extends TestCase
 {
     private EntityManagerInterface&MockObject $mockEm;
     private LoggerInterface&MockObject $mockLogger;
+    private MessageLogRepository&MockObject $mockRepo;
     private MessengerFailedEventSubscriber $subscriber;
 
     protected function setUp(): void
     {
         $this->mockEm     = $this->createMock(EntityManagerInterface::class);
         $this->mockLogger = $this->createMock(LoggerInterface::class);
+        $this->mockRepo   = $this->createMock(MessageLogRepository::class);
 
-        $this->subscriber = new MessengerFailedEventSubscriber($this->mockEm, $this->mockLogger);
+        // Por padrão: sem log queued existente
+        $this->mockRepo->method('findByWamid')->willReturn(null);
+
+        $this->subscriber = new MessengerFailedEventSubscriber($this->mockEm, $this->mockLogger, $this->mockRepo);
     }
 
     private function makeMessage(
@@ -31,6 +37,7 @@ class MessengerFailedEventSubscriberTest extends TestCase
         string $phone = '+5511999999999',
         string $template = 'promo_hsm',
         string $senderName = 'Vendas',
+        ?string $queueLogId = null,
     ): SendWhatsAppMessage {
         return new SendWhatsAppMessage(
             leadId:             $leadId,
@@ -40,6 +47,7 @@ class MessengerFailedEventSubscriberTest extends TestCase
             payloadData:        ['content' => $template],
             templateName:       $template,
             whatsAppNumberName: $senderName,
+            queueLogId:         $queueLogId,
         );
     }
 
@@ -198,6 +206,72 @@ class MessengerFailedEventSubscriberTest extends TestCase
         // Não deve lançar exceção
         $this->expectNotToPerformAssertions();
         $event = $this->makeEvent($this->makeMessage(), new \RuntimeException('err'));
+        $this->subscriber->onMessageFailed($event);
+    }
+
+    // =========================================================================
+    // onMessageFailed — reutilização do log queued via queueLogId
+    // =========================================================================
+
+    public function testUpdatesExistingQueuedLogInsteadOfCreatingNew(): void
+    {
+        $existingLog = new MessageLog();
+        $existingLog->setLeadId(42);
+        $existingLog->setStatus(MessageLog::STATUS_QUEUED);
+        $existingLog->setWamid('uuid-abc');
+
+        // Mock dedicado para este teste, evitando conflito com o stub de setUp
+        $mockRepo = $this->createMock(MessageLogRepository::class);
+        $mockRepo->expects($this->once())
+            ->method('findByWamid')
+            ->with('uuid-abc')
+            ->willReturn($existingLog);
+
+        $persisted  = null;
+        $mockEm     = $this->createMock(EntityManagerInterface::class);
+        $mockEm->expects($this->once())
+            ->method('persist')
+            ->willReturnCallback(function (MessageLog $log) use (&$persisted): void {
+                $persisted = $log;
+            });
+        $mockEm->expects($this->once())->method('flush');
+
+        $subscriber = new MessengerFailedEventSubscriber($mockEm, $this->mockLogger, $mockRepo);
+
+        $message = $this->makeMessage(leadId: 42, queueLogId: 'uuid-abc');
+        $event   = $this->makeEvent($message, new \RuntimeException('API timeout'));
+        $subscriber->onMessageFailed($event);
+
+        $this->assertSame($existingLog, $persisted);
+        $this->assertSame(MessageLog::STATUS_DLQ, $persisted->getStatus());
+        $this->assertNull($persisted->getWamid());
+        $this->assertStringContainsString('API timeout', $persisted->getErrorMessage());
+    }
+
+    public function testCreatesNewLogWhenQueuedLogNotFound(): void
+    {
+        // mockRepo já retorna null por padrão (setUp)
+        $persisted = null;
+        $this->mockEm->method('persist')->willReturnCallback(function (MessageLog $log) use (&$persisted): void {
+            $persisted = $log;
+        });
+
+        $message = $this->makeMessage(leadId: 99, queueLogId: 'unknown-uuid');
+        $event   = $this->makeEvent($message, new \RuntimeException('err'));
+        $this->subscriber->onMessageFailed($event);
+
+        $this->assertSame(99, $persisted->getLeadId());
+        $this->assertSame(MessageLog::STATUS_DLQ, $persisted->getStatus());
+    }
+
+    public function testDoesNotLookupRepoWhenQueueLogIdIsNull(): void
+    {
+        $this->mockRepo->expects($this->never())->method('findByWamid');
+
+        $this->mockEm->method('persist')->willReturnCallback(function (): void {});
+
+        $message = $this->makeMessage(queueLogId: null);
+        $event   = $this->makeEvent($message, new \RuntimeException('err'));
         $this->subscriber->onMessageFailed($event);
     }
 }

@@ -16,6 +16,26 @@ class SendWhatsAppMessage
         public readonly string $whatsAppNumberName = '',
         public readonly ?int $campaignId = null,
         public readonly ?int $campaignEventId = null,
+        public readonly ?string $queueLogId = null,
     ) {
+    }
+
+    /**
+     * Retorna uma cópia do DTO com o queueLogId definido.
+     */
+    public function withQueueLogId(string $queueLogId): self
+    {
+        return new self(
+            leadId:             $this->leadId,
+            phone:              $this->phone,
+            apiKey:             $this->apiKey,
+            baseUrl:            $this->baseUrl,
+            payloadData:        $this->payloadData,
+            templateName:       $this->templateName,
+            whatsAppNumberName: $this->whatsAppNumberName,
+            campaignId:         $this->campaignId,
+            campaignEventId:    $this->campaignEventId,
+            queueLogId:         $queueLogId,
+        );
     }
 }

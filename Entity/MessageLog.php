@@ -10,6 +10,7 @@ use Mautic\CoreBundle\Doctrine\Mapping\ClassMetadataBuilder;
 
 class MessageLog
 {
+    public const STATUS_QUEUED    = 'queued';
     public const STATUS_SENT      = 'sent';
     public const STATUS_DELIVERED = 'delivered';
     public const STATUS_READ      = 'read';

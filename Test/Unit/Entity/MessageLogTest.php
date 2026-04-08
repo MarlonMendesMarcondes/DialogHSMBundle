@@ -279,6 +279,7 @@ class MessageLogTest extends TestCase
 
     public function testStatusConstantsExist(): void
     {
+        $this->assertSame('queued', MessageLog::STATUS_QUEUED);
         $this->assertSame('sent', MessageLog::STATUS_SENT);
         $this->assertSame('delivered', MessageLog::STATUS_DELIVERED);
         $this->assertSame('read', MessageLog::STATUS_READ);
