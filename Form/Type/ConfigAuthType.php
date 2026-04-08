@@ -52,6 +52,24 @@ class ConfigAuthType extends AbstractType
                 'help' => 'dialoghsm.config.consumer_limit.help',
             ]
         );
+
+        $builder->add(
+            'log_max_records',
+            IntegerType::class,
+            [
+                'label'      => 'dialoghsm.config.log_max_records',
+                'label_attr' => ['class' => 'control-label'],
+                'required'   => false,
+                'attr'       => [
+                    'class'   => 'form-control',
+                    'min'     => 1000,
+                    'max'     => 1000000,
+                    'tooltip' => 'dialoghsm.config.log_max_records.tooltip',
+                ],
+                'data' => (int) ($data['log_max_records'] ?? 10000),
+                'help' => 'dialoghsm.config.log_max_records.help',
+            ]
+        );
     }
 
     public function configureOptions(OptionsResolver $resolver): void
