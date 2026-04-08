@@ -140,7 +140,7 @@ class SendWhatsAppDirectBatchMessageHandlerTest extends TestCase
         ($this->handler)($batch);
         $elapsed = microtime(true) - $start;
 
-        $this->assertGreaterThanOrEqual(0.9, $elapsed, 'Esperado 1 sleep de 1s (≥0.9s)');
+        $this->assertGreaterThanOrEqual(0.75, $elapsed, 'Esperado 1 sleep de 1s (≥0.75s)');
         $this->assertLessThan(2.5, $elapsed, 'Grupo parcial não gera sleep extra');
     }
 

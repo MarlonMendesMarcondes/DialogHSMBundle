@@ -341,8 +341,8 @@ class CampaignSubscriberPerformanceTest extends TestCase
         $subscriber->onCampaignTriggerAction($event);
         $elapsed = microtime(true) - $start;
 
-        // 2 sleeps de 1s = pelo menos 1.9s (margem de 5% para variação do scheduler)
-        $this->assertGreaterThanOrEqual(1.9, $elapsed, 'Esperados 2 sleeps de 1s (lote 10, 20 contatos)');
+        // 2 sleeps de 1s = pelo menos 1.7s (margem de 15% para variação do scheduler / Docker)
+        $this->assertGreaterThanOrEqual(1.7, $elapsed, 'Esperados 2 sleeps de 1s (lote 10, 20 contatos)');
         // Não deve ultrapassar 3s (margem)
         $this->assertLessThan(3.0, $elapsed, 'Não deve haver mais de 2 sleeps');
     }

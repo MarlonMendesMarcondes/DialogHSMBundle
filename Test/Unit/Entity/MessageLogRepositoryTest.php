@@ -160,6 +160,30 @@ class MessageLogRepositoryTest extends TestCase
     }
 
     // =========================================================================
+    // findByWamid
+    // =========================================================================
+
+    public function testFindByWamidReturnsNullWhenNotFound(): void
+    {
+        $this->mockQuery->method('getResult')->willReturn([]);
+
+        $result = $this->repository->findByWamid('nonexistent-uuid');
+
+        $this->assertNull($result);
+    }
+
+    public function testFindByWamidReturnsLogWhenFound(): void
+    {
+        $log = new MessageLog();
+
+        $this->mockQuery->method('getResult')->willReturn([$log]);
+
+        $result = $this->repository->findByWamid('some-uuid-123');
+
+        $this->assertSame($log, $result);
+    }
+
+    // =========================================================================
     // prune
     // =========================================================================
 

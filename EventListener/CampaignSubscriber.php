@@ -126,6 +126,9 @@ class CampaignSubscriber implements EventSubscriberInterface
         $mode   = trim($config['queue_override'] ?? '');
 
         $this->processContacts($event, function (SendWhatsAppMessage $message, WhatsAppNumber $number) use ($mode): bool {
+            $uuid = bin2hex(random_bytes(16));
+            $this->persistQueuedLog($message, $uuid);
+
             $queueName = match ($mode) {
                 'batch' => $number->getBatchQueueName() ?: $number->getQueueName(),
                 'bulk'  => $number->getQueueName(),
@@ -133,7 +136,7 @@ class CampaignSubscriber implements EventSubscriberInterface
             };
 
             $stamps = $queueName ? [new AmqpStamp($queueName)] : [];
-            $this->bus->dispatch($message, $stamps);
+            $this->bus->dispatch($message->withQueueLogId($uuid), $stamps);
 
             return true;
         }, applyBatchSleep: false);
@@ -278,6 +281,34 @@ class CampaignSubscriber implements EventSubscriberInterface
         }
 
         $event->failAll($failMessage);
+    }
+
+    /**
+     * Persiste um MessageLog com status 'queued' no momento do dispatch para a fila.
+     * O wamid recebe o UUID temporário para que o handler possa localizar e atualizar este registro.
+     */
+    private function persistQueuedLog(SendWhatsAppMessage $message, string $uuid): void
+    {
+        try {
+            $log = new MessageLog();
+            $log->setLeadId($message->leadId);
+            $log->setCampaignId($message->campaignId);
+            $log->setCampaignEventId($message->campaignEventId);
+            $log->setSenderName($message->whatsAppNumberName ?: null);
+            $log->setTemplateName($message->templateName);
+            $log->setPhoneNumber($message->phone);
+            $log->setWamid($uuid);
+            $log->setStatus(MessageLog::STATUS_QUEUED);
+            $log->setDateSent(new \DateTime());
+
+            $this->entityManager->persist($log);
+            $this->entityManager->flush();
+        } catch (\Throwable $e) {
+            $this->logger->warning('DialogHSM: Falha ao registrar log queued', [
+                'lead_id' => $message->leadId,
+                'error'   => $e->getMessage(),
+            ]);
+        }
     }
 
     /**
