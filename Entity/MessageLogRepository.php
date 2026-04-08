@@ -152,9 +152,21 @@ class MessageLogRepository extends CommonRepository
         return $data;
     }
 
+    /**
+     * Localiza um MessageLog pelo wamid (inclui UUIDs temporários de logs queued).
+     * Retorna o registro mais recente caso haja duplicatas.
+     */
     public function findByWamid(string $wamid): ?MessageLog
     {
-        return $this->findOneBy(['wamid' => $wamid]);
+        $results = $this->createQueryBuilder('dhml')
+            ->andWhere('dhml.wamid = :wamid')
+            ->setParameter('wamid', $wamid)
+            ->orderBy('dhml.id', 'DESC')
+            ->setMaxResults(1)
+            ->getQuery()
+            ->getResult();
+
+        return $results[0] ?? null;
     }
 
     /**

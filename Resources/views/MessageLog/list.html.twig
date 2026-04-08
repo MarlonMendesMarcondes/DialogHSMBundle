@@ -124,7 +124,9 @@
                         {% endif %}
                     </td>
                     <td>
-                        {% if item.getStatus() == 'sent' %}
+                        {% if item.getStatus() == 'queued' %}
+                            <span class="label label-default">{{ 'dialoghsm.log.status.queued'|trans }}</span>
+                        {% elseif item.getStatus() == 'sent' %}
                             <span class="label label-success">{{ 'dialoghsm.log.status.sent'|trans }}</span>
                         {% elseif item.getStatus() == 'delivered' %}
                             <span class="label label-info">{{ 'dialoghsm.log.status.delivered'|trans }}</span>

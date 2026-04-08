@@ -6,6 +6,7 @@ namespace MauticPlugin\DialogHSMBundle\EventListener;
 
 use Doctrine\ORM\EntityManagerInterface;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
+use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
@@ -16,6 +17,7 @@ class MessengerFailedEventSubscriber implements EventSubscriberInterface
     public function __construct(
         private EntityManagerInterface $entityManager,
         private LoggerInterface $logger,
+        private MessageLogRepository $messageLogRepository,
     ) {
     }
 
@@ -37,14 +39,23 @@ class MessengerFailedEventSubscriber implements EventSubscriberInterface
         }
 
         try {
-            $log = new MessageLog();
-            $log->setLeadId($message->leadId);
-            $log->setCampaignId($message->campaignId);
-            $log->setCampaignEventId($message->campaignEventId);
-            $log->setSenderName($message->whatsAppNumberName ?: null);
-            $log->setTemplateName($message->templateName);
-            $log->setPhoneNumber($message->phone);
+            // Reutiliza log queued criado no dispatch (identificado pelo UUID no wamid)
+            $log = $message->queueLogId !== null
+                ? $this->messageLogRepository->findByWamid($message->queueLogId)
+                : null;
+
+            if ($log === null) {
+                $log = new MessageLog();
+                $log->setLeadId($message->leadId);
+                $log->setCampaignId($message->campaignId);
+                $log->setCampaignEventId($message->campaignEventId);
+                $log->setSenderName($message->whatsAppNumberName ?: null);
+                $log->setTemplateName($message->templateName);
+                $log->setPhoneNumber($message->phone);
+            }
+
             $log->setStatus(MessageLog::STATUS_DLQ);
+            $log->setWamid(null);
             $log->setErrorMessage(mb_substr($event->getThrowable()->getMessage(), 0, 255));
             $log->setDateSent(new \DateTime());
 
