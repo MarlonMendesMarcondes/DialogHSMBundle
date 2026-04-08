@@ -84,6 +84,74 @@ class MessageLogRepository extends CommonRepository
         }
     }
 
+    /**
+     * Retorna contagens por status para o período a partir de $from.
+     *
+     * @return array{total:int, sent:int, delivered:int, read:int, failed:int, dlq:int}
+     */
+    public function getStatsByPeriod(\DateTimeInterface $from): array
+    {
+        $conn      = $this->getEntityManager()->getConnection();
+        $tableName = $this->getEntityManager()->getClassMetadata(MessageLog::class)->getTableName();
+
+        $rows = $conn->fetchAllAssociative(
+            "SELECT status, COUNT(*) AS cnt FROM `{$tableName}` WHERE date_sent >= ? GROUP BY status",
+            [$from->format('Y-m-d H:i:s')]
+        );
+
+        $stats = ['total' => 0, 'sent' => 0, 'delivered' => 0, 'read' => 0, 'failed' => 0, 'dlq' => 0];
+        foreach ($rows as $row) {
+            $status       = (string) $row['status'];
+            $count        = (int) $row['cnt'];
+            $stats['total'] += $count;
+            if (array_key_exists($status, $stats)) {
+                $stats[$status] = $count;
+            }
+        }
+
+        return $stats;
+    }
+
+    /**
+     * Retorna envios agrupados por dia e status para os últimos N dias.
+     *
+     * @return array<string, array{sent:int, delivered:int, read:int, failed:int, dlq:int}>
+     */
+    public function getChartData(int $days = 7): array
+    {
+        $conn      = $this->getEntityManager()->getConnection();
+        $tableName = $this->getEntityManager()->getClassMetadata(MessageLog::class)->getTableName();
+        $from      = (new \DateTime())->modify("-{$days} days")->setTime(0, 0, 0);
+
+        $rows = $conn->fetchAllAssociative(
+            "SELECT DATE(date_sent) AS day, status, COUNT(*) AS cnt
+             FROM `{$tableName}`
+             WHERE date_sent >= ?
+             GROUP BY DATE(date_sent), status
+             ORDER BY day ASC",
+            [$from->format('Y-m-d H:i:s')]
+        );
+
+        $empty = ['sent' => 0, 'delivered' => 0, 'read' => 0, 'failed' => 0, 'dlq' => 0];
+        $data  = [];
+
+        // Preenche todos os dias do período com zeros para o gráfico ficar contínuo
+        for ($i = $days - 1; $i >= 0; --$i) {
+            $day        = (new \DateTime())->modify("-{$i} days")->format('Y-m-d');
+            $data[$day] = $empty;
+        }
+
+        foreach ($rows as $row) {
+            $day    = (string) $row['day'];
+            $status = (string) $row['status'];
+            if (isset($data[$day]) && array_key_exists($status, $data[$day])) {
+                $data[$day][$status] = (int) $row['cnt'];
+            }
+        }
+
+        return $data;
+    }
+
     public function findByWamid(string $wamid): ?MessageLog
     {
         return $this->findOneBy(['wamid' => $wamid]);

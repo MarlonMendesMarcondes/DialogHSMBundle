@@ -411,4 +411,139 @@ class MessageLogRepositoryTest extends TestCase
 
         $this->assertSame(100, $result);
     }
+
+    // =========================================================================
+    // getStatsByPeriod
+    // =========================================================================
+
+    public function testGetStatsByPeriodReturnsZeroesWhenNoRows(): void
+    {
+        $this->mockConnection
+            ->expects($this->once())
+            ->method('fetchAllAssociative')
+            ->willReturn([]);
+
+        $result = $this->repository->getStatsByPeriod(new \DateTime('-24 hours'));
+
+        $this->assertSame(0, $result['total']);
+        $this->assertSame(0, $result['sent']);
+        $this->assertSame(0, $result['failed']);
+        $this->assertSame(0, $result['delivered']);
+        $this->assertSame(0, $result['read']);
+        $this->assertSame(0, $result['dlq']);
+    }
+
+    public function testGetStatsByPeriodSumsTotal(): void
+    {
+        $this->mockConnection
+            ->method('fetchAllAssociative')
+            ->willReturn([
+                ['status' => 'sent',   'cnt' => '10'],
+                ['status' => 'failed', 'cnt' => '3'],
+                ['status' => 'dlq',    'cnt' => '1'],
+            ]);
+
+        $result = $this->repository->getStatsByPeriod(new \DateTime('-24 hours'));
+
+        $this->assertSame(14, $result['total']);
+        $this->assertSame(10, $result['sent']);
+        $this->assertSame(3, $result['failed']);
+        $this->assertSame(1, $result['dlq']);
+        $this->assertSame(0, $result['delivered']);
+        $this->assertSame(0, $result['read']);
+    }
+
+    public function testGetStatsByPeriodIgnoresUnknownStatuses(): void
+    {
+        $this->mockConnection
+            ->method('fetchAllAssociative')
+            ->willReturn([
+                ['status' => 'sent',    'cnt' => '5'],
+                ['status' => 'unknown', 'cnt' => '99'],
+            ]);
+
+        $result = $this->repository->getStatsByPeriod(new \DateTime('-24 hours'));
+
+        $this->assertSame(104, $result['total']); // unknown soma no total
+        $this->assertSame(5, $result['sent']);
+        $this->assertArrayNotHasKey('unknown', $result);
+    }
+
+    public function testGetStatsByPeriodPassesCorrectDateToQuery(): void
+    {
+        $from = new \DateTime('2025-01-15 10:00:00');
+
+        $this->mockConnection
+            ->expects($this->once())
+            ->method('fetchAllAssociative')
+            ->with(
+                $this->stringContains('date_sent >= ?'),
+                ['2025-01-15 10:00:00']
+            )
+            ->willReturn([]);
+
+        $this->repository->getStatsByPeriod($from);
+    }
+
+    // =========================================================================
+    // getChartData
+    // =========================================================================
+
+    public function testGetChartDataReturnsAllDaysWithZeroes(): void
+    {
+        $this->mockConnection
+            ->method('fetchAllAssociative')
+            ->willReturn([]);
+
+        $result = $this->repository->getChartData(7);
+
+        $this->assertCount(7, $result);
+        foreach ($result as $day) {
+            $this->assertSame(0, $day['sent']);
+            $this->assertSame(0, $day['failed']);
+        }
+    }
+
+    public function testGetChartDataFillsCorrectStatus(): void
+    {
+        $today = (new \DateTime())->format('Y-m-d');
+
+        $this->mockConnection
+            ->method('fetchAllAssociative')
+            ->willReturn([
+                ['day' => $today, 'status' => 'sent',   'cnt' => '8'],
+                ['day' => $today, 'status' => 'failed', 'cnt' => '2'],
+            ]);
+
+        $result = $this->repository->getChartData(7);
+
+        $this->assertArrayHasKey($today, $result);
+        $this->assertSame(8, $result[$today]['sent']);
+        $this->assertSame(2, $result[$today]['failed']);
+        $this->assertSame(0, $result[$today]['delivered']);
+    }
+
+    public function testGetChartDataIgnoresUnknownStatuses(): void
+    {
+        $today = (new \DateTime())->format('Y-m-d');
+
+        $this->mockConnection
+            ->method('fetchAllAssociative')
+            ->willReturn([
+                ['day' => $today, 'status' => 'unknown', 'cnt' => '5'],
+            ]);
+
+        $result = $this->repository->getChartData(7);
+
+        $this->assertArrayNotHasKey('unknown', $result[$today]);
+        $this->assertSame(0, $result[$today]['sent']);
+    }
+
+    public function testGetChartDataDayCountMatchesParameter(): void
+    {
+        $this->mockConnection->method('fetchAllAssociative')->willReturn([]);
+
+        $this->assertCount(3,  $this->repository->getChartData(3));
+        $this->assertCount(14, $this->repository->getChartData(14));
+    }
 }

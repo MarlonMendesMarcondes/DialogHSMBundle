@@ -1,0 +1,114 @@
+{% extends '@MauticCore/Default/content.html.twig' %}
+{% block mauticContent %}dialoghsm_dashboard{% endblock %}
+{% block headerTitle %}{{ 'dialoghsm.dashboard.title'|trans }}{% endblock %}
+
+{% block content %}
+<div class="row" style="margin-bottom: 20px;">
+    <div class="col-xs-12">
+        <a href="{{ path('mautic_dialoghsm_log_index') }}" class="btn btn-default btn-sm">
+            <i class="ri-list-unordered"></i> {{ 'dialoghsm.menu.logs'|trans }}
+        </a>
+        <a href="{{ path('mautic_dialoghsm_number_index') }}" class="btn btn-default btn-sm" style="margin-left: 4px;">
+            <i class="ri-phone-line"></i> {{ 'dialoghsm.menu.numbers'|trans }}
+        </a>
+    </div>
+</div>
+
+{# ── Últimas 24h ── #}
+<h4 class="text-muted" style="margin: 0 0 12px;">{{ 'dialoghsm.dashboard.period.24h'|trans }}</h4>
+<div class="row" style="margin-bottom: 24px;">
+    {{ _self.statCard('dialoghsm.dashboard.total', stats24h.total, 'ri-send-plane-line', '#555') }}
+    {{ _self.statCard('dialoghsm.dashboard.sent',  stats24h.sent,  'ri-checkbox-circle-line', '#5cb85c') }}
+    {{ _self.statCard('dialoghsm.dashboard.delivered', stats24h.delivered, 'ri-mail-check-line', '#5bc0de') }}
+    {{ _self.statCard('dialoghsm.dashboard.read', stats24h.read, 'ri-eye-line', '#337ab7') }}
+    {{ _self.statCard('dialoghsm.dashboard.failed', stats24h.failed, 'ri-close-circle-line', '#d9534f') }}
+    {{ _self.statCard('dialoghsm.dashboard.dlq', stats24h.dlq, 'ri-error-warning-line', '#f0ad4e') }}
+    {% if stats24h.total > 0 %}
+        {% set rate = ((stats24h.sent + stats24h.delivered + stats24h.read) / stats24h.total * 100)|round(1) %}
+    {% else %}
+        {% set rate = 0 %}
+    {% endif %}
+    {{ _self.rateCard('dialoghsm.dashboard.success_rate', rate, rate >= 90 ? '#5cb85c' : (rate >= 70 ? '#f0ad4e' : '#d9534f')) }}
+</div>
+
+{# ── Últimos 7 dias ── #}
+<h4 class="text-muted" style="margin: 0 0 12px;">{{ 'dialoghsm.dashboard.period.7d'|trans }}</h4>
+<div class="row" style="margin-bottom: 32px;">
+    {{ _self.statCard('dialoghsm.dashboard.total', stats7d.total, 'ri-send-plane-line', '#555') }}
+    {{ _self.statCard('dialoghsm.dashboard.sent',  stats7d.sent,  'ri-checkbox-circle-line', '#5cb85c') }}
+    {{ _self.statCard('dialoghsm.dashboard.delivered', stats7d.delivered, 'ri-mail-check-line', '#5bc0de') }}
+    {{ _self.statCard('dialoghsm.dashboard.read', stats7d.read, 'ri-eye-line', '#337ab7') }}
+    {{ _self.statCard('dialoghsm.dashboard.failed', stats7d.failed, 'ri-close-circle-line', '#d9534f') }}
+    {{ _self.statCard('dialoghsm.dashboard.dlq', stats7d.dlq, 'ri-error-warning-line', '#f0ad4e') }}
+    {% if stats7d.total > 0 %}
+        {% set rate7 = ((stats7d.sent + stats7d.delivered + stats7d.read) / stats7d.total * 100)|round(1) %}
+    {% else %}
+        {% set rate7 = 0 %}
+    {% endif %}
+    {{ _self.rateCard('dialoghsm.dashboard.success_rate', rate7, rate7 >= 90 ? '#5cb85c' : (rate7 >= 70 ? '#f0ad4e' : '#d9534f')) }}
+</div>
+
+{# ── Gráfico ── #}
+<div class="panel panel-default">
+    <div class="panel-heading">
+        <h3 class="panel-title">{{ 'dialoghsm.dashboard.chart.title'|trans }}</h3>
+    </div>
+    <div class="panel-body">
+        <canvas id="dialoghsm-chart" height="80"></canvas>
+    </div>
+</div>
+
+<script>
+(function () {
+    var chartData = {{ chartJson|raw }};
+
+    var labelMap = {
+        sent:      '{{ 'dialoghsm.log.status.sent'|trans }}',
+        delivered: '{{ 'dialoghsm.log.status.delivered'|trans }}',
+        read:      '{{ 'dialoghsm.log.status.read'|trans }}',
+        failed:    '{{ 'dialoghsm.log.status.failed'|trans }}',
+        dlq:       '{{ 'dialoghsm.log.status.dlq'|trans }}'
+    };
+
+    chartData.datasets.forEach(function (ds) {
+        ds.label = labelMap[ds.label] || ds.label;
+    });
+
+    var ctx = document.getElementById('dialoghsm-chart').getContext('2d');
+    new Chart(ctx, {
+        type: 'bar',
+        data: chartData,
+        options: {
+            responsive: true,
+            scales: {
+                x: { stacked: true },
+                y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } }
+            },
+            plugins: {
+                legend: { position: 'bottom' }
+            }
+        }
+    });
+})();
+</script>
+{% endblock %}
+
+{% macro statCard(labelKey, value, icon, color) %}
+<div class="col-xs-6 col-sm-4 col-md-2" style="margin-bottom: 12px;">
+    <div class="panel panel-default" style="margin-bottom: 0; text-align: center; padding: 16px 8px;">
+        <i class="{{ icon }}" style="font-size: 24px; color: {{ color }};"></i>
+        <div style="font-size: 28px; font-weight: bold; color: {{ color }}; line-height: 1.2;">{{ value }}</div>
+        <div style="font-size: 11px; color: #888; margin-top: 4px;">{{ labelKey|trans }}</div>
+    </div>
+</div>
+{% endmacro %}
+
+{% macro rateCard(labelKey, value, color) %}
+<div class="col-xs-6 col-sm-4 col-md-2" style="margin-bottom: 12px;">
+    <div class="panel panel-default" style="margin-bottom: 0; text-align: center; padding: 16px 8px;">
+        <i class="ri-percent-line" style="font-size: 24px; color: {{ color }};"></i>
+        <div style="font-size: 28px; font-weight: bold; color: {{ color }}; line-height: 1.2;">{{ value }}%</div>
+        <div style="font-size: 11px; color: #888; margin-top: 4px;">{{ labelKey|trans }}</div>
+    </div>
+</div>
+{% endmacro %}
