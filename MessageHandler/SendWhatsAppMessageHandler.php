@@ -10,6 +10,7 @@ use MauticPlugin\DialogHSMBundle\Api\DialogHSMApi;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
+use MauticPlugin\DialogHSMBundle\Service\BulkRateLimiter;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Messenger\Handler\MessageHandlerInterface;
 
@@ -21,6 +22,7 @@ class SendWhatsAppMessageHandler implements MessageHandlerInterface
         private LoggerInterface $logger,
         private LeadModel $leadModel,
         private MessageLogRepository $messageLogRepository,
+        private BulkRateLimiter $rateLimiter,
     ) {
     }
 
@@ -29,6 +31,8 @@ class SendWhatsAppMessageHandler implements MessageHandlerInterface
      */
     public function __invoke(SendWhatsAppMessage $message): array
     {
+        $this->rateLimiter->throttle();
+
         $result = $this->api->sendMessage(
             $message->apiKey,
             $message->baseUrl,
