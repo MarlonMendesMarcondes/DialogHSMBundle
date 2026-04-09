@@ -8,6 +8,7 @@ use MauticPlugin\DialogHSMBundle\Api\DialogHSMApi;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppMessageHandler;
+use MauticPlugin\DialogHSMBundle\Service\BulkRateLimiter;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
@@ -20,6 +21,7 @@ class SendWhatsAppMessageHandlerTest extends TestCase
     private LeadModel&MockObject $mockLeadModel;
     private Lead&MockObject $mockLead;
     private MessageLogRepository&MockObject $mockMessageLogRepository;
+    private BulkRateLimiter&MockObject $mockRateLimiter;
     private SendWhatsAppMessageHandler $handler;
 
     protected function setUp(): void
@@ -30,6 +32,7 @@ class SendWhatsAppMessageHandlerTest extends TestCase
         $this->mockLeadModel            = $this->createMock(LeadModel::class);
         $this->mockLead                 = $this->createMock(Lead::class);
         $this->mockMessageLogRepository = $this->createMock(MessageLogRepository::class);
+        $this->mockRateLimiter          = $this->createMock(BulkRateLimiter::class);
 
         $this->handler = new SendWhatsAppMessageHandler(
             $this->mockApi,
@@ -37,6 +40,7 @@ class SendWhatsAppMessageHandlerTest extends TestCase
             $this->mockLogger,
             $this->mockLeadModel,
             $this->mockMessageLogRepository,
+            $this->mockRateLimiter,
         );
     }
 

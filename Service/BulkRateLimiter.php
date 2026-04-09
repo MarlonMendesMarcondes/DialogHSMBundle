@@ -34,6 +34,7 @@ class BulkRateLimiter
     public function __construct(
         private IntegrationsHelper $integrationsHelper,
         private string $redisDsn = '',
+        private ?\Redis $redisOverride = null,
     ) {
     }
 
@@ -56,24 +57,28 @@ class BulkRateLimiter
         $ratePerSecond = max(1, (int) ceil($ratePerMinute / 60));
 
         for ($attempt = 0; $attempt < self::MAX_RETRIES; ++$attempt) {
-            $second = (int) microtime(true);
-            $key    = 'dialoghsm:rate:bulk:' . $second;
+            try {
+                $second = (int) microtime(true);
+                $key    = 'dialoghsm:rate:bulk:' . $second;
 
-            $count = $redis->incr($key);
-            if (1 === $count) {
-                $redis->expire($key, 2); // TTL = 2s (janela atual + folga)
-            }
+                $count = $redis->incr($key);
+                if (1 === $count) {
+                    $redis->expire($key, 2); // TTL = 2s (janela atual + folga)
+                }
 
-            if ($count <= $ratePerSecond) {
-                return; // slot adquirido — sem bloqueio
-            }
+                if ($count <= $ratePerSecond) {
+                    return; // slot adquirido — sem bloqueio
+                }
 
-            // Devolve o slot e aguarda o próximo segundo
-            $redis->decr($key);
-            $now    = microtime(true);
-            $waitUs = (int) (($second + 1 - $now) * 1_000_000);
-            if ($waitUs > 0) {
-                usleep($waitUs);
+                // Devolve o slot e aguarda o próximo segundo
+                $redis->decr($key);
+                $now    = microtime(true);
+                $waitUs = (int) (($second + 1 - $now) * 1_000_000);
+                if ($waitUs > 0) {
+                    usleep($waitUs);
+                }
+            } catch (\Throwable) {
+                return; // fail-open: Redis indisponível durante o throttle
             }
         }
         // Após MAX_RETRIES: fail-open — prossegue sem throttle
@@ -101,6 +106,10 @@ class BulkRateLimiter
 
     private function getRedis(): ?\Redis
     {
+        if ($this->redisOverride !== null) {
+            return $this->redisOverride;
+        }
+
         if ($this->redis !== null) {
             try {
                 $this->redis->ping();
