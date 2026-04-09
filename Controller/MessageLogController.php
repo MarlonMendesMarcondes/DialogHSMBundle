@@ -102,7 +102,14 @@ class MessageLogController extends FormController
         }
 
         $filters = $session->get('mautic.dialoghsm.log.filters', []);
-        $limit   = $session->get('mautic.dialoghsm.log.limit', self::PAGE_LIMIT);
+
+        if ($request->query->has('limit')) {
+            $limit = max(1, min(100, (int) $request->query->get('limit')));
+            $session->set('mautic.dialoghsm.log.limit', $limit);
+            $page = 1;
+        } else {
+            $limit = $session->get('mautic.dialoghsm.log.limit', self::PAGE_LIMIT);
+        }
         $start   = (1 === $page) ? 0 : (($page - 1) * $limit);
         if ($start < 0) {
             $start = 0;

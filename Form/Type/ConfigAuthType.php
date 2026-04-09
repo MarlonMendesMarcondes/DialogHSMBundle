@@ -54,6 +54,24 @@ class ConfigAuthType extends AbstractType
         );
 
         $builder->add(
+            'bulk_rate_per_minute',
+            IntegerType::class,
+            [
+                'label'      => 'dialoghsm.config.bulk_rate_per_minute',
+                'label_attr' => ['class' => 'control-label'],
+                'required'   => false,
+                'attr'       => [
+                    'class'   => 'form-control',
+                    'min'     => 0,
+                    'max'     => 100000,
+                    'tooltip' => 'dialoghsm.config.bulk_rate_per_minute.tooltip',
+                ],
+                'data' => (int) ($data['bulk_rate_per_minute'] ?? 0),
+                'help' => 'dialoghsm.config.bulk_rate_per_minute.help',
+            ]
+        );
+
+        $builder->add(
             'log_max_records',
             IntegerType::class,
             [
