@@ -24,6 +24,10 @@ return function (ContainerConfigurator $configurator): void {
         ->autowire()
         ->tag('mautic.permissions');
 
+    $services->set(\MauticPlugin\DialogHSMBundle\Service\BulkRateLimiter::class)
+        ->autowire()
+        ->arg('$redisDsn', '%env(default::MAUTIC_MESSENGER_DSN_WHATSAPP_DIRECT)%');
+
     $services->set(\MauticPlugin\DialogHSMBundle\EventListener\CampaignSubscriber::class)
         ->autowire()
         ->autoconfigure()
