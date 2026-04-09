@@ -6,6 +6,7 @@ use Doctrine\ORM\EntityManagerInterface;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\EventListener\MessengerFailedEventSubscriber;
+use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppDirectBatchMessage;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
@@ -273,5 +274,116 @@ class MessengerFailedEventSubscriberTest extends TestCase
         $message = $this->makeMessage(queueLogId: null);
         $event   = $this->makeEvent($message, new \RuntimeException('err'));
         $this->subscriber->onMessageFailed($event);
+    }
+
+    // =========================================================================
+    // onMessageFailed — SendWhatsAppDirectBatchMessage
+    // =========================================================================
+
+    private function makeBatchEvent(
+        SendWhatsAppDirectBatchMessage $batch,
+        \Throwable $throwable,
+        bool $willRetry = false,
+    ): WorkerMessageFailedEvent {
+        $envelope = new Envelope($batch);
+        $event    = new WorkerMessageFailedEvent($envelope, 'whatsapp', $throwable);
+
+        if ($willRetry) {
+            $event->setForRetry();
+        }
+
+        return $event;
+    }
+
+    public function testDoesNotPersistBatchWhenWillRetry(): void
+    {
+        $this->mockEm->expects($this->never())->method('persist');
+
+        $batch = new SendWhatsAppDirectBatchMessage(
+            items:      [$this->makeMessage(leadId: 1), $this->makeMessage(leadId: 2)],
+            batchLimit: 0,
+            sendDelay:  0,
+        );
+        $event = $this->makeBatchEvent($batch, new \RuntimeException('timeout'), willRetry: true);
+        $this->subscriber->onMessageFailed($event);
+    }
+
+    public function testPersistsDlqLogForEachItemInBatchWhenRetriesExhausted(): void
+    {
+        $persisted = [];
+
+        $this->mockEm
+            ->expects($this->exactly(3))
+            ->method('persist')
+            ->willReturnCallback(function (MessageLog $log) use (&$persisted): void {
+                $persisted[] = $log;
+            });
+
+        $this->mockEm->expects($this->exactly(3))->method('flush');
+
+        $batch = new SendWhatsAppDirectBatchMessage(
+            items: [
+                $this->makeMessage(leadId: 10, phone: '+5511111111111', template: 'tmpl_a'),
+                $this->makeMessage(leadId: 20, phone: '+5522222222222', template: 'tmpl_b'),
+                $this->makeMessage(leadId: 30, phone: '+5533333333333', template: 'tmpl_c'),
+            ],
+            batchLimit: 0,
+            sendDelay:  0,
+        );
+        $event = $this->makeBatchEvent($batch, new \RuntimeException('Redis down'));
+        $this->subscriber->onMessageFailed($event);
+
+        $this->assertCount(3, $persisted);
+
+        $this->assertSame(10, $persisted[0]->getLeadId());
+        $this->assertSame('+5511111111111', $persisted[0]->getPhoneNumber());
+        $this->assertSame('tmpl_a', $persisted[0]->getTemplateName());
+        $this->assertSame(MessageLog::STATUS_DLQ, $persisted[0]->getStatus());
+        $this->assertStringContainsString('Redis down', $persisted[0]->getErrorMessage());
+
+        $this->assertSame(20, $persisted[1]->getLeadId());
+        $this->assertSame(30, $persisted[2]->getLeadId());
+    }
+
+    public function testEmptyBatchDoesNotPersistAnything(): void
+    {
+        $this->mockEm->expects($this->never())->method('persist');
+
+        $batch = new SendWhatsAppDirectBatchMessage(items: [], batchLimit: 0, sendDelay: 0);
+        $event = $this->makeBatchEvent($batch, new \RuntimeException('err'));
+        $this->subscriber->onMessageFailed($event);
+    }
+
+    public function testBatchDlqContinuesWhenOneItemPersistFails(): void
+    {
+        $persistCount = 0;
+
+        $this->mockEm
+            ->method('persist')
+            ->willReturnCallback(function () use (&$persistCount): void {
+                ++$persistCount;
+                if (1 === $persistCount) {
+                    throw new \RuntimeException('DB error on first item');
+                }
+            });
+
+        $this->mockLogger
+            ->expects($this->once())
+            ->method('error')
+            ->with('DialogHSM: falha ao registrar mensagem DLQ no log', $this->anything());
+
+        $batch = new SendWhatsAppDirectBatchMessage(
+            items: [
+                $this->makeMessage(leadId: 1),
+                $this->makeMessage(leadId: 2),
+            ],
+            batchLimit: 0,
+            sendDelay:  0,
+        );
+        $event = $this->makeBatchEvent($batch, new \RuntimeException('timeout'));
+        $this->subscriber->onMessageFailed($event);
+
+        // Segundo item foi processado (persist chamado 2 vezes, mesmo que 1ª tenha falhado)
+        $this->assertSame(2, $persistCount);
     }
 }

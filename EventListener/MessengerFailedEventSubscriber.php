@@ -7,6 +7,7 @@ namespace MauticPlugin\DialogHSMBundle\EventListener;
 use Doctrine\ORM\EntityManagerInterface;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
+use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppDirectBatchMessage;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
@@ -34,10 +35,21 @@ class MessengerFailedEventSubscriber implements EventSubscriberInterface
 
         $message = $event->getEnvelope()->getMessage();
 
-        if (!$message instanceof SendWhatsAppMessage) {
+        if ($message instanceof SendWhatsAppDirectBatchMessage) {
+            foreach ($message->items as $item) {
+                $this->persistDlqLog($item, $event->getThrowable());
+            }
+
             return;
         }
 
+        if ($message instanceof SendWhatsAppMessage) {
+            $this->persistDlqLog($message, $event->getThrowable());
+        }
+    }
+
+    private function persistDlqLog(SendWhatsAppMessage $message, \Throwable $throwable): void
+    {
         try {
             // Reutiliza log queued criado no dispatch (identificado pelo UUID no wamid)
             $log = $message->queueLogId !== null
@@ -56,7 +68,7 @@ class MessengerFailedEventSubscriber implements EventSubscriberInterface
 
             $log->setStatus(MessageLog::STATUS_DLQ);
             $log->setWamid(null);
-            $log->setErrorMessage(mb_substr($event->getThrowable()->getMessage(), 0, 255));
+            $log->setErrorMessage(mb_substr($throwable->getMessage(), 0, 255));
             $log->setDateSent(new \DateTime());
 
             $this->entityManager->persist($log);
