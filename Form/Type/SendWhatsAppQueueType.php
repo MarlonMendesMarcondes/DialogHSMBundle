@@ -13,6 +13,9 @@ class SendWhatsAppQueueType extends SendWhatsAppType
     {
         parent::buildForm($builder, $options);
 
+        $builder->remove('send_delay');
+        $builder->remove('batch_limit');
+
         $builder->add(
             'queue_override',
             ChoiceType::class,
