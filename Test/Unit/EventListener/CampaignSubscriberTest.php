@@ -6,6 +6,7 @@ use Doctrine\ORM\EntityManagerInterface;
 use Mautic\CampaignBundle\Event\CampaignBuilderEvent;
 use Mautic\IntegrationsBundle\Helper\IntegrationsHelper;
 use MauticPlugin\DialogHSMBundle\EventListener\CampaignSubscriber;
+use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppDirectBatchMessageHandler;
 use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppMessageHandler;
 use MauticPlugin\DialogHSMBundle\Model\WhatsAppNumberModel;
 use PHPUnit\Framework\TestCase;
@@ -23,6 +24,7 @@ class CampaignSubscriberTest extends TestCase
             $this->createMock(WhatsAppNumberModel::class),
             $this->createMock(SendWhatsAppMessageHandler::class),
             $this->createMock(EntityManagerInterface::class),
+            $this->createMock(SendWhatsAppDirectBatchMessageHandler::class),
         );
     }
 

@@ -128,9 +128,13 @@ class BulkRateLimiter
             $parsed = parse_url($this->redisDsn);
             $host   = $parsed['host'] ?? 'localhost';
             $port   = (int) ($parsed['port'] ?? 6379);
+            $db     = isset($parsed['path']) ? (int) ltrim($parsed['path'], '/') : 0;
 
             $r = new \Redis();
             $r->connect($host, $port, 1.0); // timeout 1s
+            if ($db > 0) {
+                $r->select($db);
+            }
             $this->redis = $r;
         } catch (\Throwable) {
             return null;

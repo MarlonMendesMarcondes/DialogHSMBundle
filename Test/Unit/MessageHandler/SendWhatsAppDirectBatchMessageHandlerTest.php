@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppDirectBatchMessage;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppDirectBatchMessageHandler;
@@ -13,12 +14,14 @@ use Psr\Log\NullLogger;
 class SendWhatsAppDirectBatchMessageHandlerTest extends TestCase
 {
     private SendWhatsAppMessageHandler&MockObject $mockBaseHandler;
+    private MessageLogRepository&MockObject $mockRepo;
     private SendWhatsAppDirectBatchMessageHandler $handler;
 
     protected function setUp(): void
     {
         $this->mockBaseHandler = $this->createMock(SendWhatsAppMessageHandler::class);
-        $this->handler         = new SendWhatsAppDirectBatchMessageHandler($this->mockBaseHandler, new NullLogger());
+        $this->mockRepo        = $this->createMock(MessageLogRepository::class);
+        $this->handler         = new SendWhatsAppDirectBatchMessageHandler($this->mockBaseHandler, new NullLogger(), $this->mockRepo);
     }
 
     private function makeMessage(int $leadId = 1): SendWhatsAppMessage
@@ -190,6 +193,48 @@ class SendWhatsAppDirectBatchMessageHandlerTest extends TestCase
         ($this->handler)($batch);
 
         $this->addToAssertionCount(1);
+    }
+
+    // -------------------------------------------------------------------------
+    // Redução de carga no DB: prune chamado uma vez ao final, não por item
+    // -------------------------------------------------------------------------
+
+    public function testPruneCalledOnceAfterBatch(): void
+    {
+        $this->mockRepo->expects($this->once())->method('prune');
+
+        $batch = $this->makeBatch(5);
+        $this->mockBaseHandler->method('__invoke')->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200]);
+
+        ($this->handler)($batch);
+    }
+
+    public function testPruneCalledOnceEvenForEmptyBatch(): void
+    {
+        $this->mockRepo->expects($this->once())->method('prune');
+
+        ($this->handler)(new SendWhatsAppDirectBatchMessage([], 0, 0));
+    }
+
+    public function testPruneCalledOnceEvenWhenItemFails(): void
+    {
+        $this->mockRepo->expects($this->once())->method('prune');
+
+        $this->mockBaseHandler
+            ->method('__invoke')
+            ->willThrowException(new \RuntimeException('API error'));
+
+        ($this->handler)($this->makeBatch(3));
+    }
+
+    public function testHandlerCalledWithSkipHousekeepingTrue(): void
+    {
+        $this->mockBaseHandler
+            ->expects($this->once())
+            ->method('__invoke')
+            ->with($this->isInstanceOf(SendWhatsAppMessage::class), true);
+
+        ($this->handler)($this->makeBatch(1));
     }
 
     // -------------------------------------------------------------------------

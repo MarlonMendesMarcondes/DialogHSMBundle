@@ -244,6 +244,34 @@ class SendWhatsAppMessageHandlerTest extends TestCase
     }
 
     // -------------------------------------------------------------------------
+    // Testes: skipHousekeeping — prune omitido no modo lote
+    // -------------------------------------------------------------------------
+
+    public function testPruneNotCalledWhenSkipHousekeepingIsTrue(): void
+    {
+        $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
+        $this->mockApi
+            ->method('sendMessage')
+            ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200]);
+
+        $this->mockMessageLogRepository->expects($this->never())->method('prune');
+
+        ($this->handler)($this->makeMessage(), skipHousekeeping: true);
+    }
+
+    public function testPruneCalledByDefaultWithoutFlag(): void
+    {
+        $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
+        $this->mockApi
+            ->method('sendMessage')
+            ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200]);
+
+        $this->mockMessageLogRepository->expects($this->once())->method('prune');
+
+        ($this->handler)($this->makeMessage());
+    }
+
+    // -------------------------------------------------------------------------
     // Testes: resiliência — falha no log não impede atualização do contato
     // -------------------------------------------------------------------------
 
