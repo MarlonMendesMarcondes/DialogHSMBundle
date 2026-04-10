@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use Doctrine\ORM\EntityManagerInterface;
+use Mautic\IntegrationsBundle\Helper\IntegrationsHelper;
 use Mautic\LeadBundle\Entity\Lead;
 use Mautic\LeadBundle\Model\LeadModel;
 use MauticPlugin\DialogHSMBundle\Api\DialogHSMApi;
@@ -22,6 +23,7 @@ class SendWhatsAppMessageHandlerTest extends TestCase
     private Lead&MockObject $mockLead;
     private MessageLogRepository&MockObject $mockMessageLogRepository;
     private BulkRateLimiter&MockObject $mockRateLimiter;
+    private IntegrationsHelper&MockObject $mockIntegrationsHelper;
     private SendWhatsAppMessageHandler $handler;
 
     protected function setUp(): void
@@ -33,6 +35,10 @@ class SendWhatsAppMessageHandlerTest extends TestCase
         $this->mockLead                 = $this->createMock(Lead::class);
         $this->mockMessageLogRepository = $this->createMock(MessageLogRepository::class);
         $this->mockRateLimiter          = $this->createMock(BulkRateLimiter::class);
+        $this->mockIntegrationsHelper   = $this->createMock(IntegrationsHelper::class);
+
+        // Default: getIntegration throws (fail-open → DEFAULT_MAX_RECORDS=10000)
+        $this->mockIntegrationsHelper->method('getIntegration')->willThrowException(new \RuntimeException('not configured'));
 
         $this->handler = new SendWhatsAppMessageHandler(
             $this->mockApi,
@@ -41,6 +47,7 @@ class SendWhatsAppMessageHandlerTest extends TestCase
             $this->mockLeadModel,
             $this->mockMessageLogRepository,
             $this->mockRateLimiter,
+            $this->mockIntegrationsHelper,
         );
     }
 

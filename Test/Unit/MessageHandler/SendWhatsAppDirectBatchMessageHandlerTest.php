@@ -21,7 +21,11 @@ class SendWhatsAppDirectBatchMessageHandlerTest extends TestCase
     {
         $this->mockBaseHandler = $this->createMock(SendWhatsAppMessageHandler::class);
         $this->mockRepo        = $this->createMock(MessageLogRepository::class);
-        $this->handler         = new SendWhatsAppDirectBatchMessageHandler($this->mockBaseHandler, new NullLogger(), $this->mockRepo);
+
+        // prune() agora recebe getLogMaxRecords() — stub retorna o padrão
+        $this->mockBaseHandler->method('getLogMaxRecords')->willReturn(10000);
+
+        $this->handler = new SendWhatsAppDirectBatchMessageHandler($this->mockBaseHandler, new NullLogger(), $this->mockRepo);
     }
 
     private function makeMessage(int $leadId = 1): SendWhatsAppMessage
