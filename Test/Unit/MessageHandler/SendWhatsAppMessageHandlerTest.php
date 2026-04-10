@@ -307,6 +307,21 @@ class SendWhatsAppMessageHandlerTest extends TestCase
     }
 
     // -------------------------------------------------------------------------
+    // Testes: getLogMaxRecords / getLogMaxDays — leitura de configuração
+    // -------------------------------------------------------------------------
+
+    public function testGetLogMaxRecordsReturnsDefaultWhenIntegrationThrows(): void
+    {
+        // setUp já configura getIntegration() para lançar exceção
+        $this->assertSame(100_000, $this->handler->getLogMaxRecords());
+    }
+
+    public function testGetLogMaxDaysReturnsDefaultWhenIntegrationThrows(): void
+    {
+        $this->assertSame(30, $this->handler->getLogMaxDays());
+    }
+
+    // -------------------------------------------------------------------------
     // Testes: resiliência — falha no log não impede atualização do contato
     // -------------------------------------------------------------------------
 
