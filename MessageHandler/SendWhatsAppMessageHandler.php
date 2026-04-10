@@ -99,7 +99,7 @@ class SendWhatsAppMessageHandler implements MessageHandlerInterface
         $this->entityManager->persist($log);
         $this->entityManager->flush();
 
-        if (!$skipHousekeeping) {
+        if (!$skipHousekeeping && $queueLogId === null) {
             $this->messageLogRepository->prune($this->getLogMaxRecords(), $this->getLogMaxDays());
         }
     }
