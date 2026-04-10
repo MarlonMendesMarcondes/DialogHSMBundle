@@ -170,12 +170,20 @@ class MessageLogRepository extends CommonRepository
     }
 
     /**
-     * Remove os registros mais antigos, mantendo no máximo $maxRecords.
+     * Remove registros antigos por dois critérios aplicados em sequência:
+     *  1. Registros com date_sent anterior a $maxDays dias (0 = desabilitado)
+     *  2. Se ainda restar mais que $maxRecords, remove os mais antigos até o limite
      */
-    public function prune(int $maxRecords = 10000): void
+    public function prune(int $maxRecords = 100_000, int $maxDays = 30): void
     {
         $conn      = $this->getEntityManager()->getConnection();
         $tableName = $this->getEntityManager()->getClassMetadata(MessageLog::class)->getTableName();
+
+        if ($maxDays > 0) {
+            $conn->executeStatement(
+                "DELETE FROM `{$tableName}` WHERE date_sent < DATE_SUB(NOW(), INTERVAL {$maxDays} DAY)"
+            );
+        }
 
         $count = (int) $conn->fetchOne("SELECT COUNT(*) FROM `{$tableName}`");
 

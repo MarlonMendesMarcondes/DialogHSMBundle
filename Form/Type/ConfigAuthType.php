@@ -81,11 +81,29 @@ class ConfigAuthType extends AbstractType
                 'attr'       => [
                     'class'   => 'form-control',
                     'min'     => 1000,
-                    'max'     => 1000000,
+                    'max'     => 10000000,
                     'tooltip' => 'dialoghsm.config.log_max_records.tooltip',
                 ],
-                'data' => (int) ($data['log_max_records'] ?? 10000),
+                'data' => (int) ($data['log_max_records'] ?? 100000),
                 'help' => 'dialoghsm.config.log_max_records.help',
+            ]
+        );
+
+        $builder->add(
+            'log_max_days',
+            IntegerType::class,
+            [
+                'label'      => 'dialoghsm.config.log_max_days',
+                'label_attr' => ['class' => 'control-label'],
+                'required'   => false,
+                'attr'       => [
+                    'class'   => 'form-control',
+                    'min'     => 0,
+                    'max'     => 3650,
+                    'tooltip' => 'dialoghsm.config.log_max_days.tooltip',
+                ],
+                'data' => (int) ($data['log_max_days'] ?? 30),
+                'help' => 'dialoghsm.config.log_max_days.help',
             ]
         );
     }
