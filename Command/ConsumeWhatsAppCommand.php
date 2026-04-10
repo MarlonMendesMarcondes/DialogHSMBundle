@@ -163,8 +163,10 @@ class ConsumeWhatsAppCommand extends Command
                 $processOutput = $process->getOutput().$process->getErrorOutput();
 
                 if (str_contains($processOutput, 'NOT_FOUND') || str_contains($processOutput, 'no queue')) {
+                    // Fila ainda não existe no RabbitMQ (nenhuma mensagem despachada para ela).
+                    // Tratado como fila vazia — não é um erro.
                     $output->writeln(sprintf(
-                        '<error>DialogHSM: fila "%s" não encontrada no RabbitMQ. Verifique o campo de fila do número WhatsApp no Mautic (Plugins > WhatsApp Numbers).</error>',
+                        '<comment>DialogHSM: fila "%s" ainda não existe no RabbitMQ (nenhuma mensagem enviada para ela). Ignorando.</comment>',
                         $queue
                     ));
                 } else {
@@ -173,9 +175,8 @@ class ConsumeWhatsAppCommand extends Command
                         $queue,
                         $process->getExitCode() ?? -1
                     ));
+                    $exitCode = Command::FAILURE;
                 }
-
-                $exitCode = Command::FAILURE;
             }
         }
 
@@ -212,11 +213,11 @@ class ConsumeWhatsAppCommand extends Command
             if (str_contains($e->getMessage(), 'NOT_FOUND') || str_contains($e->getMessage(), 'no queue')) {
                 $queue = $queues[0] ?? 'desconhecida';
                 $output->writeln(sprintf(
-                    '<error>DialogHSM: fila "%s" não encontrada no RabbitMQ. Verifique o campo de fila do número WhatsApp no Mautic (Plugins > WhatsApp Numbers).</error>',
+                    '<comment>DialogHSM: fila "%s" ainda não existe no RabbitMQ (nenhuma mensagem enviada para ela). Ignorando.</comment>',
                     $queue
                 ));
 
-                return Command::FAILURE;
+                return Command::SUCCESS;
             }
 
             throw $e;
