@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace MauticPlugin\DialogHSMBundle\MessageHandler;
 
 use Doctrine\ORM\EntityManagerInterface;
+use Mautic\IntegrationsBundle\Helper\IntegrationsHelper;
 use Mautic\LeadBundle\Model\LeadModel;
 use MauticPlugin\DialogHSMBundle\Api\DialogHSMApi;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
+use MauticPlugin\DialogHSMBundle\Integration\DialogHSMIntegration;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use MauticPlugin\DialogHSMBundle\Service\BulkRateLimiter;
 use Psr\Log\LoggerInterface;
@@ -16,6 +18,12 @@ use Symfony\Component\Messenger\Handler\MessageHandlerInterface;
 
 class SendWhatsAppMessageHandler implements MessageHandlerInterface
 {
+    private const CACHE_TTL_SECONDS  = 30;
+    private const DEFAULT_MAX_RECORDS = 10_000;
+
+    private int $cachedMaxRecords = -1;
+    private float $cacheExp       = 0.0;
+
     public function __construct(
         private DialogHSMApi $api,
         private EntityManagerInterface $entityManager,
@@ -23,6 +31,7 @@ class SendWhatsAppMessageHandler implements MessageHandlerInterface
         private LeadModel $leadModel,
         private MessageLogRepository $messageLogRepository,
         private BulkRateLimiter $rateLimiter,
+        private IntegrationsHelper $integrationsHelper,
     ) {
     }
 
@@ -84,8 +93,28 @@ class SendWhatsAppMessageHandler implements MessageHandlerInterface
         $this->entityManager->flush();
 
         if (!$skipHousekeeping) {
-            $this->messageLogRepository->prune();
+            $this->messageLogRepository->prune($this->getLogMaxRecords());
         }
+    }
+
+    public function getLogMaxRecords(): int
+    {
+        $now = microtime(true);
+        if ($this->cachedMaxRecords >= 0 && $now < $this->cacheExp) {
+            return $this->cachedMaxRecords;
+        }
+
+        try {
+            $integration            = $this->integrationsHelper->getIntegration(DialogHSMIntegration::NAME);
+            $apiKeys                = $integration->getIntegrationConfiguration()->getApiKeys() ?? [];
+            $this->cachedMaxRecords = max(1, (int) ($apiKeys['log_max_records'] ?? self::DEFAULT_MAX_RECORDS));
+        } catch (\Throwable) {
+            $this->cachedMaxRecords = self::DEFAULT_MAX_RECORDS;
+        }
+
+        $this->cacheExp = $now + self::CACHE_TTL_SECONDS;
+
+        return $this->cachedMaxRecords;
     }
 
     private function updateContactFields(int $leadId, array $result): void
