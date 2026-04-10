@@ -187,108 +187,123 @@ class MessageLogRepositoryTest extends TestCase
     // prune
     // =========================================================================
 
-    public function testPruneDoesNothingWhenCountBelowLimit(): void
+    public function testPruneDeletesOldRecordsByAgeFirst(): void
     {
+        // Com maxDays=30, deve executar DELETE por idade antes do COUNT
         $this->mockConnection
             ->expects($this->once())
+            ->method('executeStatement')
+            ->with($this->stringContains('INTERVAL 30 DAY'));
+
+        $this->mockConnection
             ->method('fetchOne')
-            ->with('SELECT COUNT(*) FROM `dialog_hsm_message_log`')
+            ->willReturn('0'); // após limpeza por idade, tabela está vazia
+
+        $this->repository->prune(maxRecords: 100_000, maxDays: 30);
+    }
+
+    public function testPruneSkipsAgeDeletionWhenMaxDaysIsZero(): void
+    {
+        // maxDays=0 → não executa DELETE por idade, apenas conta
+        $this->mockConnection
+            ->expects($this->never())
+            ->method('executeStatement');
+
+        $this->mockConnection
+            ->method('fetchOne')
+            ->willReturn('50');
+
+        $this->repository->prune(maxRecords: 100_000, maxDays: 0);
+    }
+
+    public function testPruneDoesNothingWhenCountBelowLimitAfterAgePrune(): void
+    {
+        // Após limpeza por idade, contagem fica abaixo do limite → nenhum DELETE por contagem
+        $this->mockConnection
+            ->expects($this->once())
+            ->method('executeStatement')
+            ->with($this->stringContains('INTERVAL'));
+
+        $this->mockConnection
+            ->method('fetchOne')
             ->willReturn('9999');
 
-        $this->mockConnection
-            ->expects($this->never())
-            ->method('executeStatement');
-
-        $this->repository->prune();
+        $this->repository->prune(maxRecords: 100_000, maxDays: 30);
     }
 
-    public function testPruneDoesNothingWhenCountEqualsLimit(): void
+    public function testPruneDeletesOldestByCountWhenStillOverLimit(): void
     {
+        // Mesmo após limpeza por idade, ainda há excesso → DELETE por contagem
         $this->mockConnection
-            ->expects($this->once())
+            ->expects($this->exactly(2))
+            ->method('executeStatement')
+            ->willReturnCallback(function (string $sql): int {
+                // Primeira chamada: DELETE por idade; segunda: DELETE por contagem
+                return 0;
+            });
+
+        $this->mockConnection
             ->method('fetchOne')
-            ->willReturn('10000');
+            ->willReturn('100500'); // ainda 100.500 após limpeza por idade
 
-        $this->mockConnection
-            ->expects($this->never())
-            ->method('executeStatement');
-
-        $this->repository->prune();
+        $this->repository->prune(maxRecords: 100_000, maxDays: 30);
     }
 
-    public function testPruneDeletesOldestWhenOverLimit(): void
+    public function testPruneDoesNothingWhenTableIsEmpty(): void
     {
         $this->mockConnection
-            ->expects($this->once())
             ->method('fetchOne')
-            ->willReturn('10500');
+            ->willReturn('0');
 
+        // Apenas o DELETE por idade deve ser chamado (maxDays=30), nunca o de contagem
+        $this->mockConnection
+            ->expects($this->once())
+            ->method('executeStatement')
+            ->with($this->stringContains('INTERVAL'));
+
+        $this->repository->prune(maxRecords: 100_000, maxDays: 30);
+    }
+
+    public function testPruneWithMaxDaysZeroAndCountOverLimitDeletesByCount(): void
+    {
         $this->mockConnection
             ->expects($this->once())
             ->method('executeStatement')
             ->with('DELETE FROM `dialog_hsm_message_log` ORDER BY date_sent ASC, id ASC LIMIT 500');
 
-        $this->repository->prune();
+        $this->mockConnection
+            ->method('fetchOne')
+            ->willReturn('500500');
+
+        $this->repository->prune(maxRecords: 500_000, maxDays: 0);
+    }
+
+    public function testPruneDeletesExactlyOneWhenExcessIsOne(): void
+    {
+        $this->mockConnection
+            ->expects($this->once())
+            ->method('executeStatement')
+            ->with('DELETE FROM `dialog_hsm_message_log` ORDER BY date_sent ASC, id ASC LIMIT 1');
+
+        $this->mockConnection
+            ->method('fetchOne')
+            ->willReturn('100001');
+
+        $this->repository->prune(maxRecords: 100_000, maxDays: 0);
     }
 
     public function testPruneRespectsCustomMaxRecords(): void
     {
         $this->mockConnection
             ->expects($this->once())
-            ->method('fetchOne')
-            ->willReturn('600');
-
-        $this->mockConnection
-            ->expects($this->once())
             ->method('executeStatement')
             ->with('DELETE FROM `dialog_hsm_message_log` ORDER BY date_sent ASC, id ASC LIMIT 100');
 
-        $this->repository->prune(maxRecords: 500);
-    }
-
-    public function testPruneDoesNothingWhenTableIsEmpty(): void
-    {
         $this->mockConnection
-            ->expects($this->once())
             ->method('fetchOne')
-            ->willReturn('0');
+            ->willReturn('600');
 
-        $this->mockConnection
-            ->expects($this->never())
-            ->method('executeStatement');
-
-        $this->repository->prune();
-    }
-
-    public function testPruneDeletesExactlyOneWhenExcessIsOne(): void
-    {
-        // 10001 registros com limite padrão de 10000 → apaga exatamente 1
-        $this->mockConnection
-            ->expects($this->once())
-            ->method('fetchOne')
-            ->willReturn('10001');
-
-        $this->mockConnection
-            ->expects($this->once())
-            ->method('executeStatement')
-            ->with('DELETE FROM `dialog_hsm_message_log` ORDER BY date_sent ASC, id ASC LIMIT 1');
-
-        $this->repository->prune();
-    }
-
-    public function testPruneWithCustomMaxRecordsDoesNothingWhenCountIsExactlyAtLimit(): void
-    {
-        // Exatamente no limite customizado → não deleta
-        $this->mockConnection
-            ->expects($this->once())
-            ->method('fetchOne')
-            ->willReturn('500');
-
-        $this->mockConnection
-            ->expects($this->never())
-            ->method('executeStatement');
-
-        $this->repository->prune(maxRecords: 500);
+        $this->repository->prune(maxRecords: 500, maxDays: 0);
     }
 
     // =========================================================================
