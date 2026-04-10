@@ -18,11 +18,13 @@ use Symfony\Component\Messenger\Handler\MessageHandlerInterface;
 
 class SendWhatsAppMessageHandler implements MessageHandlerInterface
 {
-    private const CACHE_TTL_SECONDS  = 30;
-    private const DEFAULT_MAX_RECORDS = 10_000;
+    private const CACHE_TTL_SECONDS   = 30;
+    private const DEFAULT_MAX_RECORDS = 100_000;
+    private const DEFAULT_MAX_DAYS    = 30;
 
-    private int $cachedMaxRecords = -1;
-    private float $cacheExp       = 0.0;
+    private int   $cachedMaxRecords = -1;
+    private int   $cachedMaxDays    = -1;
+    private float $cacheExp         = 0.0;
 
     public function __construct(
         private DialogHSMApi $api,
@@ -98,28 +100,42 @@ class SendWhatsAppMessageHandler implements MessageHandlerInterface
         $this->entityManager->flush();
 
         if (!$skipHousekeeping) {
-            $this->messageLogRepository->prune($this->getLogMaxRecords());
+            $this->messageLogRepository->prune($this->getLogMaxRecords(), $this->getLogMaxDays());
         }
     }
 
     public function getLogMaxRecords(): int
     {
+        $this->refreshSettingsCache();
+
+        return $this->cachedMaxRecords;
+    }
+
+    public function getLogMaxDays(): int
+    {
+        $this->refreshSettingsCache();
+
+        return $this->cachedMaxDays;
+    }
+
+    private function refreshSettingsCache(): void
+    {
         $now = microtime(true);
         if ($this->cachedMaxRecords >= 0 && $now < $this->cacheExp) {
-            return $this->cachedMaxRecords;
+            return;
         }
 
         try {
             $integration            = $this->integrationsHelper->getIntegration(DialogHSMIntegration::NAME);
             $apiKeys                = $integration->getIntegrationConfiguration()->getApiKeys() ?? [];
             $this->cachedMaxRecords = max(1, (int) ($apiKeys['log_max_records'] ?? self::DEFAULT_MAX_RECORDS));
+            $this->cachedMaxDays    = max(0, (int) ($apiKeys['log_max_days']    ?? self::DEFAULT_MAX_DAYS));
         } catch (\Throwable) {
             $this->cachedMaxRecords = self::DEFAULT_MAX_RECORDS;
+            $this->cachedMaxDays    = self::DEFAULT_MAX_DAYS;
         }
 
         $this->cacheExp = $now + self::CACHE_TTL_SECONDS;
-
-        return $this->cachedMaxRecords;
     }
 
     private function updateContactFields(int $leadId, array $result): void
