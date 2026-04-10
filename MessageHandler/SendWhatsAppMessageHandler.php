@@ -39,12 +39,17 @@ class SendWhatsAppMessageHandler implements MessageHandlerInterface
      * @param bool $skipHousekeeping Quando true, omite o prune() pós-persistência.
      *                               Use em processamento de lote — o caller é responsável
      *                               por chamar prune() uma única vez ao final do lote.
+     * @param bool $skipRateLimit    Quando true, omite o throttle() do BulkRateLimiter.
+     *                               Use para envios batch — o throttle do lote é feito via
+     *                               sendDelay em SendWhatsAppDirectBatchMessageHandler.
      *
      * @return array{success: bool, response: array|null, error: string|null, http_status: int|null}
      */
-    public function __invoke(SendWhatsAppMessage $message, bool $skipHousekeeping = false): array
+    public function __invoke(SendWhatsAppMessage $message, bool $skipHousekeeping = false, bool $skipRateLimit = false): array
     {
-        $this->rateLimiter->throttle();
+        if (!$skipRateLimit) {
+            $this->rateLimiter->throttle();
+        }
 
         $result = $this->api->sendMessage(
             $message->apiKey,
