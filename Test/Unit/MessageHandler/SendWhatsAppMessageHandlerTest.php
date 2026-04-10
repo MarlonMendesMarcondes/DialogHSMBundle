@@ -279,6 +279,34 @@ class SendWhatsAppMessageHandlerTest extends TestCase
     }
 
     // -------------------------------------------------------------------------
+    // Testes: skipRateLimit — BulkRateLimiter omitido no modo batch
+    // -------------------------------------------------------------------------
+
+    public function testRateLimiterNotCalledWhenSkipRateLimitIsTrue(): void
+    {
+        $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
+        $this->mockApi
+            ->method('sendMessage')
+            ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200]);
+
+        $this->mockRateLimiter->expects($this->never())->method('throttle');
+
+        ($this->handler)($this->makeMessage(), skipHousekeeping: true, skipRateLimit: true);
+    }
+
+    public function testRateLimiterCalledByDefault(): void
+    {
+        $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
+        $this->mockApi
+            ->method('sendMessage')
+            ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200]);
+
+        $this->mockRateLimiter->expects($this->once())->method('throttle');
+
+        ($this->handler)($this->makeMessage());
+    }
+
+    // -------------------------------------------------------------------------
     // Testes: resiliência — falha no log não impede atualização do contato
     // -------------------------------------------------------------------------
 
