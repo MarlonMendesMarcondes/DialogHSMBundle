@@ -27,9 +27,13 @@ class SendWhatsAppMessageHandler implements MessageHandlerInterface
     }
 
     /**
+     * @param bool $skipHousekeeping Quando true, omite o prune() pós-persistência.
+     *                               Use em processamento de lote — o caller é responsável
+     *                               por chamar prune() uma única vez ao final do lote.
+     *
      * @return array{success: bool, response: array|null, error: string|null, http_status: int|null}
      */
-    public function __invoke(SendWhatsAppMessage $message): array
+    public function __invoke(SendWhatsAppMessage $message, bool $skipHousekeeping = false): array
     {
         $this->rateLimiter->throttle();
 
@@ -41,7 +45,7 @@ class SendWhatsAppMessageHandler implements MessageHandlerInterface
         );
 
         try {
-            $this->logMessage($message->leadId, $message->templateName, $message->phone, $message->whatsAppNumberName, $result, $message->campaignId, $message->campaignEventId, $message->queueLogId);
+            $this->logMessage($message->leadId, $message->templateName, $message->phone, $message->whatsAppNumberName, $result, $message->campaignId, $message->campaignEventId, $message->queueLogId, $skipHousekeeping);
         } catch (\Throwable $e) {
             $this->logger->warning('DialogHSM: Falha ao registrar log da mensagem', [
                 'lead_id' => $message->leadId,
@@ -54,7 +58,7 @@ class SendWhatsAppMessageHandler implements MessageHandlerInterface
         return $result;
     }
 
-    private function logMessage(int $leadId, string $templateName, string $phone, string $senderName, array $result, ?int $campaignId = null, ?int $campaignEventId = null, ?string $queueLogId = null): void
+    private function logMessage(int $leadId, string $templateName, string $phone, string $senderName, array $result, ?int $campaignId = null, ?int $campaignEventId = null, ?string $queueLogId = null, bool $skipHousekeeping = false): void
     {
         // Se existe log queued criado no dispatch, atualiza-o em vez de criar novo
         $log = $queueLogId !== null ? $this->messageLogRepository->findByWamid($queueLogId) : null;
@@ -79,7 +83,9 @@ class SendWhatsAppMessageHandler implements MessageHandlerInterface
         $this->entityManager->persist($log);
         $this->entityManager->flush();
 
-        $this->messageLogRepository->prune();
+        if (!$skipHousekeeping) {
+            $this->messageLogRepository->prune();
+        }
     }
 
     private function updateContactFields(int $leadId, array $result): void
