@@ -39,15 +39,20 @@ class MessageLogController extends FormController
         }
     }
 
-    public function dashboardAction(MessageLogRepository $messageLogRepository): Response
+    public function dashboardAction(Request $request, MessageLogRepository $messageLogRepository): Response
     {
+        $allowedDays = [7, 14, 30];
+        $chartDays   = in_array((int) $request->query->get('days', 7), $allowedDays, true)
+            ? (int) $request->query->get('days', 7)
+            : 7;
+
         $now     = new \DateTime();
         $from24h = (clone $now)->modify('-24 hours');
         $from7d  = (clone $now)->modify('-7 days')->setTime(0, 0, 0);
 
         $stats24h  = $messageLogRepository->getStatsByPeriod($from24h);
         $stats7d   = $messageLogRepository->getStatsByPeriod($from7d);
-        $chartRaw  = $messageLogRepository->getChartData(7);
+        $chartRaw  = $messageLogRepository->getChartData($chartDays);
 
         // Prepara dados para Chart.js
         $labels   = array_keys($chartRaw);
@@ -73,6 +78,7 @@ class MessageLogController extends FormController
                 'stats24h'  => $stats24h,
                 'stats7d'   => $stats7d,
                 'chartJson' => json_encode(['labels' => $labels, 'datasets' => $datasets]),
+                'chartDays' => $chartDays,
                 'tmpl'      => 'index',
             ],
             'contentTemplate' => '@DialogHSM/MessageLog/dashboard.html.twig',

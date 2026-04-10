@@ -53,11 +53,21 @@
 
 {# ── Gráfico ── #}
 <div class="panel panel-default">
-    <div class="panel-heading">
-        <h3 class="panel-title">{{ 'dialoghsm.dashboard.chart.title'|trans }}</h3>
+    <div class="panel-heading" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+        <h3 class="panel-title" style="margin: 0;">{{ 'dialoghsm.dashboard.chart.title'|trans }}</h3>
+        <div class="btn-group btn-group-xs" role="group">
+            <a href="{{ path('mautic_dialoghsm_dashboard', {days: 7}) }}"
+               class="btn {{ chartDays == 7 ? 'btn-primary' : 'btn-default' }}">7d</a>
+            <a href="{{ path('mautic_dialoghsm_dashboard', {days: 14}) }}"
+               class="btn {{ chartDays == 14 ? 'btn-primary' : 'btn-default' }}">14d</a>
+            <a href="{{ path('mautic_dialoghsm_dashboard', {days: 30}) }}"
+               class="btn {{ chartDays == 30 ? 'btn-primary' : 'btn-default' }}">30d</a>
+        </div>
     </div>
     <div class="panel-body">
-        <canvas id="dialoghsm-chart" height="80"></canvas>
+        <div style="position: relative; height: 320px;">
+            <canvas id="dialoghsm-chart"></canvas>
+        </div>
     </div>
 </div>
 
@@ -82,12 +92,35 @@
         data: chartData,
         options: {
             responsive: true,
+            maintainAspectRatio: false,
             scales: {
-                x: { stacked: true },
-                y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } }
+                x: {
+                    stacked: true,
+                    grid: { display: false },
+                    ticks: { maxRotation: 45 }
+                },
+                y: {
+                    stacked: true,
+                    beginAtZero: true,
+                    ticks: {
+                        precision: 0,
+                        callback: function (v) { return v.toLocaleString(); }
+                    },
+                    grid: { color: 'rgba(0,0,0,0.06)' }
+                }
             },
             plugins: {
-                legend: { position: 'bottom' }
+                legend: { position: 'bottom', labels: { boxWidth: 14, padding: 16 } },
+                tooltip: {
+                    mode: 'index',
+                    intersect: false,
+                    callbacks: {
+                        footer: function (items) {
+                            var total = items.reduce(function (sum, i) { return sum + i.parsed.y; }, 0);
+                            return '{{ 'dialoghsm.dashboard.total'|trans }}: ' + total.toLocaleString();
+                        }
+                    }
+                }
             }
         }
     });

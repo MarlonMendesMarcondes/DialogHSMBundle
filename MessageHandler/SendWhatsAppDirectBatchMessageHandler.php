@@ -67,7 +67,7 @@ class SendWhatsAppDirectBatchMessageHandler implements MessageHandlerInterface
         // Prune executado uma única vez ao final do lote em vez de por mensagem,
         // reduzindo drasticamente a carga de SELECT COUNT + DELETE no banco.
         try {
-            $this->messageLogRepository->prune();
+            $this->messageLogRepository->prune($this->handler->getLogMaxRecords());
         } catch (\Throwable $e) {
             $this->logger->warning('DialogHSM: Falha ao executar prune após lote', [
                 'error' => $e->getMessage(),
