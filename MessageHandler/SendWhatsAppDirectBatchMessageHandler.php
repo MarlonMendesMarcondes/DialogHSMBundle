@@ -49,7 +49,7 @@ class SendWhatsAppDirectBatchMessageHandler implements MessageHandlerInterface
             }
 
             try {
-                $this->handler->__invoke($item, skipHousekeeping: true);
+                $this->handler->__invoke($item, skipHousekeeping: true, skipRateLimit: true);
             } catch (\Throwable $e) {
                 $this->logger->error('DialogHSM: Erro ao processar item do lote', [
                     'lead_id' => $item->leadId,

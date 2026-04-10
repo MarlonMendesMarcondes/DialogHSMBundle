@@ -231,12 +231,12 @@ class SendWhatsAppDirectBatchMessageHandlerTest extends TestCase
         ($this->handler)($this->makeBatch(3));
     }
 
-    public function testHandlerCalledWithSkipHousekeepingTrue(): void
+    public function testHandlerCalledWithSkipHousekeepingAndSkipRateLimitTrue(): void
     {
         $this->mockBaseHandler
             ->expects($this->once())
             ->method('__invoke')
-            ->with($this->isInstanceOf(SendWhatsAppMessage::class), true);
+            ->with($this->isInstanceOf(SendWhatsAppMessage::class), true, true);
 
         ($this->handler)($this->makeBatch(1));
     }
