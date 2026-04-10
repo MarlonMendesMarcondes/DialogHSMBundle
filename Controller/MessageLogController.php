@@ -14,7 +14,7 @@ use Symfony\Contracts\Service\Attribute\Required;
 
 class MessageLogController extends FormController
 {
-    private const DEFAULT_MAX_LOGS = 10000;
+    private const DEFAULT_MAX_LOGS = 100_000;
     private const PAGE_LIMIT       = 50;
 
     private const FILTER_KEYS = ['status', 'dateFrom', 'dateTo', 'senderName', 'contact'];
