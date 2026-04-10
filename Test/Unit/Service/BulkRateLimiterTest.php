@@ -8,6 +8,9 @@ use MauticPlugin\DialogHSMBundle\Service\BulkRateLimiter;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 
+/**
+ * @requires extension redis
+ */
 class BulkRateLimiterTest extends TestCase
 {
     private IntegrationsHelper&MockObject $integrationsHelper;

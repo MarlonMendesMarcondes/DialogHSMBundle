@@ -13,6 +13,7 @@ use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
 use MauticPlugin\DialogHSMBundle\EventListener\CampaignSubscriber;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppDirectBatchMessage;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
+use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppDirectBatchMessageHandler;
 use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppMessageHandler;
 use MauticPlugin\DialogHSMBundle\Model\WhatsAppNumberModel;
 use PHPUnit\Framework\MockObject\MockObject;
@@ -41,6 +42,7 @@ class CampaignSubscriberPerformanceTest extends TestCase
     private LoggerInterface&MockObject       $mockLogger;
     private WhatsAppNumberModel&MockObject   $mockNumberModel;
     private SendWhatsAppMessageHandler&MockObject $mockHandler;
+    private SendWhatsAppDirectBatchMessageHandler&MockObject $mockDirectBatchHandler;
     private EntityManagerInterface&MockObject $mockEntityManager;
 
     protected function setUp(): void
@@ -50,6 +52,7 @@ class CampaignSubscriberPerformanceTest extends TestCase
         $this->mockLogger             = $this->createMock(LoggerInterface::class);
         $this->mockNumberModel        = $this->createMock(WhatsAppNumberModel::class);
         $this->mockHandler            = $this->createMock(SendWhatsAppMessageHandler::class);
+        $this->mockDirectBatchHandler = $this->createMock(SendWhatsAppDirectBatchMessageHandler::class);
         $this->mockEntityManager      = $this->createMock(EntityManagerInterface::class);
     }
 
@@ -66,6 +69,7 @@ class CampaignSubscriberPerformanceTest extends TestCase
             $this->mockNumberModel,
             $this->mockHandler,
             $this->mockEntityManager,
+            $this->mockDirectBatchHandler,
             $directTransportDsn,
         );
     }
@@ -127,10 +131,8 @@ class CampaignSubscriberPerformanceTest extends TestCase
             ->method('getEntity')
             ->willReturn($this->makeNumber());
 
-        $this->mockHandler
-            ->method('__invoke')
-            ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200]);
-
+        // No modo inline, CampaignSubscriber delega para directBatchHandler
+        // O mock não faz nada (retorna null) — suficiente para medir overhead do loop
         $contacts = $this->buildContacts($volume);
         $event    = $this->buildPendingEvent('dialoghsm.send_whatsapp', $contacts);
 
@@ -307,14 +309,12 @@ class CampaignSubscriberPerformanceTest extends TestCase
     // -------------------------------------------------------------------------
 
     /**
-     * Valida o tempo de execução esperado com throttle de 2s a cada 10 mensagens.
+     * Valida que o CampaignSubscriber passa batchLimit e sendDelay corretos ao handler de lote.
      *
-     * Fórmula: floor(contacts / batch_limit) × send_delay
-     *   20 contatos / 10 por lote = 2 sleeps × 1s (usamos 1s aqui para não travar o CI)
-     *
-     * Em produção com send_delay=2: 1000 contatos → 100 × 2s = 200s (~3,3 min)
+     * O contrato de sleep (throttle) é testado em SendWhatsAppDirectBatchMessageHandlerTest.
+     * Aqui verificamos apenas que os parâmetros chegam corretamente ao lote.
      */
-    public function testInlineBatchDelayTimingIsCorrect(): void
+    public function testInlineBatchDelayParamsArePassedToBatchHandler(): void
     {
         $this->mockIntegrationsHelper
             ->method('getIntegration')
@@ -324,11 +324,14 @@ class CampaignSubscriberPerformanceTest extends TestCase
             ->method('getEntity')
             ->willReturn($this->makeNumber());
 
-        $this->mockHandler
+        $capturedBatch = null;
+        $this->mockDirectBatchHandler
             ->method('__invoke')
-            ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200]);
+            ->willReturnCallback(function (SendWhatsAppDirectBatchMessage $batch) use (&$capturedBatch): void {
+                $capturedBatch = $batch;
+            });
 
-        // 20 contatos, lote=10, delay=1s → 2 sleeps = ~2s
+        // 20 contatos, lote=10, delay=1s
         $contacts = $this->buildContacts(20);
         $event    = $this->buildPendingEvent('dialoghsm.send_whatsapp', $contacts, [
             'batch_limit' => 10,
@@ -336,15 +339,15 @@ class CampaignSubscriberPerformanceTest extends TestCase
         ]);
 
         $subscriber = $this->makeSubscriber('null://null');
-
-        $start = microtime(true);
         $subscriber->onCampaignTriggerAction($event);
-        $elapsed = microtime(true) - $start;
 
-        // 2 sleeps de 1s = pelo menos 1.7s (margem de 15% para variação do scheduler / Docker)
-        $this->assertGreaterThanOrEqual(1.7, $elapsed, 'Esperados 2 sleeps de 1s (lote 10, 20 contatos)');
-        // Não deve ultrapassar 3s (margem)
-        $this->assertLessThan(3.0, $elapsed, 'Não deve haver mais de 2 sleeps');
+        $this->assertNotNull($capturedBatch, 'directBatchHandler deve ser invocado');
+        $this->assertInstanceOf(SendWhatsAppDirectBatchMessage::class, $capturedBatch);
+        $this->assertSame(10, $capturedBatch->batchLimit, 'batchLimit deve ser 10');
+        // Guard: no modo inline (null://null) send_delay é zerado para não bloquear
+        // o mautic:campaigns:trigger. O throttle real só funciona via Redis ou queue.
+        $this->assertSame(0, $capturedBatch->sendDelay, 'Guard: sendDelay zerado no modo inline');
+        $this->assertCount(20, $capturedBatch->items, 'Todos os 20 contatos devem estar no lote');
     }
 
     public function testRedisIgnoresBatchDelayEvenWith360dialogConfig(): void

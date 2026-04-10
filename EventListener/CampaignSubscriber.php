@@ -18,6 +18,7 @@ use MauticPlugin\DialogHSMBundle\Form\Type\SendWhatsAppType;
 use MauticPlugin\DialogHSMBundle\Integration\DialogHSMIntegration;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppDirectBatchMessage;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
+use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppDirectBatchMessageHandler;
 use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppMessageHandler;
 use MauticPlugin\DialogHSMBundle\Model\WhatsAppNumberModel;
 use Psr\Log\LoggerInterface;
@@ -34,6 +35,7 @@ class CampaignSubscriber implements EventSubscriberInterface
         private WhatsAppNumberModel $whatsAppNumberModel,
         private SendWhatsAppMessageHandler $handler,
         private EntityManagerInterface $entityManager,
+        private SendWhatsAppDirectBatchMessageHandler $directBatchHandler,
         private string $directTransportDsn = 'null://null',
     ) {
     }
@@ -108,12 +110,43 @@ class CampaignSubscriber implements EventSubscriberInterface
             return;
         }
 
-        // Inline: chama a API diretamente no worker do Mautic
-        $this->processContacts($event, function (SendWhatsAppMessage $message, WhatsAppNumber $number): bool {
-            $result = ($this->handler)($message);
+        // Direto (null://null): coleta todos os itens e processa como lote síncrono.
+        // GUARD: send_delay é ignorado no modo inline — usleep() bloquearia o processo
+        // mautic:campaigns:trigger, impedindo segmentos e outras campanhas de executar.
+        // Para throttle real configure MAUTIC_MESSENGER_DSN_WHATSAPP_DIRECT=redis://...
+        // ou use a action send_whatsapp_queue (RabbitMQ) para envios em grande volume.
+        $config     = $event->getEvent()->getProperties();
+        $sendDelay  = (int) ($config['send_delay'] ?? 0);
+        $batchLimit = (int) ($config['batch_limit'] ?? 0);
 
-            return $result['success'] ?? false;
-        });
+        if ($sendDelay > 0) {
+            $this->logger->warning('DialogHSM: send_delay ignorado no modo inline (null://null). '
+                .'Configure MAUTIC_MESSENGER_DSN_WHATSAPP_DIRECT=redis://... para throttle real '
+                .'ou use a action send_whatsapp_queue para envios em grande volume.', [
+                'send_delay'  => $sendDelay,
+                'batch_limit' => $batchLimit,
+            ]);
+            $sendDelay = 0;
+        }
+
+        $items = [];
+        $this->processContacts(
+            $event,
+            function (SendWhatsAppMessage $message, WhatsAppNumber $number) use (&$items): bool {
+                $items[] = $message;
+
+                return true;
+            },
+            applyBatchSleep: false
+        );
+
+        if (!empty($items)) {
+            ($this->directBatchHandler)(new SendWhatsAppDirectBatchMessage(
+                items:      $items,
+                batchLimit: $batchLimit,
+                sendDelay:  $sendDelay,
+            ));
+        }
     }
 
     public function onCampaignTriggerActionQueue(PendingEvent $event): void
