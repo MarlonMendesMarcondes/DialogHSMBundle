@@ -1,77 +1,183 @@
-# 360dialog WhatsApp — Plugin para Mautic 5
+# DialogHSMBundle — 360dialog WhatsApp para Mautic 5
 
-Plugin que integra o Mautic com a API 360dialog para envio de mensagens WhatsApp HSM (templates aprovados pelo Meta).
+Plugin que integra o Mautic com a API 360dialog para envio de mensagens WhatsApp via templates HSM.
 
 ---
 
-## Requisitos
+## Dependências
 
-| Dependência | Versão mínima |
-|-------------|---------------|
-| Mautic      | 5.x           |
-| PHP         | 8.1, 8.2, 8.3 |
-| MySQL       | 5.7 / 8.x     |
-| RabbitMQ    | 3.x *(opcional — necessário apenas para envio com fila)* |
-| Extensão PHP `amqp` | qualquer *(obrigatória se usar RabbitMQ)* |
-
-> **Atenção:** O transport `amqp://` do Symfony exige a extensão nativa `amqp` do PHP. Ela **não vem instalada por padrão** — inclusive em ambientes LiteSpeed (lsphp). Veja a seção [Instalando a extensão amqp](#instalando-a-extensão-amqp-litespeed--vps) se estiver usando LiteSpeed ou VPS sem Docker.
+| | Versão |
+|---|---|
+| Mautic | 5.x |
+| PHP | 8.1 – 8.3 |
+| MySQL | 5.7 / 8.x |
+| RabbitMQ | 3.x *(opcional — envio assíncrono)* |
 
 ---
 
 ## Instalação
 
-### 1. Clonar o repositório
-
 ```bash
+# 1. Clonar na pasta de plugins
 cd /var/www/html/docroot/plugins
-git clone <url-do-repositorio> DialogHSMBundle
-```
+git clone <url> DialogHSMBundle
 
-> Com Docker:
-> ```bash
-> docker exec mautic_app bash -c "cd /var/www/html/docroot/plugins && git clone <url-do-repositorio> DialogHSMBundle"
-> ```
-
-### 2. Limpar o cache e rodar as migrações
-
-```bash
+# 2. Registrar o plugin
 php bin/console cache:clear
 php bin/console mautic:plugins:reload
+
+# 3. Ativar: Configurações → Plugins → 360dialog WhatsApp → Publicar
 ```
 
-> Com Docker:
-> ```bash
-> docker exec mautic_app php /var/www/html/bin/console cache:clear
-> docker exec mautic_app php /var/www/html/bin/console mautic:plugins:reload
-> ```
+> **Migrações:** o `mautic:plugins:reload` só roda migrations quando a versão em `Config/config.php` é maior que a salva no banco. Toda migration nova exige incremento da versão.
 
-### 3. Criptografar API Keys existentes (obrigatório em atualizações)
+---
 
-A partir da versão **1.2.0** as API Keys são armazenadas criptografadas. Após o `mautic:plugins:reload`, execute o comando abaixo para migrar os registros existentes:
+## Configuração
+
+### Plugin (global)
+
+**Configurações → Plugins → 360dialog WhatsApp**
+
+| Campo | Padrão | Descrição |
+|---|---|---|
+| URL Base da API | `https://waba-v2.360dialog.io/messages` | URL padrão para números sem URL própria |
+| Limite do Consumer | `50` | Mensagens por execução (sobreposto por `--limit`) |
+| Rate Bulk (msg/min) | `0` | Throttle do consumer assíncrono. `0` = sem limite |
+| Máx. Registros de Log | `100.000` | Limite de registros na tabela de logs |
+| Retenção de Log (dias) | `30` | Registros mais antigos são removidos. `0` = sem limite |
+
+### Números WhatsApp
+
+**Canais → Números WhatsApp → Novo**
+
+| Campo | Obrigatório | Descrição |
+|---|---|---|
+| Nome | ✅ | Identificador (ex: `Comercial SP`) |
+| Telefone | ✅ | Formato E.164 (ex: `+5511999999999`) |
+| API Key | ✅ | Chave `D360-API-KEY` da 360dialog |
+| URL Base | ❌ | Sobrepõe a URL global |
+| Fila Massiva | ❌ | Nome da fila RabbitMQ para envio bulk |
+| Fila Batch | ❌ | Nome da fila RabbitMQ para envio em horário comercial |
+
+---
+
+## Como funciona
+
+O plugin adiciona duas ações ao builder de campanhas:
+
+### Ação 1 — Enviar WhatsApp (síncrono)
+
+Chama a API 360dialog diretamente no momento em que o contato entra no nó.
+
+### Ação 2 — Enviar WhatsApp com Fila (assíncrono)
+
+Enfileira a mensagem no RabbitMQ. Um consumer processa a fila em background (cron).
+
+| Tipo de Fila | Quando usar |
+|---|---|
+| **Massivo** | Qualquer horário |
+| **Batch** | Horário comercial (seg–sex) |
+
+### Payload do template
+
+```
+content  = nome_do_template
+nome     = {{ contact.firstname }}
+telefone = {{ contact.phone }}
+```
+
+A chave `content` define o template. As demais são variáveis passadas ao template.
+
+---
+
+## Envio Assíncrono (RabbitMQ)
+
+### 1. Variáveis de ambiente (`.env.local`)
 
 ```bash
-php bin/console dialoghsm:encrypt-api-keys
+# Transport principal (AMQP)
+MAUTIC_MESSENGER_DSN_WHATSAPP=amqp://user:password@localhost:5672/%2f
+
+# Transport direto (Redis) — para a ação síncrona não bloquear o worker
+MAUTIC_MESSENGER_DSN_WHATSAPP_DIRECT=redis://localhost:6379/3
+
+# Dead Letter Queue — mensagens que esgotam os 3 retries
+MAUTIC_MESSENGER_DSN_WHATSAPP_FAILED=amqp://user:password@localhost:5672/%2f?exchange[name]=whatsapp_failed&exchange[type]=fanout
 ```
 
-> Com Docker:
-> ```bash
-> docker exec mautic_app php /var/www/html/bin/console dialoghsm:encrypt-api-keys
-> ```
+Sem configuração, o padrão é `null://null` (envio inline, sem fila).
 
-Use `--dry-run` para visualizar o que seria alterado sem efetuar mudanças:
+### 2. Setup inicial do RabbitMQ
+
+Execute **uma única vez** após configurar o `.env.local`:
 
 ```bash
-php bin/console dialoghsm:encrypt-api-keys --dry-run
+# Cria o exchange 'whatsapp' e o exchange 'delays' (retry)
+php bin/console messenger:setup-transports whatsapp
+
+# Para cada fila do número, criar e vincular ao exchange 'whatsapp'
+rabbitmqadmin declare queue name=minha_fila durable=true
+rabbitmqadmin declare binding source=whatsapp destination=minha_fila routing_key=minha_fila
 ```
 
-> Números criados após a atualização são criptografados automaticamente ao salvar. O comando é necessário apenas para migrar chaves já existentes no banco.
+> Mensagens enviadas para uma fila sem binding ao exchange `whatsapp` são descartadas silenciosamente.
 
-### 3. Ativar o plugin
+**Dead Letter Queue** (opcional):
 
-1. Acesse **Configurações → Plugins**
-2. Localize **360dialog WhatsApp** e clique em **Ativar/Publicar**
+```bash
+rabbitmqadmin declare exchange name=whatsapp_failed type=fanout durable=true
+rabbitmqadmin declare queue name=whatsapp_failed durable=true
+rabbitmqadmin declare binding source=whatsapp_failed destination=whatsapp_failed
+```
 
-### Atualizações futuras
+### 3. Cron
+
+```bash
+# Consumer direto (Redis) — a cada minuto
+* * * * * php bin/console messenger:consume whatsapp_direct --limit=120 --time-limit=55
+
+# Fila bulk — a cada minuto
+* * * * * php bin/console dialoghsm:consume --mode=bulk --limit=120 --time-limit=55
+
+# Fila batch — seg a sex, a cada 10 minutos
+*/10 * * * 1-5 php bin/console dialoghsm:consume --mode=batch --limit=100 --time-limit=540
+```
+
+### Consumer manual
+
+```bash
+# Por tipo
+php bin/console dialoghsm:consume --mode=bulk --time-limit=60
+php bin/console dialoghsm:consume --mode=batch --time-limit=60
+
+# Por fila específica
+php bin/console dialoghsm:consume --queue=nome_da_fila --time-limit=60
+```
+
+| Opção | Padrão | Descrição |
+|---|---|---|
+| `--mode` | — | `bulk` ou `batch` (atalho para as filas do número) |
+| `--queue` | — | Nome exato da fila (tem prioridade sobre `--mode`) |
+| `--limit` | configuração do plugin | Máximo de mensagens |
+| `--time-limit` | `60` | Para após N segundos (`0` = sem limite) |
+
+---
+
+## Logs de Envio
+
+**Canais → Logs de Envio**
+
+| Status | Significado |
+|---|---|
+| `queued` | Na fila, aguardando consumer |
+| `sent` | Enviado com sucesso (HTTP 200) |
+| `failed` | Falha no envio |
+| `dlq` | Esgotou os 3 retries, movido para DLQ |
+
+---
+
+## Atualizações
 
 ```bash
 cd /var/www/html/docroot/plugins/DialogHSMBundle
@@ -80,14 +186,9 @@ php bin/console cache:clear
 php bin/console mautic:plugins:reload
 ```
 
-> **Importante:** O `mautic:plugins:reload` só executa migrations quando a versão em `Config/config.php` é maior que a versão registrada no banco. Toda vez que uma migration for adicionada ao plugin, o campo `version` em `Config/config.php` **deve ser incrementado**. Sem isso, as migrations não rodam em produção.
-
-#### Se migrations ficaram para trás (emergência)
-
-Caso uma atualização tenha adicionado migrations sem incrementar a versão, force o re-run baixando a versão no banco e rodando o reload:
+Se uma migration ficou para trás (versão não foi incrementada):
 
 ```sql
--- Execute no banco de produção antes do mautic:plugins:reload
 UPDATE plugins SET version = '0.0.0' WHERE bundle = 'DialogHSMBundle';
 ```
 
@@ -97,230 +198,13 @@ php bin/console mautic:plugins:reload
 
 ---
 
-## Configuração Global do Plugin
+## Segurança
 
-Acesse **Configurações → Plugins → 360dialog WhatsApp → Configuração**.
-
-| Campo             | Descrição                                                        | Padrão                              |
-|-------------------|------------------------------------------------------------------|-------------------------------------|
-| **URL Base da API** | URL padrão da API 360dialog usada quando o número não define a sua | `https://waba-v2.360dialog.io/messages` |
-| **Limite do Consumer** | Máximo de mensagens processadas por execução do consumer | `50` |
-
----
-
-## Cadastro de Números WhatsApp
-
-Acesse **Canais → Números WhatsApp → Novo**.
-
-| Campo          | Descrição                                                                            | Obrigatório |
-|----------------|--------------------------------------------------------------------------------------|-------------|
-| **Nome**       | Identificador amigável (ex: `Comercial SP`)                                          | ✅          |
-| **Telefone**   | Número remetente no formato E.164 (ex: `+5511999999999`)                             | ✅          |
-| **API Key**    | Chave D360-API-KEY fornecida pela 360dialog                                          | ✅          |
-| **URL Base**   | URL customizada da API. Se vazio, usa a URL global configurada no plugin             | ❌          |
-| **Fila Massiva (RabbitMQ)** | Nome da fila para envio massivo em qualquer horário (ex: `queue`)       | ❌          |
-| **Fila Batch (RabbitMQ)**   | Nome da fila para envio em lote no horário comercial (ex: `batch`)      | ❌          |
-
----
-
-## Uso no Builder de Campanhas
-
-O plugin adiciona **duas ações** ao builder de campanhas do Mautic:
-
-### Ação 1 — Enviar WhatsApp (síncrono)
-
-Envia a mensagem diretamente via API no momento em que o contato entra no nó.
-
-| Campo           | Descrição                                                           |
-|-----------------|---------------------------------------------------------------------|
-| **Número**      | Número WhatsApp remetente                                           |
-| **Payload**     | Lista de `chave → valor` enviados ao template (ex: `content = nome_do_template`, `nome = {{ contact.firstname }}`) |
-| **Delay (ms)**  | Aguardar X ms entre cada envio. `0` = sem delay                     |
-| **Limite/Lote** | Agrupar envios em lotes de N antes de aplicar o delay. `0` = delay entre cada mensagem individualmente |
-
-### Ação 2 — Enviar WhatsApp com Fila (assíncrono)
-
-Enfileira a mensagem no RabbitMQ para processamento posterior pelo consumer.
-
-Possui os mesmos campos da ação síncrona, mais:
-
-| Campo            | Opções                  | Descrição                                                                                           |
-|------------------|-------------------------|-----------------------------------------------------------------------------------------------------|
-| **Tipo de Fila** | **Massivo** / **Batch** | **Massivo** usa a *Fila Massiva* do número (qualquer horário). **Batch** usa a *Fila Batch* (horário comercial). |
-
-### Estrutura do Payload
-
-A chave `content` define o nome do template. As demais chaves são variáveis enviadas ao template:
-
-```
-content  = nome_do_template
-nome     = {{ contact.firstname }}
-telefone = {{ contact.phone }}
-custom   = {{ contact.custom_field }}
-```
-
----
-
-## Envio Assíncrono via RabbitMQ
-
-### 1. Configurar a conexão
-
-Adicione no `.env.local` (na raiz do Mautic):
+- API Keys são armazenadas criptografadas (prefixo `ENC:`). Após atualizar da v1.1.x para v1.2+:
 
 ```bash
-MAUTIC_MESSENGER_DSN_WHATSAPP=amqp://user:password@localhost:5672/%2f
+php bin/console dialoghsm:encrypt-api-keys
 ```
 
-> Em Docker, substitua `localhost` pelo nome do serviço RabbitMQ (ex: `rabbitmq`).
-
-**Dead Letter Queue (opcional):** mensagens que falharam em todas as 3 tentativas de reenvio são marcadas como `dlq` no log. Por padrão são descartadas. Para armazená-las em uma fila separada:
-
-```bash
-MAUTIC_MESSENGER_DSN_WHATSAPP_FAILED=amqp://user:password@localhost:5672/%2f?queues[]=whatsapp_failed
-```
-
-Sem essa variável o comportamento é idêntico — apenas o status no log muda para `dlq`.
-
-### 2. Criar as filas no RabbitMQ
-
-Crie as filas com os **mesmos nomes** configurados nos campos *Fila Massiva* e *Fila Batch* de cada número:
-
-```bash
-rabbitmqctl add_queue bulk
-rabbitmqctl add_queue batch
-```
-
-> Se a fila não existir no RabbitMQ, a mensagem é descartada silenciosamente.
-
-### 3. Configurar o Cron
-
-```bash
-# Fila bulk: qualquer horário, a cada minuto
-* * * * * php /var/www/html/bin/console dialoghsm:consume --mode=bulk --time-limit=60
-
-# Fila batch (horário comercial): seg a sex, 8h às 18h, a cada 10 minutos
-*/10 8-17 * * 1-5 php /var/www/html/bin/console dialoghsm:consume --mode=batch --time-limit=540
-```
-
-### Consumer Manual
-
-```bash
-# Fila padrão bulk
-php bin/console dialoghsm:consume --mode=bulk --time-limit=60
-
-# Fila padrão batch
-php bin/console dialoghsm:consume --mode=batch --time-limit=60
-
-# Fila com nome customizado
-php bin/console dialoghsm:consume --queue=nome_da_fila --time-limit=60
-
-# Todas as filas
-php bin/console dialoghsm:consume
-```
-
-| Opção           | Descrição                                                                      | Padrão           |
-|-----------------|--------------------------------------------------------------------------------|------------------|
-| `--mode`        | Atalho para filas padrão: `bulk` ou `batch`                                    | *(nenhum)*       |
-| `--queue`       | Nome exato da fila. Tem prioridade sobre `--mode`                              | *(todas)*        |
-| `--limit`       | Máximo de mensagens a processar                                                | Limite do plugin |
-| `--time-limit`  | Para o consumer após N segundos. `0` = sem limite                              | `60`             |
-
----
-
-## Logs de Envio
-
-Acesse **Canais → Logs de Envio** para auditar todos os envios realizados pelo plugin.
-
-| Coluna        | Descrição                                              |
-|---------------|--------------------------------------------------------|
-| **Data/Hora** | Timestamp do envio                                     |
-| **Contato**   | Link para o perfil do contato no Mautic                |
-| **Telefone**  | Número de destino                                      |
-| **Template**  | Nome do template HSM enviado                           |
-| **Status**    | `sent` (verde), `failed` (vermelho) ou `dlq` (amarelo) |
-| **HTTP**      | Código de resposta da API 360dialog                    |
-| **Erro**      | Mensagem de erro quando o envio falha                  |
-
-> Os logs são mantidos automaticamente em no máximo **10.000 registros**.
-
----
-
-## Solução de Problemas
-
-**Cache desatualizado após instalar:**
-```bash
-php bin/console cache:clear
-```
-
-**Mensagens não sendo enviadas:**
-- Verifique se o plugin está publicado em Configurações → Plugins
-- Confirme que a API Key do número está correta
-- Consulte os logs: `var/logs/mautic_prod-YYYY-MM-DD.php`
-
-**Contatos não recebem mensagem (status `failed` com `invalid_phone`):**
-- O telefone do contato deve estar no formato E.164: `+` seguido do código do país sem zeros à esquerda, ex: `+5511999999999`
-- Números sem `+`, com espaços ou com código de país `0xx` são rejeitados antes do envio
-
-**Consumer não finaliza:**
-- Sempre use `--time-limit` ao rodar manualmente
-
----
-
-## Instalando a extensão amqp (LiteSpeed / VPS)
-
-Se estiver usando **LiteSpeed** (`lsphp83`) ou qualquer VPS sem Docker, a extensão `amqp` precisa ser compilada manualmente. O pacote `lsphp83-amqp` **não existe** nos repositórios padrão.
-
-### Passo 1 — Instale as dependências
-
-```bash
-apt install -y lsphp83-dev librabbitmq-dev build-essential autoconf
-```
-
-### Passo 2 — Baixe e extraia o código-fonte da extensão
-
-```bash
-cd /tmp
-wget https://pecl.php.net/get/amqp-2.1.2.tgz
-tar xzf amqp-2.1.2.tgz
-cd amqp-2.1.2
-```
-
-### Passo 3 — Compile usando o phpize do lsphp83
-
-```bash
-/usr/local/lsws/lsphp83/bin/phpize
-./configure --with-php-config=/usr/local/lsws/lsphp83/bin/php-config
-make && make install
-```
-
-### Passo 4 — Ative a extensão
-
-```bash
-echo "extension=amqp.so" > /usr/local/lsws/lsphp83/etc/php/8.3/mods-available/amqp.ini
-```
-
-### Passo 5 — Confirme
-
-```bash
-/usr/local/lsws/lsphp83/bin/php -m | grep amqp
-# deve retornar: amqp
-```
-
-### Alternativas sem compilação
-
-Se não quiser compilar, o plugin suporta dois outros transports que não precisam de extensão adicional:
-
-**Redis** (recomendado — extensão já vem com o lsphp83):
-```bash
-# .env.local
-MAUTIC_MESSENGER_DSN_WHATSAPP=redis://localhost:6379
-```
-
-**Banco de dados** (zero dependência extra):
-```bash
-# .env.local
-MAUTIC_MESSENGER_DSN_WHATSAPP=doctrine://default?table_name=messenger_messages
-
-# Criar a tabela uma única vez:
-php bin/console messenger:setup-transports
-```
+- URLs de mídia passam por validação anti-SSRF (apenas HTTPS + IPs públicos).
+- Telefones são validados no formato E.164 (`+` + código do país + número, sem zeros iniciais).
