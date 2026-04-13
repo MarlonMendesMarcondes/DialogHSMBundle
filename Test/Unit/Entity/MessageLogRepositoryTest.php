@@ -470,18 +470,18 @@ class MessageLogRepositoryTest extends TestCase
         $this->repository->getLogs(0, 50, ['status' => 'sent']);
     }
 
-    public function testGetLogsWithSenderNameFilterUsesLike(): void
+    public function testGetLogsWithSenderNameFilterUsesExactMatch(): void
     {
         $this->mockQueryBuilder
             ->expects($this->once())
             ->method('andWhere')
-            ->with('dhml.senderName LIKE :senderName')
+            ->with('dhml.senderName = :senderName')
             ->willReturnSelf();
 
         $this->mockQueryBuilder
             ->expects($this->once())
             ->method('setParameter')
-            ->with('senderName', '%Numero%')
+            ->with('senderName', 'Numero')
             ->willReturnSelf();
 
         $this->mockQuery->method('getResult')->willReturn([]);
