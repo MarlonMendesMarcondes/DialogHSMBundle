@@ -170,19 +170,45 @@ class MessageLogRepository extends CommonRepository
     }
 
     /**
-     * Remove registros antigos por dois critérios aplicados em sequência:
-     *  1. Registros com date_sent anterior a $maxDays dias (0 = desabilitado)
-     *  2. Se ainda restar mais que $maxRecords, remove os mais antigos até o limite
+     * Tamanho de cada lote no prune(). Limita o lock por statement a ~1k linhas,
+     * evitando travamento prolongado em tabelas grandes.
      */
-    public function prune(int $maxRecords = 100_000, int $maxDays = 30): void
+    private const PRUNE_BATCH_SIZE = 1_000;
+
+    /**
+     * Remove registros antigos por dois critérios aplicados em sequência:
+     *
+     *  1. Por idade (primário/padrão): remove registros com date_sent anterior a $maxDays dias.
+     *     Desabilitado somente quando $maxDays = 0.
+     *
+     *  2. Por contagem (segurança/opcional): se após a limpeza por idade a tabela ainda
+     *     ultrapassar $maxRecords, remove os mais antigos até o limite.
+     *     Desabilitado quando $maxRecords = 0 (padrão).
+     *
+     * Ambas as deleções usam lotes de PRUNE_BATCH_SIZE para evitar table locks longos.
+     * O loop de idade continua enquanto o lote estiver cheio (indica que há mais registros).
+     * O loop de contagem continua até zerar o excesso ou até o banco retornar 0 linhas.
+     *
+     * @param int $maxRecords Limite máximo de registros. 0 = desabilitado (padrão).
+     * @param int $maxDays    Registros mais antigos que este número de dias são removidos. 0 = desabilitado.
+     */
+    public function prune(int $maxRecords = 0, int $maxDays = 30): void
     {
         $conn      = $this->getEntityManager()->getConnection();
         $tableName = $this->getEntityManager()->getClassMetadata(MessageLog::class)->getTableName();
 
+        // Passo 1: deletar por idade em lotes
         if ($maxDays > 0) {
-            $conn->executeStatement(
-                "DELETE FROM `{$tableName}` WHERE date_sent < DATE_SUB(NOW(), INTERVAL {$maxDays} DAY)"
-            );
+            do {
+                $deleted = (int) $conn->executeStatement(
+                    "DELETE FROM `{$tableName}` WHERE date_sent < DATE_SUB(NOW(), INTERVAL {$maxDays} DAY) LIMIT ".self::PRUNE_BATCH_SIZE
+                );
+            } while ($deleted === self::PRUNE_BATCH_SIZE);
+        }
+
+        // Passo 2: deletar por contagem em lotes (desabilitado quando maxRecords = 0)
+        if ($maxRecords <= 0) {
+            return;
         }
 
         $count = (int) $conn->fetchOne("SELECT COUNT(*) FROM `{$tableName}`");
@@ -192,8 +218,18 @@ class MessageLogRepository extends CommonRepository
         }
 
         $toDelete = $count - $maxRecords;
-        $conn->executeStatement(
-            "DELETE FROM `{$tableName}` ORDER BY date_sent ASC, id ASC LIMIT {$toDelete}"
-        );
+
+        while ($toDelete > 0) {
+            $batch   = min(self::PRUNE_BATCH_SIZE, $toDelete);
+            $deleted = (int) $conn->executeStatement(
+                "DELETE FROM `{$tableName}` ORDER BY date_sent ASC, id ASC LIMIT {$batch}"
+            );
+
+            if (0 === $deleted) {
+                break; // tabela esvaziou antes do previsto
+            }
+
+            $toDelete -= $deleted;
+        }
     }
 }

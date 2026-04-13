@@ -204,7 +204,8 @@ class MessageLogRepositoryTest extends TestCase
 
     public function testPruneSkipsAgeDeletionWhenMaxDaysIsZero(): void
     {
-        // maxDays=0 → não executa DELETE por idade, apenas conta
+        // maxDays=0 → não executa DELETE por idade
+        // maxRecords=100_000 → executa COUNT, mas 50 < 100_000 → nenhum DELETE
         $this->mockConnection
             ->expects($this->never())
             ->method('executeStatement');
@@ -214,6 +215,48 @@ class MessageLogRepositoryTest extends TestCase
             ->willReturn('50');
 
         $this->repository->prune(maxRecords: 100_000, maxDays: 0);
+    }
+
+    public function testPruneDefaultMaxRecordsZeroSkipsCountCheck(): void
+    {
+        // maxRecords=0 (padrão) → limite por contagem desabilitado
+        // Apenas o DELETE por idade roda; COUNT não é consultado
+        $this->mockConnection
+            ->expects($this->once())
+            ->method('executeStatement')
+            ->with($this->stringContains('INTERVAL 30 DAY'))
+            ->willReturn(0);
+
+        $this->mockConnection
+            ->expects($this->never())
+            ->method('fetchOne');
+
+        $this->repository->prune(); // sem argumentos → maxRecords=0, maxDays=30
+    }
+
+    public function testPruneMaxRecordsZeroExplicitSkipsCountCheck(): void
+    {
+        // maxRecords=0 explícito → mesmo comportamento que o padrão
+        $this->mockConnection
+            ->expects($this->once())
+            ->method('executeStatement')
+            ->with($this->stringContains('INTERVAL 7 DAY'))
+            ->willReturn(0);
+
+        $this->mockConnection
+            ->expects($this->never())
+            ->method('fetchOne');
+
+        $this->repository->prune(maxRecords: 0, maxDays: 7);
+    }
+
+    public function testPruneBothDisabledDoesNothing(): void
+    {
+        // maxDays=0, maxRecords=0 → absolutamente nada acontece
+        $this->mockConnection->expects($this->never())->method('executeStatement');
+        $this->mockConnection->expects($this->never())->method('fetchOne');
+
+        $this->repository->prune(maxRecords: 0, maxDays: 0);
     }
 
     public function testPruneDoesNothingWhenCountBelowLimitAfterAgePrune(): void
@@ -304,6 +347,104 @@ class MessageLogRepositoryTest extends TestCase
             ->willReturn('600');
 
         $this->repository->prune(maxRecords: 500, maxDays: 0);
+    }
+
+    // =========================================================================
+    // prune — comportamento de batching (evita table lock)
+    // =========================================================================
+
+    public function testPruneAgeDeletionSqlContainsLimit(): void
+    {
+        // O DELETE por idade deve sempre incluir LIMIT para não travar a tabela inteira
+        $this->mockConnection
+            ->expects($this->once())
+            ->method('executeStatement')
+            ->with($this->logicalAnd(
+                $this->stringContains('INTERVAL 30 DAY'),
+                $this->stringContains('LIMIT 1000')
+            ))
+            ->willReturn(0);
+
+        $this->mockConnection->method('fetchOne')->willReturn('0');
+
+        $this->repository->prune(maxRecords: 100_000, maxDays: 30);
+    }
+
+    public function testPruneAgeDeletionLoopsWhileBatchIsFull(): void
+    {
+        // 1ª batch retorna 1000 (cheio) → continua; 2ª retorna 300 (parcial) → para
+        // Resultado: executeStatement chamado exatamente 2 vezes
+        $call = 0;
+        $this->mockConnection
+            ->expects($this->exactly(2))
+            ->method('executeStatement')
+            ->with($this->stringContains('INTERVAL 7 DAY'))
+            ->willReturnCallback(static function () use (&$call): int {
+                return ++$call === 1 ? 1000 : 300;
+            });
+
+        $this->mockConnection->method('fetchOne')->willReturn('0');
+
+        $this->repository->prune(maxRecords: 100_000, maxDays: 7);
+    }
+
+    public function testPruneCountDeletionUsesMultipleBatchesForLargeExcess(): void
+    {
+        // Excesso de 2500 → 3 batches: LIMIT 1000, LIMIT 1000, LIMIT 500
+        $call = 0;
+        $this->mockConnection
+            ->expects($this->exactly(3))
+            ->method('executeStatement')
+            ->willReturnCallback(function (string $sql) use (&$call): int {
+                ++$call;
+                if ($call <= 2) {
+                    $this->assertStringContainsString('LIMIT 1000', $sql);
+                    return 1000;
+                }
+                $this->assertStringContainsString('LIMIT 500', $sql);
+                return 500;
+            });
+
+        // 102500 registros, limite 100000 → excesso = 2500
+        $this->mockConnection->method('fetchOne')->willReturn('102500');
+
+        $this->repository->prune(maxRecords: 100_000, maxDays: 0);
+    }
+
+    public function testPruneCountDeletionStopsEarlyWhenTableDrains(): void
+    {
+        // executeStatement retorna 0 imediatamente → break sem loop infinito
+        $this->mockConnection
+            ->expects($this->once())
+            ->method('executeStatement')
+            ->willReturn(0);
+
+        // Excesso = 100000, mas o banco retorna 0 linhas deletadas
+        $this->mockConnection->method('fetchOne')->willReturn('200000');
+
+        $this->repository->prune(maxRecords: 100_000, maxDays: 0);
+    }
+
+    public function testPruneAgeDeletionThenCountDeletionBothBatch(): void
+    {
+        // Simula: idade remove em 2 batches (1000 + 200), contagem ainda excede → 1 batch de contagem
+        $ageCalls   = 0;
+        $countCalls = 0;
+
+        $this->mockConnection
+            ->expects($this->exactly(3))
+            ->method('executeStatement')
+            ->willReturnCallback(static function (string $sql) use (&$ageCalls, &$countCalls): int {
+                if (str_contains($sql, 'INTERVAL')) {
+                    return ++$ageCalls === 1 ? 1000 : 200;
+                }
+                ++$countCalls;
+                return 0; // break do while de contagem
+            });
+
+        $this->mockConnection->method('fetchOne')->willReturn('100500'); // excesso = 500
+
+        $this->repository->prune(maxRecords: 100_000, maxDays: 14);
     }
 
     // =========================================================================
