@@ -144,14 +144,15 @@ class MessageLogController extends FormController
 
         return $this->delegateView([
             'viewParameters' => [
-                'items'      => $items,
-                'totalItems' => $total,
-                'maxLogs'    => $this->getMaxLogs(),
-                'page'       => $page,
-                'limit'      => $limit,
-                'filters'    => $filters,
-                'timezone'   => $this->coreParametersHelper->get('default_timezone', 'UTC'),
-                'tmpl'       => $request->get('tmpl', 'index'),
+                'items'        => $items,
+                'totalItems'   => $total,
+                'maxLogs'      => $this->getMaxLogs(),
+                'page'         => $page,
+                'limit'        => $limit,
+                'filters'      => $filters,
+                'senderNames'  => $messageLogRepository->getDistinctSenderNames(),
+                'timezone'     => $this->coreParametersHelper->get('default_timezone', 'UTC'),
+                'tmpl'         => $request->get('tmpl', 'index'),
             ],
             'contentTemplate' => '@DialogHSM/MessageLog/list.html.twig',
             'passthroughVars' => [
