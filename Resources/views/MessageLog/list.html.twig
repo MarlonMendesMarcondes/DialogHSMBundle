@@ -105,7 +105,7 @@
             <tbody>
             {% for item in items %}
                 <tr>
-                    <td>{{ item.getDateSent()|date('d/m/Y H:i:s') }}</td>
+                    <td>{{ item.getDateSent()|date('d/m/Y H:i:s', timezone) }}</td>
                     <td>{{ item.getSenderName() ?? '—' }}</td>
                     <td>
                         <a href="{{ path('mautic_contact_action', {'objectAction': 'view', 'objectId': item.getLeadId()}) }}" target="_blank">
