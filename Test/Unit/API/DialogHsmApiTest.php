@@ -47,9 +47,18 @@ class DialogHsmApiTest extends TestCase
 
     protected function setUp(): void
     {
+        // Garante que o SSRF check está ativo nos testes, independente do ambiente Docker
+        // (DIALOGHSM_DISABLE_SSRF_CHECK=1 é setado no container de dev para fake API local)
+        putenv('DIALOGHSM_DISABLE_SSRF_CHECK=0');
+
         $this->mockClient = $this->createMock(Client::class);
         $this->mockLogger = $this->createMock(LoggerInterface::class);
         $this->api        = new DialogHSMApi($this->mockClient, $this->mockLogger, self::createDnsResolver());
+    }
+
+    protected function tearDown(): void
+    {
+        putenv('DIALOGHSM_DISABLE_SSRF_CHECK');
     }
 
     // =========================================================================
