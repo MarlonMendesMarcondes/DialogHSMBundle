@@ -12,7 +12,9 @@ class MessageLog
 {
     public const STATUS_QUEUED    = 'queued';
     public const STATUS_SENT      = 'sent';
+    /** @deprecated Nunca produzido desde v1.3.1 (webhook removido). Mantido apenas para compatibilidade com registros históricos. */
     public const STATUS_DELIVERED = 'delivered';
+    /** @deprecated Nunca produzido desde v1.3.1 (webhook removido). Mantido apenas para compatibilidade com registros históricos. */
     public const STATUS_READ      = 'read';
     public const STATUS_FAILED    = 'failed';
     public const STATUS_DLQ       = 'dlq';
