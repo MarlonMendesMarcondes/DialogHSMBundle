@@ -160,7 +160,6 @@ class CampaignSubscriber implements EventSubscriberInterface
 
         $this->processContacts($event, function (SendWhatsAppMessage $message, WhatsAppNumber $number) use ($mode): bool {
             $uuid = bin2hex(random_bytes(16));
-            $this->persistQueuedLog($message, $uuid);
 
             $queueName = match ($mode) {
                 'batch' => $number->getBatchQueueName() ?: $number->getQueueName(),
@@ -170,6 +169,11 @@ class CampaignSubscriber implements EventSubscriberInterface
 
             $stamps = $queueName ? [new AmqpStamp($queueName)] : [];
             $this->bus->dispatch($message->withQueueLogId($uuid), $stamps);
+
+            // Só persiste o log após confirmação do dispatch.
+            // Se o dispatch lançar, o try/catch de processContacts captura
+            // e chama persistFailureLog — nenhum log queued órfão é criado.
+            $this->persistQueuedLog($message, $uuid);
 
             return true;
         }, applyBatchSleep: false);

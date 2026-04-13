@@ -1439,6 +1439,42 @@ class CampaignSubscriberActionTest extends TestCase
     }
 
     /**
+     * Se bus->dispatch() lançar exceção, nenhum log 'queued' órfão deve ser criado.
+     * O EntityManager deve ser chamado uma única vez — para o log 'failed'
+     * gerado pelo try/catch de processContacts — e não duas vezes (queued + failed).
+     */
+    public function testQueueDispatchFailureDoesNotCreateOrphanQueuedLog(): void
+    {
+        $this->enableIntegration();
+
+        $number = $this->buildWhatsAppNumber();
+        $number->method('getQueueName')->willReturn('teste_hsm');
+        $this->mockNumberModel->method('getEntity')->willReturn($number);
+
+        $this->mockBus
+            ->expects($this->once())
+            ->method('dispatch')
+            ->willThrowException(new \RuntimeException('RabbitMQ connection refused'));
+
+        $persistedEntities = [];
+        $this->mockEntityManager
+            ->method('persist')
+            ->willReturnCallback(function (object $entity) use (&$persistedEntities): void {
+                $persistedEntities[] = $entity;
+            });
+        $this->mockEntityManager->method('flush');
+
+        $contact = $this->buildContact('+5511999999999', 1);
+        $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp_queue', [1 => $contact]);
+
+        $this->subscriber->onCampaignTriggerActionQueue($event);
+
+        // Deve ter persistido exatamente UM log (o de falha), não dois (queued + failed)
+        $this->assertCount(1, $persistedEntities, 'dispatch falhou: apenas 1 log deve ser criado (failed), sem log queued órfão');
+        $this->assertSame('failed', $persistedEntities[0]->getStatus());
+    }
+
+    /**
      * @return array<string, array{string}>
      */
     public static function invalidE164Provider(): array
