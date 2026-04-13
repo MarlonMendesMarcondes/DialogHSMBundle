@@ -31,7 +31,7 @@ class DialogHSMExtension extends Extension implements PrependExtensionInterface
                         'dsn'             => '%env(MAUTIC_MESSENGER_DSN_WHATSAPP)%',
                         'options'         => [
                             'auto_setup' => false,
-                            'exchange'   => ['name' => 'whatsapp', 'type' => 'direct'],
+                            'exchange'   => ['name' => '', 'type' => 'direct'],
                         ],
                         'retry_strategy'  => [
                             'max_retries'  => 3,
