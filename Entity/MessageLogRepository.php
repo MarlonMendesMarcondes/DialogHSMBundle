@@ -48,6 +48,24 @@ class MessageLogRepository extends CommonRepository
     }
 
     /**
+     * Retorna lista ordenada de sender names distintos presentes nos logs.
+     *
+     * @return string[]
+     */
+    public function getDistinctSenderNames(): array
+    {
+        $rows = $this->createQueryBuilder('dhml')
+            ->select('DISTINCT dhml.senderName')
+            ->where('dhml.senderName IS NOT NULL')
+            ->andWhere("dhml.senderName != ''")
+            ->orderBy('dhml.senderName', 'ASC')
+            ->getQuery()
+            ->getScalarResult();
+
+        return array_column($rows, 'senderName');
+    }
+
+    /**
      * @param array{status?:string, dateFrom?:string, dateTo?:string, senderName?:string, contact?:string} $filters
      */
     private function applyFilters(\Doctrine\ORM\QueryBuilder $qb, array $filters): void
@@ -68,8 +86,8 @@ class MessageLogRepository extends CommonRepository
         }
 
         if (!empty($filters['senderName'])) {
-            $qb->andWhere('dhml.senderName LIKE :senderName')
-               ->setParameter('senderName', '%' . $filters['senderName'] . '%');
+            $qb->andWhere('dhml.senderName = :senderName')
+               ->setParameter('senderName', $filters['senderName']);
         }
 
         if (!empty($filters['contact'])) {
