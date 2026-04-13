@@ -80,11 +80,11 @@ class ConfigAuthType extends AbstractType
                 'required'   => false,
                 'attr'       => [
                     'class'   => 'form-control',
-                    'min'     => 1000,
+                    'min'     => 0,       // 0 = desabilitado (sem limite por contagem)
                     'max'     => 10000000,
                     'tooltip' => 'dialoghsm.config.log_max_records.tooltip',
                 ],
-                'data' => (int) ($data['log_max_records'] ?? 100000),
+                'data' => (int) ($data['log_max_records'] ?? 0),
                 'help' => 'dialoghsm.config.log_max_records.help',
             ]
         );

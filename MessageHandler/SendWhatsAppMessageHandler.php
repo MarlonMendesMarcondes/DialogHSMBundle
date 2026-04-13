@@ -19,7 +19,7 @@ use Symfony\Component\Messenger\Handler\MessageHandlerInterface;
 class SendWhatsAppMessageHandler implements MessageHandlerInterface
 {
     private const CACHE_TTL_SECONDS   = 30;
-    private const DEFAULT_MAX_RECORDS = 100_000;
+    private const DEFAULT_MAX_RECORDS = 0;      // 0 = sem limite por contagem (padrão)
     private const DEFAULT_MAX_DAYS    = 30;
 
     private int   $cachedMaxRecords = -1;
@@ -128,7 +128,7 @@ class SendWhatsAppMessageHandler implements MessageHandlerInterface
         try {
             $integration            = $this->integrationsHelper->getIntegration(DialogHSMIntegration::NAME);
             $apiKeys                = $integration->getIntegrationConfiguration()->getApiKeys() ?? [];
-            $this->cachedMaxRecords = max(1, (int) ($apiKeys['log_max_records'] ?? self::DEFAULT_MAX_RECORDS));
+            $this->cachedMaxRecords = max(0, (int) ($apiKeys['log_max_records'] ?? self::DEFAULT_MAX_RECORDS));
             $this->cachedMaxDays    = max(0, (int) ($apiKeys['log_max_days']    ?? self::DEFAULT_MAX_DAYS));
         } catch (\Throwable) {
             $this->cachedMaxRecords = self::DEFAULT_MAX_RECORDS;
