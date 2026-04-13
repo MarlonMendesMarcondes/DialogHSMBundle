@@ -37,7 +37,7 @@ class DialogHSMApi
         $url = rtrim($baseUrl, '/');
 
         // DIALOGHSM_DISABLE_SSRF_CHECK=1 desativa a validação SSRF.
-        // Usar APENAS em desenvolvimento local com fake API (ex: /tmp/fake_360dialog.php no Docker).
+        // Usar APENAS em desenvolvimento local com fake API.
         // Nunca definir em produção.
         $ssrfCheckEnabled = '1' !== getenv('DIALOGHSM_DISABLE_SSRF_CHECK');
 
