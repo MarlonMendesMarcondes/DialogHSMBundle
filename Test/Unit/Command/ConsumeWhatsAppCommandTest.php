@@ -421,7 +421,7 @@ class ConsumeWhatsAppCommandTest extends TestCase
     }
 
     // -------------------------------------------------------------------------
-    // Testes: tratamento de erro — fila não encontrada no RabbitMQ
+    // Testes: tratamento de erro — fila ainda não existe no RabbitMQ
     // -------------------------------------------------------------------------
 
     public function testRunConsumerShowsFriendlyMessageOnNotFoundQueue(): void
@@ -513,7 +513,7 @@ class ConsumeWhatsAppCommandTest extends TestCase
         $output = $tester->getDisplay();
 
         $this->assertStringContainsString('worker failed for queue', $output);
-        $this->assertStringNotContainsString('não encontrada no RabbitMQ', $output);
+        $this->assertStringNotContainsString('ainda não existe no RabbitMQ', $output);
         $this->assertSame(Command::FAILURE, $tester->getStatusCode());
     }
 
