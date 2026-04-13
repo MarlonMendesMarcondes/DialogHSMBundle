@@ -30,7 +30,7 @@ class DialogHSMApi
      *
      * @param array<string, string> $payloadData key-value pairs configurados na campanha
      *
-     * @return array{success: bool, response: array|null, error: string|null, http_status: int|null, wamid: string|null}
+     * @return array{success: bool, response: array|null, error: string|null, http_status: int|null, wamid: string|null, retryable: bool}
      */
     public function sendMessage(string $apiKey, string $baseUrl, string $mobile, array $payloadData): array
     {
@@ -61,6 +61,7 @@ class DialogHSMApi
                     'error'       => 'URL da API inválida ou aponta para endereço interno.',
                     'http_status' => null,
                     'wamid'       => null,
+                    'retryable'   => false,  // erro de configuração — retry não resolve
                 ];
             }
         } else {
@@ -118,6 +119,7 @@ class DialogHSMApi
                     'error'       => null,
                     'http_status' => $statusCode,
                     'wamid'       => $wamid,
+                    'retryable'   => false,
                 ];
             }
 
@@ -127,8 +129,13 @@ class DialogHSMApi
                 ?? $responseBody['message']
                 ?? json_encode($responseBody);
 
+            // 429 (rate limit) e 5xx (falha do servidor) são transitórios — vale retry.
+            // 4xx (exceto 429) são erros de validação/autenticação — retry não resolve.
+            $retryable = ($statusCode === 429 || $statusCode >= 500);
+
             $this->logger->error('DialogHSM: API retornou erro', [
                 'http_status' => $statusCode,
+                'retryable'   => $retryable,
                 'error'       => $errorDetail,
             ]);
 
@@ -138,6 +145,7 @@ class DialogHSMApi
                 'error'       => "HTTP {$statusCode}: {$errorDetail}",
                 'http_status' => $statusCode,
                 'wamid'       => null,
+                'retryable'   => $retryable,
             ];
         } catch (RequestException $e) {
             $statusCode   = null;
@@ -148,8 +156,13 @@ class DialogHSMApi
                 $responseBody = json_decode($e->getResponse()->getBody()->getContents(), true);
             }
 
+            // Sem resposta = erro de rede (timeout, DNS) = transitório.
+            // Com resposta: aplica mesma classificação do bloco HTTP acima.
+            $retryable = ($statusCode === null || $statusCode === 429 || $statusCode >= 500);
+
             $this->logger->error('DialogHSM: Erro ao enviar mensagem', [
                 'http_status' => $statusCode,
+                'retryable'   => $retryable,
                 'error'       => $e->getMessage(),
             ]);
 
@@ -159,6 +172,7 @@ class DialogHSMApi
                 'error'       => $e->getMessage(),
                 'http_status' => $statusCode,
                 'wamid'       => null,
+                'retryable'   => $retryable,
             ];
         } catch (\Throwable $e) {
             $this->logger->error('DialogHSM: Erro inesperado', [
@@ -171,6 +185,7 @@ class DialogHSMApi
                 'error'       => $e->getMessage(),
                 'http_status' => null,
                 'wamid'       => null,
+                'retryable'   => true,  // causa desconhecida — tenta novamente por segurança
             ];
         }
     }

@@ -10,6 +10,7 @@ use Mautic\LeadBundle\Model\LeadModel;
 use MauticPlugin\DialogHSMBundle\Api\DialogHSMApi;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
+use MauticPlugin\DialogHSMBundle\Exception\TransientApiException;
 use MauticPlugin\DialogHSMBundle\Integration\DialogHSMIntegration;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use MauticPlugin\DialogHSMBundle\Service\BulkRateLimiter;
@@ -44,10 +45,16 @@ class SendWhatsAppMessageHandler implements MessageHandlerInterface
      * @param bool $skipRateLimit    Quando true, omite o throttle() do BulkRateLimiter.
      *                               Use para envios batch — o throttle do lote é feito via
      *                               sendDelay em SendWhatsAppDirectBatchMessageHandler.
+     * @param bool $skipRetry        Quando true, nunca lança TransientApiException mesmo em
+     *                               erros transitórios — registra como 'failed' e retorna.
+     *                               Use em contexto de lote onde o retry individual não é suportado.
      *
-     * @return array{success: bool, response: array|null, error: string|null, http_status: int|null}
+     * @return array{success: bool, response: array|null, error: string|null, http_status: int|null, retryable: bool}
+     *
+     * @throws TransientApiException quando o erro é transitório (rede, rate limit, 5xx) e $skipRetry=false,
+     *                               para que o Symfony Messenger aplique a retry strategy configurada.
      */
-    public function __invoke(SendWhatsAppMessage $message, bool $skipHousekeeping = false, bool $skipRateLimit = false): array
+    public function __invoke(SendWhatsAppMessage $message, bool $skipHousekeeping = false, bool $skipRateLimit = false, bool $skipRetry = false): array
     {
         if (!$skipRateLimit) {
             $this->rateLimiter->throttle();
@@ -59,6 +66,21 @@ class SendWhatsAppMessageHandler implements MessageHandlerInterface
             $message->phone,
             $message->payloadData
         );
+
+        // Erro transitório (rede, 429, 5xx): lança exceção para acionar retry do Messenger.
+        // O log será gravado pelo MessengerFailedEventSubscriber após esgotar os retries (DLQ),
+        // ou naturalmente quando a tentativa de retry obtiver sucesso.
+        // Em contexto de lote (skipRetry=true) não é possível fazer retry individual, então
+        // registra como 'failed' normalmente.
+        if (!$result['success'] && !$skipRetry && ($result['retryable'] ?? false)) {
+            $this->logger->warning('DialogHSM: Erro transitório, agendando retry', [
+                'lead_id'     => $message->leadId,
+                'http_status' => $result['http_status'],
+                'error'       => $result['error'],
+            ]);
+
+            throw new TransientApiException($result['error'] ?? 'Erro transitório na API 360dialog');
+        }
 
         try {
             $this->logMessage($message->leadId, $message->templateName, $message->phone, $message->whatsAppNumberName, $result, $message->campaignId, $message->campaignEventId, $message->queueLogId, $skipHousekeeping);

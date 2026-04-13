@@ -7,6 +7,7 @@ use Mautic\LeadBundle\Entity\Lead;
 use Mautic\LeadBundle\Model\LeadModel;
 use MauticPlugin\DialogHSMBundle\Api\DialogHSMApi;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
+use MauticPlugin\DialogHSMBundle\Exception\TransientApiException;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppMessageHandler;
 use MauticPlugin\DialogHSMBundle\Service\BulkRateLimiter;
@@ -73,7 +74,7 @@ class SendWhatsAppMessageHandlerTest extends TestCase
         $this->mockApi
             ->expects($this->once())
             ->method('sendMessage')
-            ->willReturn(['success' => true, 'response' => ['id' => 'abc'], 'error' => null, 'http_status' => 200]);
+            ->willReturn(['success' => true, 'response' => ['id' => 'abc'], 'error' => null, 'http_status' => 200, 'retryable' => false]);
 
         $this->mockEntityManager->expects($this->once())->method('persist');
         $this->mockEntityManager->expects($this->once())->method('flush');
@@ -90,7 +91,7 @@ class SendWhatsAppMessageHandlerTest extends TestCase
         $this->mockApi
             ->expects($this->once())
             ->method('sendMessage')
-            ->willReturn(['success' => false, 'response' => null, 'error' => 'HTTP 400: Bad Request', 'http_status' => 400]);
+            ->willReturn(['success' => false, 'response' => null, 'error' => 'HTTP 400: Bad Request', 'http_status' => 400, 'retryable' => false]);
 
         $this->mockEntityManager->expects($this->once())->method('persist');
         $this->mockEntityManager->expects($this->once())->method('flush');
@@ -101,19 +102,18 @@ class SendWhatsAppMessageHandlerTest extends TestCase
         ($this->handler)($this->makeMessage());
     }
 
-    public function testHandleRequestException(): void
+    public function testHandleRequestExceptionTransientThrows(): void
     {
-        $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
         $this->mockApi
             ->expects($this->once())
             ->method('sendMessage')
-            ->willReturn(['success' => false, 'response' => null, 'error' => 'Network error', 'http_status' => null]);
+            ->willReturn(['success' => false, 'response' => null, 'error' => 'Network error', 'http_status' => null, 'retryable' => true]);
 
-        $this->mockEntityManager->expects($this->once())->method('persist');
-        $this->mockEntityManager->expects($this->once())->method('flush');
-        $this->mockLeadModel->expects($this->once())->method('setFieldValues');
-        $this->mockLeadModel->expects($this->once())->method('saveEntity');
-        $this->mockMessageLogRepository->expects($this->once())->method('prune');
+        // Erro transitório: não deve persistir log nem atualizar contato — o Messenger vai fazer retry
+        $this->mockEntityManager->expects($this->never())->method('persist');
+        $this->mockLeadModel->expects($this->never())->method('setFieldValues');
+
+        $this->expectException(TransientApiException::class);
 
         ($this->handler)($this->makeMessage());
     }
@@ -127,7 +127,7 @@ class SendWhatsAppMessageHandlerTest extends TestCase
         $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
         $this->mockApi
             ->method('sendMessage')
-            ->willReturn(['success' => true, 'response' => ['id' => 'abc'], 'error' => null, 'http_status' => 200]);
+            ->willReturn(['success' => true, 'response' => ['id' => 'abc'], 'error' => null, 'http_status' => 200, 'retryable' => false]);
 
         $capturedFields = null;
         $this->mockLeadModel
@@ -152,7 +152,7 @@ class SendWhatsAppMessageHandlerTest extends TestCase
         $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
         $this->mockApi
             ->method('sendMessage')
-            ->willReturn(['success' => false, 'response' => null, 'error' => 'HTTP 400: Bad Request', 'http_status' => 400]);
+            ->willReturn(['success' => false, 'response' => null, 'error' => 'HTTP 400: Bad Request', 'http_status' => 400, 'retryable' => false]);
 
         $capturedFields = null;
         $this->mockLeadModel
@@ -177,7 +177,7 @@ class SendWhatsAppMessageHandlerTest extends TestCase
         $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
         $this->mockApi
             ->method('sendMessage')
-            ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => null]);
+            ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => null, 'retryable' => false]);
 
         $capturedFields = null;
         $this->mockLeadModel
@@ -196,7 +196,7 @@ class SendWhatsAppMessageHandlerTest extends TestCase
         $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
         $this->mockApi
             ->method('sendMessage')
-            ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200]);
+            ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200, 'retryable' => false]);
 
         $capturedLead = null;
         $this->mockLeadModel
@@ -215,7 +215,7 @@ class SendWhatsAppMessageHandlerTest extends TestCase
         $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
         $this->mockApi
             ->method('sendMessage')
-            ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200]);
+            ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200, 'retryable' => false]);
 
         $this->mockLeadModel
             ->method('setFieldValues')
@@ -234,9 +234,10 @@ class SendWhatsAppMessageHandlerTest extends TestCase
         $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
         $longError = str_repeat('x', 300);
 
+        // Usa HTTP 400 (permanente) para que o erro chegue ao updateContactFields sem lançar exceção
         $this->mockApi
             ->method('sendMessage')
-            ->willReturn(['success' => false, 'response' => null, 'error' => $longError, 'http_status' => 500]);
+            ->willReturn(['success' => false, 'response' => null, 'error' => $longError, 'http_status' => 400, 'retryable' => false]);
 
         $capturedFields = null;
         $this->mockLeadModel
@@ -259,7 +260,7 @@ class SendWhatsAppMessageHandlerTest extends TestCase
         $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
         $this->mockApi
             ->method('sendMessage')
-            ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200]);
+            ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200, 'retryable' => false]);
 
         $this->mockMessageLogRepository->expects($this->never())->method('prune');
 
@@ -271,7 +272,7 @@ class SendWhatsAppMessageHandlerTest extends TestCase
         $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
         $this->mockApi
             ->method('sendMessage')
-            ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200]);
+            ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200, 'retryable' => false]);
 
         $this->mockMessageLogRepository->expects($this->once())->method('prune');
 
@@ -287,7 +288,7 @@ class SendWhatsAppMessageHandlerTest extends TestCase
         $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
         $this->mockApi
             ->method('sendMessage')
-            ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200]);
+            ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200, 'retryable' => false]);
 
         $this->mockRateLimiter->expects($this->never())->method('throttle');
 
@@ -299,7 +300,7 @@ class SendWhatsAppMessageHandlerTest extends TestCase
         $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
         $this->mockApi
             ->method('sendMessage')
-            ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200]);
+            ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200, 'retryable' => false]);
 
         $this->mockRateLimiter->expects($this->once())->method('throttle');
 
@@ -313,7 +314,8 @@ class SendWhatsAppMessageHandlerTest extends TestCase
     public function testGetLogMaxRecordsReturnsDefaultWhenIntegrationThrows(): void
     {
         // setUp já configura getIntegration() para lançar exceção
-        $this->assertSame(100_000, $this->handler->getLogMaxRecords());
+        // DEFAULT_MAX_RECORDS = 0 significa sem limite por contagem
+        $this->assertSame(0, $this->handler->getLogMaxRecords());
     }
 
     public function testGetLogMaxDaysReturnsDefaultWhenIntegrationThrows(): void
@@ -330,7 +332,7 @@ class SendWhatsAppMessageHandlerTest extends TestCase
         $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
         $this->mockApi
             ->method('sendMessage')
-            ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200]);
+            ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200, 'retryable' => false]);
 
         // Simula falha no persist (log falha)
         $this->mockEntityManager
@@ -352,7 +354,7 @@ class SendWhatsAppMessageHandlerTest extends TestCase
     {
         $this->mockApi
             ->method('sendMessage')
-            ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200]);
+            ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200, 'retryable' => false]);
 
         $this->mockLeadModel->method('getEntity')->willReturn(null);
 
@@ -360,5 +362,88 @@ class SendWhatsAppMessageHandlerTest extends TestCase
         $this->mockLeadModel->expects($this->never())->method('saveEntity');
 
         ($this->handler)($this->makeMessage());
+    }
+
+    // -------------------------------------------------------------------------
+    // Testes: retry — erros transitórios x permanentes
+    // -------------------------------------------------------------------------
+
+    /**
+     * @dataProvider transientErrorProvider
+     */
+    public function testTransientErrorThrowsExceptionToTriggerRetry(int|null $httpStatus): void
+    {
+        $this->mockApi
+            ->method('sendMessage')
+            ->willReturn(['success' => false, 'response' => null, 'error' => 'Erro transitório', 'http_status' => $httpStatus, 'retryable' => true]);
+
+        // Erro transitório: não persiste log nem atualiza contato — Messenger vai retry
+        $this->mockEntityManager->expects($this->never())->method('persist');
+        $this->mockLeadModel->expects($this->never())->method('setFieldValues');
+
+        $this->expectException(TransientApiException::class);
+
+        ($this->handler)($this->makeMessage());
+    }
+
+    /**
+     * @return array<string, array{int|null}>
+     */
+    public static function transientErrorProvider(): array
+    {
+        return [
+            'rate limit (429)'        => [429],
+            'internal server (500)'   => [500],
+            'bad gateway (502)'       => [502],
+            'service unavailable (503)' => [503],
+            'sem resposta HTTP (rede)' => [null],
+        ];
+    }
+
+    /**
+     * @dataProvider permanentErrorProvider
+     */
+    public function testPermanentErrorLogsAsFailedWithoutRetry(int $httpStatus): void
+    {
+        $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
+        $this->mockApi
+            ->method('sendMessage')
+            ->willReturn(['success' => false, 'response' => null, 'error' => "HTTP {$httpStatus}: erro", 'http_status' => $httpStatus, 'retryable' => false]);
+
+        // Erro permanente: persiste log como 'failed', não lança exceção
+        $this->mockEntityManager->expects($this->once())->method('persist');
+        $this->mockEntityManager->expects($this->once())->method('flush');
+        $this->mockLeadModel->expects($this->once())->method('setFieldValues');
+
+        ($this->handler)($this->makeMessage());
+    }
+
+    /**
+     * @return array<string, array{int}>
+     */
+    public static function permanentErrorProvider(): array
+    {
+        return [
+            'bad request (400)'   => [400],
+            'unauthorized (401)'  => [401],
+            'forbidden (403)'     => [403],
+            'not found (404)'     => [404],
+        ];
+    }
+
+    public function testSkipRetryPreventsExceptionForTransientError(): void
+    {
+        $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
+        $this->mockApi
+            ->method('sendMessage')
+            ->willReturn(['success' => false, 'response' => null, 'error' => 'HTTP 503: unavailable', 'http_status' => 503, 'retryable' => true]);
+
+        // Com skipRetry=true (contexto de lote), deve registrar como 'failed' sem lançar
+        $this->mockEntityManager->expects($this->once())->method('persist');
+        $this->mockEntityManager->expects($this->once())->method('flush');
+        $this->mockLeadModel->expects($this->once())->method('setFieldValues');
+
+        // Não deve lançar exceção
+        ($this->handler)($this->makeMessage(), skipRetry: true);
     }
 }
