@@ -31,7 +31,7 @@ class DialogHSMExtension extends Extension implements PrependExtensionInterface
                         'dsn'             => '%env(MAUTIC_MESSENGER_DSN_WHATSAPP)%',
                         'options'         => [
                             'auto_setup' => false,
-                            'exchange'   => ['name' => '', 'type' => 'direct'],
+                            'exchange'   => ['name' => 'whatsapp', 'type' => 'direct'],
                         ],
                         'retry_strategy'  => [
                             'max_retries'  => 3,
@@ -42,6 +42,10 @@ class DialogHSMExtension extends Extension implements PrependExtensionInterface
                     ],
                     'whatsapp_direct' => [
                         'dsn'            => '%env(MAUTIC_MESSENGER_DSN_WHATSAPP_DIRECT)%',
+                        'options'        => [
+                            'auto_setup' => false,
+                            'exchange'   => ['name' => 'whatsapp', 'type' => 'direct'],
+                        ],
                         'retry_strategy' => [
                             'max_retries' => 3,
                             'delay'       => 5000,
@@ -53,6 +57,7 @@ class DialogHSMExtension extends Extension implements PrependExtensionInterface
                         'dsn'     => '%env(MAUTIC_MESSENGER_DSN_WHATSAPP_FAILED)%',
                         'options' => [
                             'auto_setup' => false,
+                            'exchange'   => ['name' => 'whatsapp', 'type' => 'direct'],
                         ],
                     ],
                 ],
