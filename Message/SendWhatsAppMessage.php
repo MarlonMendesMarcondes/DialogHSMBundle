@@ -17,6 +17,7 @@ class SendWhatsAppMessage
         public readonly ?int $campaignId = null,
         public readonly ?int $campaignEventId = null,
         public readonly ?string $queueLogId = null,
+        public readonly bool $isBatch = false,
     ) {
     }
 
@@ -36,6 +37,27 @@ class SendWhatsAppMessage
             campaignId:         $this->campaignId,
             campaignEventId:    $this->campaignEventId,
             queueLogId:         $queueLogId,
+            isBatch:            $this->isBatch,
+        );
+    }
+
+    /**
+     * Retorna uma cópia do DTO marcada como batch (pula o BulkRateLimiter no handler).
+     */
+    public function withBatchMode(bool $isBatch = true): self
+    {
+        return new self(
+            leadId:             $this->leadId,
+            phone:              $this->phone,
+            apiKey:             $this->apiKey,
+            baseUrl:            $this->baseUrl,
+            payloadData:        $this->payloadData,
+            templateName:       $this->templateName,
+            whatsAppNumberName: $this->whatsAppNumberName,
+            campaignId:         $this->campaignId,
+            campaignEventId:    $this->campaignEventId,
+            queueLogId:         $this->queueLogId,
+            isBatch:            $isBatch,
         );
     }
 }

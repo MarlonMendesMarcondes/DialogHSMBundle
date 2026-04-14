@@ -56,7 +56,7 @@ class SendWhatsAppMessageHandler implements MessageHandlerInterface
      */
     public function __invoke(SendWhatsAppMessage $message, bool $skipHousekeeping = false, bool $skipRateLimit = false, bool $skipRetry = false): array
     {
-        if (!$skipRateLimit) {
+        if (!$skipRateLimit && !$message->isBatch) {
             $this->rateLimiter->throttle($message->whatsAppNumberName);
         }
 
