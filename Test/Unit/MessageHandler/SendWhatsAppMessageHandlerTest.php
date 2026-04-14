@@ -52,15 +52,16 @@ class SendWhatsAppMessageHandlerTest extends TestCase
         );
     }
 
-    private function makeMessage(int $leadId = 1): SendWhatsAppMessage
+    private function makeMessage(int $leadId = 1, string $whatsAppNumberName = ''): SendWhatsAppMessage
     {
         return new SendWhatsAppMessage(
-            leadId:       $leadId,
-            phone:        '11999999999',
-            apiKey:       'API_KEY',
-            baseUrl:      'https://api.360dialog.com/v1/messages',
-            payloadData:  ['content' => 'nome_template', 'language' => 'pt_BR'],
-            templateName: 'nome_template',
+            leadId:             $leadId,
+            phone:              '11999999999',
+            apiKey:             'API_KEY',
+            baseUrl:            'https://api.360dialog.com/v1/messages',
+            payloadData:        ['content' => 'nome_template', 'language' => 'pt_BR'],
+            templateName:       'nome_template',
+            whatsAppNumberName: $whatsAppNumberName,
         );
     }
 
@@ -302,9 +303,21 @@ class SendWhatsAppMessageHandlerTest extends TestCase
             ->method('sendMessage')
             ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200, 'retryable' => false]);
 
-        $this->mockRateLimiter->expects($this->once())->method('throttle');
+        $this->mockRateLimiter->expects($this->once())->method('throttle')->with('');
 
         ($this->handler)($this->makeMessage());
+    }
+
+    public function testRateLimiterReceivesWhatsAppNumberName(): void
+    {
+        $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
+        $this->mockApi
+            ->method('sendMessage')
+            ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200, 'retryable' => false]);
+
+        $this->mockRateLimiter->expects($this->once())->method('throttle')->with('Numero_Comercial');
+
+        ($this->handler)($this->makeMessage(whatsAppNumberName: 'Numero_Comercial'));
     }
 
     // -------------------------------------------------------------------------

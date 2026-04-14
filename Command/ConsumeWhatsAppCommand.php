@@ -76,11 +76,23 @@ class ConsumeWhatsAppCommand extends Command
             ? max(0, (int) $input->getOption('time-limit'))
             : 60;
 
-        // Múltiplas filas (--mode=bulk ou --mode=batch): workers paralelos
-        // Cada fila roda em processo separado com seu próprio --limit
-        if (count($queues) > 1) {
+        // Modo bulk/batch sem filas cadastradas: nenhum WhatsApp Number configurado
+        $mode = $input->getOption('mode');
+        if (in_array($mode, ['bulk', 'batch'], true) && count($queues) === 0) {
             $output->writeln(sprintf(
-                '<info>DialogHSM: starting %d parallel workers (limit=%d each): [%s]</info>',
+                '<comment>DialogHSM: nenhuma fila configurada para o modo "%s". Verifique os WhatsApp Numbers.</comment>',
+                $mode
+            ));
+
+            return Command::SUCCESS;
+        }
+
+        // Qualquer fila resolvida (1 ou N): cada fila roda em processo OS isolado
+        // Garante que --mode=bulk e --mode=batch nunca compartilhem worker,
+        // mesmo quando há apenas 1 fila cadastrada.
+        if (count($queues) >= 1) {
+            $output->writeln(sprintf(
+                '<info>DialogHSM: starting %d worker(s) (limit=%d each): [%s]</info>',
                 count($queues),
                 $limit,
                 implode(', ', $queues)
@@ -89,7 +101,7 @@ class ConsumeWhatsAppCommand extends Command
             return $this->runParallel($output, $queues, $limit, $timeLimit);
         }
 
-        // Fila única ou sem fila: comportamento original via sub-comando interno
+        // Sem modo e sem --queue: comportamento legado — consume sem filtro de fila
         $app = $this->getApplication();
         if (null === $app) {
             $output->writeln('<error>DialogHSM: application not available.</error>');
@@ -98,14 +110,9 @@ class ConsumeWhatsAppCommand extends Command
         }
 
         $subCommand = $app->find('messenger:consume');
+        $output->writeln(sprintf('<info>DialogHSM: consuming all whatsapp queues (limit=%d)</info>', $limit));
 
-        if (empty($queues)) {
-            $output->writeln(sprintf('<info>DialogHSM: consuming all whatsapp queues (limit=%d)</info>', $limit));
-        } else {
-            $output->writeln(sprintf('<info>DialogHSM: consuming queue "%s" (limit=%d)</info>', $queues[0], $limit));
-        }
-
-        return $this->runConsumer($subCommand, $output, $queues, $limit, $timeLimit);
+        return $this->runConsumer($subCommand, $output, [], $limit, $timeLimit);
     }
 
     /**
