@@ -93,12 +93,18 @@ class CampaignSubscriberActionTest extends TestCase
             ->willThrowException(new \Exception('Integration not found'));
     }
 
-    private function buildWhatsAppNumber(string $apiKey = 'VALID_API_KEY_12345', string $baseUrl = 'https://api.360dialog.com/v1/messages'): WhatsAppNumber&MockObject
-    {
+    private function buildWhatsAppNumber(
+        string $apiKey = 'VALID_API_KEY_12345',
+        string $baseUrl = 'https://api.360dialog.com/v1/messages',
+        string $queueName = 'whatsapp_bulk',
+        ?string $batchQueueName = 'whatsapp_batch',
+    ): WhatsAppNumber&MockObject {
         $mock = $this->createMock(WhatsAppNumber::class);
         $mock->method('getApiKey')->willReturn($apiKey);
         $mock->method('getBaseUrl')->willReturn($baseUrl);
         $mock->method('getIsPublished')->willReturn(true);
+        $mock->method('getQueueName')->willReturn($queueName);
+        $mock->method('getBatchQueueName')->willReturn($batchQueueName);
 
         return $mock;
     }
@@ -749,10 +755,7 @@ class CampaignSubscriberActionTest extends TestCase
     {
         $this->enableIntegration();
 
-        $number = $this->buildWhatsAppNumber();
-        $number->method('getQueueName')->willReturn('bulk');
-
-        $this->mockNumberModel->method('getEntity')->willReturn($number);
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber(queueName: 'bulk'));
 
         $contact = $this->buildContact('+5511999999999', 1);
         $event   = $this->buildPendingEvent(
@@ -784,10 +787,7 @@ class CampaignSubscriberActionTest extends TestCase
     {
         $this->enableIntegration();
 
-        $number = $this->buildWhatsAppNumber();
-        $number->method('getQueueName')->willReturn('bulk');
-
-        $this->mockNumberModel->method('getEntity')->willReturn($number);
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber(queueName: 'bulk'));
 
         $contact = $this->buildContact('+5511999999999', 1);
         $event   = $this->buildPendingEvent(
@@ -819,11 +819,7 @@ class CampaignSubscriberActionTest extends TestCase
     {
         $this->enableIntegration();
 
-        $number = $this->buildWhatsAppNumber();
-        $number->method('getQueueName')->willReturn('bulk');
-        $number->method('getBatchQueueName')->willReturn('batch');
-
-        $this->mockNumberModel->method('getEntity')->willReturn($number);
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber(queueName: 'bulk', batchQueueName: 'batch'));
 
         $contact = $this->buildContact('+5511999999999', 1);
         $event   = $this->buildPendingEvent(
@@ -851,15 +847,11 @@ class CampaignSubscriberActionTest extends TestCase
         $this->assertEquals('batch', $capturedStamps[0]->getRoutingKey());
     }
 
-    public function testQueueSendBatchModeFallsBackToQueueNameWhenBatchQueueNameIsEmpty(): void
+    public function testQueueSendBatchModeSkipsContactWhenBatchQueueNameIsEmpty(): void
     {
         $this->enableIntegration();
 
-        $number = $this->buildWhatsAppNumber();
-        $number->method('getQueueName')->willReturn('bulk');
-        $number->method('getBatchQueueName')->willReturn(null);
-
-        $this->mockNumberModel->method('getEntity')->willReturn($number);
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber(queueName: 'bulk', batchQueueName: null));
 
         $contact = $this->buildContact('+5511999999999', 1);
         $event   = $this->buildPendingEvent(
@@ -868,23 +860,18 @@ class CampaignSubscriberActionTest extends TestCase
             ['queue_override' => 'batch']
         );
 
-        $capturedStamps = null;
-        $this->mockBus
-            ->expects($this->once())
-            ->method('dispatch')
-            ->willReturnCallback(function ($msg, array $stamps) use (&$capturedStamps): Envelope {
-                $capturedStamps = $stamps;
+        // Fila batch não configurada: nunca despacha para a fila bulk
+        $this->mockBus->expects($this->never())->method('dispatch');
 
-                return new Envelope($msg);
-            });
+        // Logger deve registrar o aviso
+        $this->mockLogger->expects($this->once())->method('warning')
+            ->with($this->stringContains('fila não configurada'));
 
-        $event->expects($this->once())->method('pass');
+        // Contato recebe passWithError (não pass), pois o envio não ocorreu
+        $event->expects($this->never())->method('pass');
+        $event->expects($this->once())->method('passWithError');
 
         $this->subscriber->onCampaignTriggerActionQueue($event);
-
-        $this->assertCount(1, $capturedStamps);
-        $this->assertInstanceOf(AmqpStamp::class, $capturedStamps[0]);
-        $this->assertEquals('bulk', $capturedStamps[0]->getRoutingKey());
     }
 
     public function testQueueSendFailsAllWhenIntegrationDisabled(): void

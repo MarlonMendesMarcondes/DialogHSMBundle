@@ -162,13 +162,27 @@ class CampaignSubscriber implements EventSubscriberInterface
             $uuid = bin2hex(random_bytes(16));
 
             $queueName = match ($mode) {
-                'batch' => $number->getBatchQueueName() ?: $number->getQueueName(),
+                'batch' => $number->getBatchQueueName(),
                 'bulk'  => $number->getQueueName(),
                 default => $number->getQueueName(),
             };
 
-            $stamps = $queueName ? [new AmqpStamp($queueName)] : [];
-            $this->bus->dispatch($message->withQueueLogId($uuid), $stamps);
+            if ($queueName === null || $queueName === '') {
+                $this->logger->warning('DialogHSM: fila não configurada para o modo, mensagem ignorada', [
+                    'mode'      => $mode ?: 'default',
+                    'number_id' => $number->getId(),
+                    'lead_id'   => $message->leadId,
+                ]);
+
+                return false;
+            }
+
+            $stamps  = [new AmqpStamp($queueName)];
+            $payload = $message->withQueueLogId($uuid);
+            if ($mode === 'batch') {
+                $payload = $payload->withBatchMode();
+            }
+            $this->bus->dispatch($payload, $stamps);
 
             // Só persiste o log após confirmação do dispatch.
             // Se o dispatch lançar, o try/catch de processContacts captura
