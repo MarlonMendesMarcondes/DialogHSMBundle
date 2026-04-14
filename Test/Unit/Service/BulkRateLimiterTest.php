@@ -183,6 +183,83 @@ class BulkRateLimiterTest extends TestCase
     }
 
     // -------------------------------------------------------------------------
+    // Chave Redis por número: cada número usa namespace isolado
+    // -------------------------------------------------------------------------
+
+    public function testThrottleUsesGlobalNamespaceWhenNumberKeyIsEmpty(): void
+    {
+        $limiter = $this->makeLimiter(60); // ratePerSecond = 1
+
+        $capturedKey = null;
+        $this->redis->method('incr')->willReturnCallback(function (string $key) use (&$capturedKey) {
+            $capturedKey = $key;
+
+            return 1;
+        });
+
+        $limiter->throttle('');
+
+        $this->assertStringContainsString(':global:', $capturedKey);
+    }
+
+    public function testThrottleUsesNumberNameAsNamespace(): void
+    {
+        $limiter = $this->makeLimiter(60); // ratePerSecond = 1
+
+        $capturedKey = null;
+        $this->redis->method('incr')->willReturnCallback(function (string $key) use (&$capturedKey) {
+            $capturedKey = $key;
+
+            return 1;
+        });
+
+        $limiter->throttle('Numero_A');
+
+        $this->assertStringContainsString(':Numero_A:', $capturedKey);
+        $this->assertStringNotContainsString(':global:', $capturedKey);
+    }
+
+    public function testThrottleSanitizesSpecialCharsInNumberKey(): void
+    {
+        $limiter = $this->makeLimiter(60);
+
+        $capturedKey = null;
+        $this->redis->method('incr')->willReturnCallback(function (string $key) use (&$capturedKey) {
+            $capturedKey = $key;
+
+            return 1;
+        });
+
+        $limiter->throttle('Número Comercial / SP');
+
+        // Espaços, acentos e "/" devem ser substituídos por "_"
+        $this->assertStringNotContainsString(' ', $capturedKey);
+        $this->assertStringNotContainsString('/', $capturedKey);
+        $this->assertStringNotContainsString('ú', $capturedKey);
+    }
+
+    public function testTwoNumbersUseIndependentCounters(): void
+    {
+        $limiter = $this->makeLimiter(60); // ratePerSecond = 1
+
+        $keys = [];
+        $this->redis->method('incr')->willReturnCallback(function (string $key) use (&$keys) {
+            $keys[] = $key;
+
+            return 1;
+        });
+
+        $limiter->throttle('NumeroA');
+        $limiter->throttle('NumeroB');
+
+        // Garante que as duas chamadas geraram chaves com namespaces diferentes
+        $this->assertCount(2, $keys);
+        $this->assertStringContainsString(':NumeroA:', $keys[0]);
+        $this->assertStringContainsString(':NumeroB:', $keys[1]);
+        $this->assertNotSame($keys[0], $keys[1]);
+    }
+
+    // -------------------------------------------------------------------------
     // IntegrationsHelper lança exceção: fail-open (rate = 0)
     // -------------------------------------------------------------------------
 

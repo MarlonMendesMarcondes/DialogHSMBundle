@@ -41,8 +41,13 @@ class BulkRateLimiter
     /**
      * Aplica throttle antes de enviar uma mensagem.
      * Retorna imediatamente se dentro do rate; bloqueia no máximo até o início do próximo segundo.
+     *
+     * @param string $numberKey Identificador do WhatsApp Number (ex.: whatsAppNumberName).
+     *                          Cada número recebe seu próprio contador de rate, garantindo
+     *                          que N números entreguem N × ratePerSecond mensagens/s no total.
+     *                          Vazio → usa namespace "global" (comportamento legado).
      */
-    public function throttle(): void
+    public function throttle(string $numberKey = ''): void
     {
         $ratePerMinute = $this->getRatePerMinute();
         if ($ratePerMinute <= 0) {
@@ -55,11 +60,12 @@ class BulkRateLimiter
         }
 
         $ratePerSecond = max(1, (int) ceil($ratePerMinute / 60));
+        $ns            = $this->sanitizeKey($numberKey);
 
         for ($attempt = 0; $attempt < self::MAX_RETRIES; ++$attempt) {
             try {
                 $second = (int) microtime(true);
-                $key    = 'dialoghsm:rate:bulk:' . $second;
+                $key    = 'dialoghsm:rate:bulk:' . $ns . ':' . $second;
 
                 $count = $redis->incr($key);
                 if (1 === $count) {
@@ -82,6 +88,19 @@ class BulkRateLimiter
             }
         }
         // Após MAX_RETRIES: fail-open — prossegue sem throttle
+    }
+
+    /**
+     * Normaliza o identificador do número para uso seguro como segmento de chave Redis.
+     * Substitui qualquer caractere que não seja alfanumérico, hífen ou underscore por "_".
+     */
+    private function sanitizeKey(string $key): string
+    {
+        if ('' === $key) {
+            return 'global';
+        }
+
+        return preg_replace('/[^a-zA-Z0-9_\-]/', '_', $key) ?: 'global';
     }
 
     private function getRatePerMinute(): int
