@@ -39,12 +39,10 @@ class MessageLogController extends FormController
         }
     }
 
-    public function dashboardAction(Request $request, MessageLogRepository $messageLogRepository): Response
+    public function dashboardAction(Request $request, MessageLogRepository $messageLogRepository, int $days = 7): Response
     {
         $allowedDays = [7, 14, 30];
-        $chartDays   = in_array((int) $request->query->get('days', 7), $allowedDays, true)
-            ? (int) $request->query->get('days', 7)
-            : 7;
+        $chartDays   = in_array($days, $allowedDays, true) ? $days : 7;
 
         $now     = new \DateTime();
         $from24h = (clone $now)->modify('-24 hours');
@@ -86,7 +84,7 @@ class MessageLogController extends FormController
             'passthroughVars' => [
                 'activeLink'    => '#mautic_dialoghsm_dashboard',
                 'mauticContent' => 'dialoghsm_dashboard',
-                'route'         => $this->generateUrl('mautic_dialoghsm_dashboard'),
+                'route'         => $this->generateUrl('mautic_dialoghsm_dashboard', ['days' => $chartDays]),
             ],
         ]);
     }
