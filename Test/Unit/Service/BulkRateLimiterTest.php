@@ -26,11 +26,17 @@ class BulkRateLimiterTest extends TestCase
     // Helpers
     // -------------------------------------------------------------------------
 
-    private function makeIntegrationStub(int $ratePerMinute): object
+    private function makeIntegrationStub(int $bulkRate, int $batchRate = 0): object
     {
-        $config = new class($ratePerMinute) {
-            public function __construct(private int $rate) {}
-            public function getApiKeys(): array { return ['bulk_rate_per_minute' => $this->rate]; }
+        $config = new class($bulkRate, $batchRate) {
+            public function __construct(private int $bulk, private int $batch) {}
+            public function getApiKeys(): array
+            {
+                return [
+                    'bulk_rate_per_minute'  => $this->bulk,
+                    'batch_rate_per_minute' => $this->batch,
+                ];
+            }
         };
 
         return new class($config) {
@@ -39,12 +45,12 @@ class BulkRateLimiterTest extends TestCase
         };
     }
 
-    private function makeLimiter(int $ratePerMinute): BulkRateLimiter
+    private function makeLimiter(int $bulkRate, int $batchRate = 0): BulkRateLimiter
     {
         $this->integrationsHelper
             ->method('getIntegration')
             ->with(DialogHSMIntegration::NAME)
-            ->willReturn($this->makeIntegrationStub($ratePerMinute));
+            ->willReturn($this->makeIntegrationStub($bulkRate, $batchRate));
 
         return new BulkRateLimiter($this->integrationsHelper, '', $this->redis);
     }
@@ -299,5 +305,85 @@ class BulkRateLimiterTest extends TestCase
         $this->redis->expects($this->once())->method('expire');
 
         $limiter->throttle();
+    }
+
+    // =========================================================================
+    // throttleBatch() — Redis sliding window (mesmo mecanismo do bulk)
+    // =========================================================================
+
+    public function testThrottleBatchDoesNothingWhenRateIsZero(): void
+    {
+        $limiter = $this->makeLimiter(0, 0);
+
+        $this->redis->expects($this->never())->method('incr');
+
+        $limiter->throttleBatch();
+    }
+
+    public function testThrottleBatchUsesRedisWhenRateIsConfigured(): void
+    {
+        $limiter = $this->makeLimiter(0, 60);
+
+        $this->redis->method('incr')->willReturn(1);
+        $this->redis->expects($this->once())->method('incr');
+
+        $limiter->throttleBatch();
+    }
+
+    public function testThrottleBatchUsesRedisKeyWithBatchNamespace(): void
+    {
+        $limiter = $this->makeLimiter(0, 60);
+
+        $capturedKey = null;
+        $this->redis->method('incr')->willReturnCallback(function (string $key) use (&$capturedKey) {
+            $capturedKey = $key;
+
+            return 1;
+        });
+
+        $limiter->throttleBatch('NumeroB');
+
+        $this->assertStringContainsString(':batch:', $capturedKey);
+        $this->assertStringNotContainsString(':bulk:', $capturedKey);
+    }
+
+    public function testThrottleBatchAndThrottleUseSeparateRedisKeys(): void
+    {
+        $limiter = $this->makeLimiter(60, 60);
+
+        $capturedKeys = [];
+        $this->redis->method('incr')->willReturnCallback(function (string $key) use (&$capturedKeys) {
+            $capturedKeys[] = $key;
+
+            return 1;
+        });
+
+        $limiter->throttle('NumeroA');
+        $limiter->throttleBatch('NumeroA');
+
+        $this->assertCount(2, $capturedKeys);
+        $this->assertStringContainsString(':bulk:', $capturedKeys[0]);
+        $this->assertStringContainsString(':batch:', $capturedKeys[1]);
+    }
+
+    // =========================================================================
+    // throttle() bulk — Redis key namespace
+    // =========================================================================
+
+    public function testThrottleUsesRedisKeyWithBulkNamespace(): void
+    {
+        $limiter = $this->makeLimiter(60);
+
+        $capturedKey = null;
+        $this->redis->method('incr')->willReturnCallback(function (string $key) use (&$capturedKey) {
+            $capturedKey = $key;
+
+            return 1;
+        });
+
+        $limiter->throttle('NumeroA');
+
+        $this->assertStringContainsString(':bulk:', $capturedKey);
+        $this->assertStringNotContainsString(':batch:', $capturedKey);
     }
 }

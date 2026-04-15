@@ -8,7 +8,7 @@ use Mautic\IntegrationsBundle\Helper\IntegrationsHelper;
 use MauticPlugin\DialogHSMBundle\Integration\DialogHSMIntegration;
 
 /**
- * Rate limiter para envio bulk via Redis sliding window (por segundo).
+ * Rate limiter para envio bulk e batch via Redis sliding window (por segundo).
  *
  * Algoritmo:
  *   1. INCR na chave do segundo atual
@@ -21,15 +21,19 @@ use MauticPlugin\DialogHSMBundle\Integration\DialogHSMIntegration;
  *   - Sem bloqueio quando dentro do rate (caso mais comum)
  *   - Sleep máximo de ~1s por tentativa, quando o segundo está saturado
  *   - Fail-open: se Redis indisponível ou rate=0, não aplica throttle
+ *   - Bulk e batch usam o mesmo mecanismo; diferem apenas no namespace da chave Redis
+ *     e no campo de configuração (bulk_rate_per_minute / batch_rate_per_minute)
  */
 class BulkRateLimiter
 {
     private const CACHE_TTL_SECONDS = 30;
     private const MAX_RETRIES       = 5;
 
-    private ?\Redis $redis   = null;
-    private int $cachedRate  = -1;
-    private float $cacheExp  = 0.0;
+    private ?\Redis $redis        = null;
+    private int $cachedRate       = -1;
+    private float $cacheExp       = 0.0;
+    private int $cachedBatchRate  = -1;
+    private float $batchCacheExp  = 0.0;
 
     public function __construct(
         private IntegrationsHelper $integrationsHelper,
@@ -49,7 +53,21 @@ class BulkRateLimiter
      */
     public function throttle(string $numberKey = ''): void
     {
-        $ratePerMinute = $this->getRatePerMinute();
+        $this->applyThrottle('bulk', $this->getRatePerMinute(), $numberKey);
+    }
+
+    /**
+     * Aplica throttle para envios batch via Redis sliding window (mesmo mecanismo do bulk).
+     * Lê batch_rate_per_minute das configurações do plugin.
+     * Namespace Redis: "batch" — chaves isoladas das do bulk.
+     */
+    public function throttleBatch(string $numberKey = ''): void
+    {
+        $this->applyThrottle('batch', $this->getBatchRatePerMinute(), $numberKey);
+    }
+
+    private function applyThrottle(string $namespace, int $ratePerMinute, string $numberKey): void
+    {
         if ($ratePerMinute <= 0) {
             return;
         }
@@ -65,7 +83,7 @@ class BulkRateLimiter
         for ($attempt = 0; $attempt < self::MAX_RETRIES; ++$attempt) {
             try {
                 $second = (int) microtime(true);
-                $key    = 'dialoghsm:rate:bulk:' . $ns . ':' . $second;
+                $key    = 'dialoghsm:rate:' . $namespace . ':' . $ns . ':' . $second;
 
                 $count = $redis->incr($key);
                 if (1 === $count) {
@@ -110,17 +128,35 @@ class BulkRateLimiter
             return $this->cachedRate;
         }
 
-        try {
-            $integration     = $this->integrationsHelper->getIntegration(DialogHSMIntegration::NAME);
-            $apiKeys         = $integration->getIntegrationConfiguration()->getApiKeys() ?? [];
-            $this->cachedRate = max(0, (int) ($apiKeys['bulk_rate_per_minute'] ?? 0));
-        } catch (\Throwable) {
-            $this->cachedRate = 0;
-        }
-
-        $this->cacheExp = $now + self::CACHE_TTL_SECONDS;
+        $this->cachedRate = $this->readRateFromPlugin('bulk_rate_per_minute');
+        $this->cacheExp   = $now + self::CACHE_TTL_SECONDS;
 
         return $this->cachedRate;
+    }
+
+    private function getBatchRatePerMinute(): int
+    {
+        $now = microtime(true);
+        if ($this->cachedBatchRate >= 0 && $now < $this->batchCacheExp) {
+            return $this->cachedBatchRate;
+        }
+
+        $this->cachedBatchRate = $this->readRateFromPlugin('batch_rate_per_minute');
+        $this->batchCacheExp   = $now + self::CACHE_TTL_SECONDS;
+
+        return $this->cachedBatchRate;
+    }
+
+    private function readRateFromPlugin(string $field): int
+    {
+        try {
+            $integration = $this->integrationsHelper->getIntegration(DialogHSMIntegration::NAME);
+            $apiKeys     = $integration->getIntegrationConfiguration()->getApiKeys() ?? [];
+
+            return max(0, (int) ($apiKeys[$field] ?? 0));
+        } catch (\Throwable) {
+            return 0;
+        }
     }
 
     private function getRedis(): ?\Redis

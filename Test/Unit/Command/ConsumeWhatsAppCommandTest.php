@@ -466,7 +466,7 @@ class ConsumeWhatsAppCommandTest extends TestCase
 
         $tester = $this->runCommandTester(['--mode' => 'bulk', '--limit' => '25']);
 
-        $this->assertStringContainsString('limit=25 each', $tester->getDisplay());
+        $this->assertStringContainsString('limit=25', $tester->getDisplay());
     }
 
     public function testParallelModeOutputsWorkerStartedMessageForEachQueue(): void

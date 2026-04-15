@@ -92,7 +92,7 @@ class ConsumeWhatsAppCommand extends Command
         // mesmo quando há apenas 1 fila cadastrada.
         if (count($queues) >= 1) {
             $output->writeln(sprintf(
-                '<info>DialogHSM: starting %d worker(s) (limit=%d each): [%s]</info>',
+                '<info>DialogHSM: starting %d worker(s) (limit=%d): [%s]</info>',
                 count($queues),
                 $limit,
                 implode(', ', $queues)
