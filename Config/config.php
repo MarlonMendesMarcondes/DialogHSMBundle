@@ -23,9 +23,8 @@ return [
                 'defaults'   => ['page' => 1],
             ],
             'mautic_dialoghsm_dashboard' => [
-                'path'       => '/dialoghsm/dashboard/{days}',
+                'path'       => '/dialoghsm/dashboard',
                 'controller' => 'MauticPlugin\DialogHSMBundle\Controller\MessageLogController::dashboardAction',
-                'defaults'   => ['days' => 7],
             ],
         ],
         'public' => [],

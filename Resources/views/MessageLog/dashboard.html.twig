@@ -57,11 +57,11 @@
         <h3 class="panel-title" style="margin: 0;">{{ 'dialoghsm.dashboard.chart.title'|trans }}</h3>
         <div class="btn-group btn-group-xs" role="group">
             <a href="{{ path('mautic_dialoghsm_dashboard', {days: 7}) }}"
-               class="btn {{ chartDays == 7 ? 'btn-primary' : 'btn-secondary' }}">7d</a>
+               class="btn {{ chartDays == 7 ? 'btn-primary' : 'btn-default' }}">7d</a>
             <a href="{{ path('mautic_dialoghsm_dashboard', {days: 14}) }}"
-               class="btn {{ chartDays == 14 ? 'btn-primary' : 'btn-secondary' }}">14d</a>
+               class="btn {{ chartDays == 14 ? 'btn-primary' : 'btn-default' }}">14d</a>
             <a href="{{ path('mautic_dialoghsm_dashboard', {days: 30}) }}"
-               class="btn {{ chartDays == 30 ? 'btn-primary' : 'btn-secondary' }}">30d</a>
+               class="btn {{ chartDays == 30 ? 'btn-primary' : 'btn-default' }}">30d</a>
         </div>
     </div>
     <div class="panel-body">
