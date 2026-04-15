@@ -22,6 +22,28 @@ class SendWhatsAppMessage
     }
 
     /**
+     * Garante compatibilidade com mensagens serializadas antes da adição de novas propriedades.
+     * Sem este método, propriedades ausentes nos dados serializados ficam não-inicializadas
+     * e lançam TypeError ao serem acessadas (ex.: $isBatch adicionado após envios na fila).
+     *
+     * @param array<string, mixed> $data
+     */
+    public function __unserialize(array $data): void
+    {
+        $this->leadId             = $data['leadId'];
+        $this->phone              = $data['phone'];
+        $this->apiKey             = $data['apiKey'];
+        $this->baseUrl            = $data['baseUrl'];
+        $this->payloadData        = $data['payloadData'];
+        $this->templateName       = $data['templateName'];
+        $this->whatsAppNumberName = $data['whatsAppNumberName'] ?? '';
+        $this->campaignId         = $data['campaignId']         ?? null;
+        $this->campaignEventId    = $data['campaignEventId']    ?? null;
+        $this->queueLogId         = $data['queueLogId']         ?? null;
+        $this->isBatch            = $data['isBatch']            ?? false;
+    }
+
+    /**
      * Retorna uma cópia do DTO com o queueLogId definido.
      */
     public function withQueueLogId(string $queueLogId): self
