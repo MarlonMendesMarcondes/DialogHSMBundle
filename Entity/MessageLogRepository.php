@@ -48,6 +48,24 @@ class MessageLogRepository extends CommonRepository
     }
 
     /**
+     * Retorna lista ordenada de template names distintos presentes nos logs.
+     *
+     * @return string[]
+     */
+    public function getDistinctTemplateNames(): array
+    {
+        $rows = $this->createQueryBuilder('dhml')
+            ->select('DISTINCT dhml.templateName')
+            ->where('dhml.templateName IS NOT NULL')
+            ->andWhere("dhml.templateName != ''")
+            ->orderBy('dhml.templateName', 'ASC')
+            ->getQuery()
+            ->getScalarResult();
+
+        return array_column($rows, 'templateName');
+    }
+
+    /**
      * Retorna lista ordenada de sender names distintos presentes nos logs.
      *
      * @return string[]
@@ -66,7 +84,7 @@ class MessageLogRepository extends CommonRepository
     }
 
     /**
-     * @param array{status?:string, dateFrom?:string, dateTo?:string, senderName?:string, contact?:string} $filters
+     * @param array{status?:string, dateFrom?:string, dateTo?:string, senderName?:string, contact?:string, templateName?:string} $filters
      */
     private function applyFilters(\Doctrine\ORM\QueryBuilder $qb, array $filters): void
     {
@@ -99,6 +117,11 @@ class MessageLogRepository extends CommonRepository
                 $qb->andWhere('dhml.phoneNumber LIKE :phone')
                    ->setParameter('phone', '%' . $contact . '%');
             }
+        }
+
+        if (!empty($filters['templateName'])) {
+            $qb->andWhere('dhml.templateName = :templateName')
+               ->setParameter('templateName', $filters['templateName']);
         }
     }
 

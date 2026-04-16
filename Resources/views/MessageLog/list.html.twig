@@ -64,6 +64,16 @@
                            style="width: 160px;">
                 </div>
 
+                <div class="form-group" style="margin-right: 8px;">
+                    <label class="sr-only" for="filter-template">{{ 'dialoghsm.log.filter.template'|trans }}</label>
+                    <select name="dialoghsm_log_filter[templateName]" id="filter-template" class="form-control input-sm">
+                        <option value="">{{ 'dialoghsm.log.filter.template'|trans }}</option>
+                        {% for name in templateNames %}
+                            <option value="{{ name }}" {% if (filters.templateName ?? '') == name %}selected{% endif %}>{{ name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
                 <button type="submit" class="btn btn-primary btn-sm">
                     <i class="ri-search-line"></i> {{ 'dialoghsm.log.filter.apply'|trans }}
                 </button>

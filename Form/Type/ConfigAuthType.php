@@ -54,6 +54,24 @@ class ConfigAuthType extends AbstractType
         );
 
         $builder->add(
+            'batch_consumer_limit',
+            IntegerType::class,
+            [
+                'label'      => 'dialoghsm.config.batch_consumer_limit',
+                'label_attr' => ['class' => 'control-label'],
+                'required'   => false,
+                'attr'       => [
+                    'class'   => 'form-control',
+                    'min'     => 1,
+                    'max'     => 10000,
+                    'tooltip' => 'dialoghsm.config.batch_consumer_limit.tooltip',
+                ],
+                'data' => (int) ($data['batch_consumer_limit'] ?? 100),
+                'help' => 'dialoghsm.config.batch_consumer_limit.help',
+            ]
+        );
+
+        $builder->add(
             'bulk_rate_per_minute',
             IntegerType::class,
             [

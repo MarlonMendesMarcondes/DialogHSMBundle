@@ -17,7 +17,7 @@ class MessageLogController extends FormController
     private const DEFAULT_MAX_LOGS = 100_000;
     private const PAGE_LIMIT       = 50;
 
-    private const FILTER_KEYS = ['status', 'dateFrom', 'dateTo', 'senderName', 'contact'];
+    private const FILTER_KEYS = ['status', 'dateFrom', 'dateTo', 'senderName', 'contact', 'templateName'];
 
     private IntegrationsHelper $integrationsHelper;
 
@@ -150,7 +150,8 @@ class MessageLogController extends FormController
                 'page'         => $page,
                 'limit'        => $limit,
                 'filters'      => $filters,
-                'senderNames'  => $messageLogRepository->getDistinctSenderNames(),
+                'senderNames'   => $messageLogRepository->getDistinctSenderNames(),
+                'templateNames' => $messageLogRepository->getDistinctTemplateNames(),
                 'timezone'     => $this->coreParametersHelper->get('default_timezone', 'UTC'),
                 'tmpl'         => $request->get('tmpl', 'index'),
             ],
