@@ -37,16 +37,31 @@ return [
                     'route'    => 'mautic_dialoghsm_dashboard',
                     'parent'   => 'mautic.core.channels',
                     'priority' => 0,
+                    'checks'   => [
+                        'integration' => [
+                            'DialogHSM' => ['enabled' => true],
+                        ],
+                    ],
                 ],
                 'dialoghsm.menu.numbers' => [
                     'route'    => 'mautic_dialoghsm_number_index',
                     'parent'   => 'mautic.core.channels',
                     'priority' => -1,
+                    'checks'   => [
+                        'integration' => [
+                            'DialogHSM' => ['enabled' => true],
+                        ],
+                    ],
                 ],
                 'dialoghsm.menu.logs' => [
                     'route'    => 'mautic_dialoghsm_log_index',
                     'parent'   => 'mautic.core.channels',
                     'priority' => -2,
+                    'checks'   => [
+                        'integration' => [
+                            'DialogHSM' => ['enabled' => true],
+                        ],
+                    ],
                 ],
             ],
         ],
