@@ -23,19 +23,21 @@ class DialogHSMExtension extends Extension implements PrependExtensionInterface
 
         $container->prependExtensionConfig('framework', [
             'messenger' => [
-                'failure_transport' => 'whatsapp_failed',
                 'transports' => [
                     'whatsapp' => [
-                        'dsn'             => '%env(MAUTIC_MESSENGER_DSN_WHATSAPP)%',
-                        'options'         => [
+                        'dsn'            => '%env(MAUTIC_MESSENGER_DSN_WHATSAPP)%',
+                        'options'        => [
                             'auto_setup' => false,
+                            // Exchange default do AMQP (name=''): roteia direto para a fila pelo
+                            // routing key (AmqpStamp($queueName)), sem precisar criar exchange
+                            // nem bindings manualmente no RabbitMQ.
                             'exchange'   => ['name' => '', 'type' => 'direct'],
                         ],
-                        'retry_strategy'  => [
-                            'max_retries'  => 3,
-                            'delay'        => 5000,
-                            'multiplier'   => 2,
-                            'max_delay'    => 60000,
+                        'retry_strategy' => [
+                            'max_retries' => 3,
+                            'delay'       => 5000,
+                            'multiplier'  => 2,
+                            'max_delay'   => 60000,
                         ],
                     ],
                     'whatsapp_direct' => [
@@ -58,9 +60,10 @@ class DialogHSMExtension extends Extension implements PrependExtensionInterface
                         ],
                     ],
                 ],
-                // Routing definido em app/config/config.php para evitar merge duplicado.
-                // prependExtensionConfig + config.php com mesmo class => transport gera
-                // array ['whatsapp_direct', 'whatsapp_direct'] e despacha duas vezes.
+                'routing' => [
+                    \MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage::class            => 'whatsapp',
+                    \MauticPlugin\DialogHSMBundle\Message\SendWhatsAppDirectBatchMessage::class => 'whatsapp_direct',
+                ],
             ],
         ]);
     }
