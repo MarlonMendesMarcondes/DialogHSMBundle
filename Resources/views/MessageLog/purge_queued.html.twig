@@ -1,0 +1,57 @@
+{% set isIndex = tmpl == 'index' ? true : false %}
+{% set tmpl = 'purge_queued' %}
+{% extends isIndex ? '@MauticCore/Default/content.html.twig' : '@MauticCore/Default/raw_output.html.twig' %}
+{% block mauticContent %}dialoghsm_purge_queued{% endblock %}
+{% block headerTitle %}{{ 'dialoghsm.log.purge.title'|trans }}{% endblock %}
+{% block content %}
+{% if isIndex %}
+<div class="panel panel-default" style="max-width: 640px; margin: 20px auto;">
+    <div class="panel-body">
+
+        <div class="alert alert-warning">
+            <i class="ri-alert-line"></i>
+            {{ 'dialoghsm.log.purge.warning'|trans({'%count%': totalQueued}) }}
+        </div>
+
+        <form method="post" action="{{ path('mautic_dialoghsm_log_purge_queued') }}">
+            <input type="hidden" name="_token" value="{{ csrf_token('dialoghsm_purge_queued') }}">
+
+            <div class="form-group">
+                <label for="purge-template">{{ 'dialoghsm.log.filter.template'|trans }}</label>
+                <select name="templateName" id="purge-template" class="form-control">
+                    <option value="">{{ 'dialoghsm.log.purge.all_templates'|trans }}</option>
+                    {% for name in templateNames %}
+                        <option value="{{ name }}">{{ name }}</option>
+                    {% endfor %}
+                </select>
+                <p class="help-block">{{ 'dialoghsm.log.purge.template.help'|trans }}</p>
+            </div>
+
+            <div class="form-group">
+                <label for="purge-sender">{{ 'dialoghsm.log.filter.sender'|trans }}</label>
+                <select name="senderName" id="purge-sender" class="form-control">
+                    <option value="">{{ 'dialoghsm.log.purge.all_senders'|trans }}</option>
+                    {% for name in senderNames %}
+                        <option value="{{ name }}">{{ name }}</option>
+                    {% endfor %}
+                </select>
+                <p class="help-block">{{ 'dialoghsm.log.purge.sender.help'|trans }}</p>
+            </div>
+
+            <hr>
+
+            <div class="form-group" style="margin-bottom: 0;">
+                <a href="{{ path('mautic_dialoghsm_log_index') }}" class="btn btn-default">
+                    <i class="ri-arrow-left-line"></i> {{ 'mautic.core.form.cancel'|trans }}
+                </a>
+                <button type="submit" class="btn btn-danger" style="margin-left: 8px;"
+                        onclick="return confirm('{{ 'dialoghsm.log.purge.confirm'|trans|escape('js') }}')">
+                    <i class="ri-delete-bin-line"></i> {{ 'dialoghsm.log.purge.submit'|trans }}
+                </button>
+            </div>
+        </form>
+
+    </div>
+</div>
+{% endif %}
+{% endblock %}

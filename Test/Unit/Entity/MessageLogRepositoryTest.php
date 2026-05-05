@@ -593,6 +593,178 @@ class MessageLogRepositoryTest extends TestCase
     }
 
     // =========================================================================
+    // deleteQueued
+    // =========================================================================
+
+    public function testDeleteQueuedWithNoFiltersDeletesAllQueued(): void
+    {
+        $this->mockClassMetadata->method('getColumnName')->willReturnMap([
+            ['templateName', 'template_name'],
+            ['senderName', 'sender_name'],
+        ]);
+
+        $this->mockConnection
+            ->expects($this->once())
+            ->method('executeStatement')
+            ->with(
+                $this->logicalAnd(
+                    $this->stringContains('status = :status'),
+                    $this->stringContains('LIMIT 1000'),
+                    $this->logicalNot($this->stringContains('template_name')),
+                    $this->logicalNot($this->stringContains('sender_name'))
+                ),
+                $this->arrayHasKey('status'),
+                $this->anything()
+            )
+            ->willReturn(0);
+
+        $result = $this->repository->deleteQueued();
+
+        $this->assertSame(0, $result);
+    }
+
+    public function testDeleteQueuedWithTemplateFilterAddsTemplateCondition(): void
+    {
+        $this->mockClassMetadata->method('getColumnName')->willReturnMap([
+            ['templateName', 'template_name'],
+            ['senderName', 'sender_name'],
+        ]);
+
+        $this->mockConnection
+            ->expects($this->once())
+            ->method('executeStatement')
+            ->with(
+                $this->logicalAnd(
+                    $this->stringContains('status = :status'),
+                    $this->stringContains('`template_name` = :templateName')
+                ),
+                $this->arrayHasKey('templateName'),
+                $this->anything()
+            )
+            ->willReturn(5);
+
+        $result = $this->repository->deleteQueued('my_template');
+
+        $this->assertSame(5, $result);
+    }
+
+    public function testDeleteQueuedWithSenderFilterAddsSenderCondition(): void
+    {
+        $this->mockClassMetadata->method('getColumnName')->willReturnMap([
+            ['templateName', 'template_name'],
+            ['senderName', 'sender_name'],
+        ]);
+
+        $this->mockConnection
+            ->expects($this->once())
+            ->method('executeStatement')
+            ->with(
+                $this->logicalAnd(
+                    $this->stringContains('status = :status'),
+                    $this->stringContains('`sender_name` = :senderName')
+                ),
+                $this->arrayHasKey('senderName'),
+                $this->anything()
+            )
+            ->willReturn(3);
+
+        $result = $this->repository->deleteQueued(null, 'Número 1');
+
+        $this->assertSame(3, $result);
+    }
+
+    public function testDeleteQueuedWithBothFiltersAddsBothConditions(): void
+    {
+        $this->mockClassMetadata->method('getColumnName')->willReturnMap([
+            ['templateName', 'template_name'],
+            ['senderName', 'sender_name'],
+        ]);
+
+        $this->mockConnection
+            ->expects($this->once())
+            ->method('executeStatement')
+            ->with(
+                $this->logicalAnd(
+                    $this->stringContains('status = :status'),
+                    $this->stringContains('`template_name` = :templateName'),
+                    $this->stringContains('`sender_name` = :senderName')
+                ),
+                $this->logicalAnd(
+                    $this->arrayHasKey('templateName'),
+                    $this->arrayHasKey('senderName')
+                ),
+                $this->anything()
+            )
+            ->willReturn(10);
+
+        $result = $this->repository->deleteQueued('template_x', 'Sender A');
+
+        $this->assertSame(10, $result);
+    }
+
+    public function testDeleteQueuedReturnsAccumulatedCountAcrossBatches(): void
+    {
+        $this->mockClassMetadata->method('getColumnName')->willReturnMap([
+            ['templateName', 'template_name'],
+            ['senderName', 'sender_name'],
+        ]);
+
+        // 1ª batch = 1000 (cheio) → continua; 2ª = 400 → para
+        $call = 0;
+        $this->mockConnection
+            ->expects($this->exactly(2))
+            ->method('executeStatement')
+            ->willReturnCallback(static function () use (&$call): int {
+                return ++$call === 1 ? 1000 : 400;
+            });
+
+        $result = $this->repository->deleteQueued();
+
+        $this->assertSame(1400, $result);
+    }
+
+    public function testDeleteQueuedReturnsZeroWhenNothingToDelete(): void
+    {
+        $this->mockClassMetadata->method('getColumnName')->willReturnMap([
+            ['templateName', 'template_name'],
+            ['senderName', 'sender_name'],
+        ]);
+
+        $this->mockConnection
+            ->expects($this->once())
+            ->method('executeStatement')
+            ->willReturn(0);
+
+        $result = $this->repository->deleteQueued('nonexistent_template');
+
+        $this->assertSame(0, $result);
+    }
+
+    public function testDeleteQueuedSqlAlwaysContainsStatusQueued(): void
+    {
+        $this->mockClassMetadata->method('getColumnName')->willReturnMap([
+            ['templateName', 'template_name'],
+            ['senderName', 'sender_name'],
+        ]);
+
+        $capturedSql = null;
+        $capturedParams = null;
+        $this->mockConnection
+            ->expects($this->once())
+            ->method('executeStatement')
+            ->willReturnCallback(static function (string $sql, array $params) use (&$capturedSql, &$capturedParams): int {
+                $capturedSql    = $sql;
+                $capturedParams = $params;
+                return 0;
+            });
+
+        $this->repository->deleteQueued('tmpl', 'sender');
+
+        $this->assertStringContainsString('status = :status', $capturedSql);
+        $this->assertSame('queued', $capturedParams['status']);
+    }
+
+    // =========================================================================
     // getStatsByPeriod
     // =========================================================================
 

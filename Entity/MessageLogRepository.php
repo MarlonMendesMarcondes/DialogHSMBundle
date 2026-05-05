@@ -48,6 +48,24 @@ class MessageLogRepository extends CommonRepository
     }
 
     /**
+     * Retorna lista ordenada de template names distintos presentes nos logs.
+     *
+     * @return string[]
+     */
+    public function getDistinctTemplateNames(): array
+    {
+        $rows = $this->createQueryBuilder('dhml')
+            ->select('DISTINCT dhml.templateName')
+            ->where('dhml.templateName IS NOT NULL')
+            ->andWhere("dhml.templateName != ''")
+            ->orderBy('dhml.templateName', 'ASC')
+            ->getQuery()
+            ->getScalarResult();
+
+        return array_column($rows, 'templateName');
+    }
+
+    /**
      * Retorna lista ordenada de sender names distintos presentes nos logs.
      *
      * @return string[]
@@ -66,7 +84,7 @@ class MessageLogRepository extends CommonRepository
     }
 
     /**
-     * @param array{status?:string, dateFrom?:string, dateTo?:string, senderName?:string, contact?:string} $filters
+     * @param array{status?:string, dateFrom?:string, dateTo?:string, senderName?:string, contact?:string, templateName?:string} $filters
      */
     private function applyFilters(\Doctrine\ORM\QueryBuilder $qb, array $filters): void
     {
@@ -99,6 +117,11 @@ class MessageLogRepository extends CommonRepository
                 $qb->andWhere('dhml.phoneNumber LIKE :phone')
                    ->setParameter('phone', '%' . $contact . '%');
             }
+        }
+
+        if (!empty($filters['templateName'])) {
+            $qb->andWhere('dhml.templateName = :templateName')
+               ->setParameter('templateName', $filters['templateName']);
         }
     }
 
@@ -194,10 +217,55 @@ class MessageLogRepository extends CommonRepository
     }
 
     /**
-     * Tamanho de cada lote no prune(). Limita o lock por statement a ~1k linhas,
+     * Tamanho de cada lote no prune() e deleteQueued(). Limita o lock por statement a ~1k linhas,
      * evitando travamento prolongado em tabelas grandes.
      */
     private const PRUNE_BATCH_SIZE = 1_000;
+
+    /**
+     * Deleta registros com status 'queued', opcionalmente filtrado por template e/ou número remetente.
+     * Usa lotes de PRUNE_BATCH_SIZE para evitar table locks em volumes grandes.
+     *
+     * @return int Total de registros deletados
+     */
+    public function deleteQueued(?string $templateName = null, ?string $senderName = null): int
+    {
+        $conn      = $this->getEntityManager()->getConnection();
+        $tableName = $this->getEntityManager()->getClassMetadata(MessageLog::class)->getTableName();
+        $meta      = $this->getEntityManager()->getClassMetadata(MessageLog::class);
+
+        $where  = ['status = :status'];
+        $params = ['status' => MessageLog::STATUS_QUEUED];
+        $types  = ['status' => \PDO::PARAM_STR];
+
+        if (null !== $templateName) {
+            $col                    = $meta->getColumnName('templateName');
+            $where[]                = "`{$col}` = :templateName";
+            $params['templateName'] = $templateName;
+            $types['templateName']  = \PDO::PARAM_STR;
+        }
+
+        if (null !== $senderName) {
+            $col                  = $meta->getColumnName('senderName');
+            $where[]              = "`{$col}` = :senderName";
+            $params['senderName'] = $senderName;
+            $types['senderName']  = \PDO::PARAM_STR;
+        }
+
+        $whereClause = implode(' AND ', $where);
+        $total       = 0;
+
+        do {
+            $deleted = (int) $conn->executeStatement(
+                "DELETE FROM `{$tableName}` WHERE {$whereClause} LIMIT " . self::PRUNE_BATCH_SIZE,
+                $params,
+                $types
+            );
+            $total += $deleted;
+        } while ($deleted === self::PRUNE_BATCH_SIZE);
+
+        return $total;
+    }
 
     /**
      * Remove registros antigos por dois critérios aplicados em sequência:

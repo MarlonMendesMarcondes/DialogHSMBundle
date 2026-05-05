@@ -76,6 +76,20 @@ class ConsumeWhatsAppCommand extends Command
             ? max(0, (int) $input->getOption('time-limit'))
             : 60;
 
+        // Em modo batch, usa batch_consumer_limit (exato por run) em vez de consumer_limit (bulk).
+        // O batch_rate_per_minute controla apenas o throttle (velocidade de envio).
+        // O time-limit do cron serve como safety cap; o --limit para o worker antes.
+        if ($input->getOption('mode') === 'batch' && $input->getOption('limit') === null) {
+            $batchLimit = $this->getBatchConsumerLimit();
+            $batchRate  = $this->getBatchRatePerMinute();
+            $limit      = $batchLimit;
+            $output->writeln(sprintf(
+                '<comment>DialogHSM: batch limit=%d mensagens (batch_consumer_limit), rate=%d/min</comment>',
+                $limit,
+                $batchRate
+            ));
+        }
+
         // Modo bulk/batch sem filas cadastradas: nenhum WhatsApp Number configurado
         $mode = $input->getOption('mode');
         if (in_array($mode, ['bulk', 'batch'], true) && count($queues) === 0) {
@@ -256,6 +270,30 @@ class ConsumeWhatsAppCommand extends Command
             return max(1, (int) ($apiKeys['consumer_limit'] ?? 50));
         } catch (\Exception) {
             return 50;
+        }
+    }
+
+    private function getBatchConsumerLimit(): int
+    {
+        try {
+            $integration = $this->integrationsHelper->getIntegration(DialogHSMIntegration::NAME);
+            $apiKeys     = $integration->getIntegrationConfiguration()->getApiKeys() ?? [];
+
+            return max(1, (int) ($apiKeys['batch_consumer_limit'] ?? 100));
+        } catch (\Exception) {
+            return 100;
+        }
+    }
+
+    private function getBatchRatePerMinute(): int
+    {
+        try {
+            $integration = $this->integrationsHelper->getIntegration(DialogHSMIntegration::NAME);
+            $apiKeys     = $integration->getIntegrationConfiguration()->getApiKeys() ?? [];
+
+            return max(1, (int) ($apiKeys['batch_rate_per_minute'] ?? 60));
+        } catch (\Exception) {
+            return 60;
         }
     }
 }
