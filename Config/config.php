@@ -17,6 +17,11 @@ return [
                 'path'       => '/dialoghsm/numbers/{objectAction}/{objectId}',
                 'controller' => 'MauticPlugin\DialogHSMBundle\Controller\WhatsAppNumberController::executeAction',
             ],
+            'mautic_dialoghsm_log_purge_queued' => [
+                'path'       => '/dialoghsm/logs/purge-queued',
+                'controller' => 'MauticPlugin\DialogHSMBundle\Controller\MessageLogController::purgeQueuedAction',
+                'methods'    => ['GET', 'POST'],
+            ],
             'mautic_dialoghsm_log_index' => [
                 'path'       => '/dialoghsm/logs/{page}',
                 'controller' => 'MauticPlugin\DialogHSMBundle\Controller\MessageLogController::indexAction',

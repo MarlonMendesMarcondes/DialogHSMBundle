@@ -6,6 +6,7 @@ namespace MauticPlugin\DialogHSMBundle\Controller;
 
 use Mautic\CoreBundle\Controller\FormController;
 use Mautic\IntegrationsBundle\Helper\IntegrationsHelper;
+use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Integration\DialogHSMIntegration;
 use Symfony\Component\HttpFoundation\Request;
@@ -160,6 +161,57 @@ class MessageLogController extends FormController
                 'activeLink'    => '#mautic_dialoghsm_log_index',
                 'mauticContent' => 'dialoghsm_log',
                 'route'         => $this->generateUrl('mautic_dialoghsm_log_index', ['page' => $page]),
+            ],
+        ]);
+    }
+
+    public function purgeQueuedAction(Request $request, MessageLogRepository $messageLogRepository): Response
+    {
+        if ($request->isMethod('POST')) {
+            $token = (string) $request->request->get('_token', '');
+            if (!$this->isCsrfTokenValid('dialoghsm_purge_queued', $token)) {
+                throw $this->createAccessDeniedException();
+            }
+
+            $templateName = trim((string) $request->request->get('templateName', ''));
+            $senderName   = trim((string) $request->request->get('senderName', ''));
+
+            $deleted = $messageLogRepository->deleteQueued(
+                $templateName !== '' ? $templateName : null,
+                $senderName !== '' ? $senderName : null,
+            );
+
+            return $this->postActionRedirect([
+                'returnUrl'       => $this->generateUrl('mautic_dialoghsm_log_index'),
+                'contentTemplate' => 'MauticPlugin\DialogHSMBundle\Controller\MessageLogController::indexAction',
+                'passthroughVars' => [
+                    'activeLink'    => '#mautic_dialoghsm_log_index',
+                    'mauticContent' => 'dialoghsm_log',
+                ],
+                'flashes' => [
+                    [
+                        'type'    => 'notice',
+                        'msg'     => 'dialoghsm.log.purge.success',
+                        'msgVars' => ['%count%' => $deleted],
+                    ],
+                ],
+            ]);
+        }
+
+        $totalQueued = $messageLogRepository->countAll(['status' => MessageLog::STATUS_QUEUED]);
+
+        return $this->delegateView([
+            'viewParameters' => [
+                'totalQueued'   => $totalQueued,
+                'senderNames'   => $messageLogRepository->getDistinctSenderNames(),
+                'templateNames' => $messageLogRepository->getDistinctTemplateNames(),
+                'tmpl'          => 'index',
+            ],
+            'contentTemplate' => '@DialogHSM/MessageLog/purge_queued.html.twig',
+            'passthroughVars' => [
+                'activeLink'    => '#mautic_dialoghsm_log_index',
+                'mauticContent' => 'dialoghsm_purge_queued',
+                'route'         => $this->generateUrl('mautic_dialoghsm_log_purge_queued'),
             ],
         ]);
     }

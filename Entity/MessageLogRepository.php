@@ -217,10 +217,55 @@ class MessageLogRepository extends CommonRepository
     }
 
     /**
-     * Tamanho de cada lote no prune(). Limita o lock por statement a ~1k linhas,
+     * Tamanho de cada lote no prune() e deleteQueued(). Limita o lock por statement a ~1k linhas,
      * evitando travamento prolongado em tabelas grandes.
      */
     private const PRUNE_BATCH_SIZE = 1_000;
+
+    /**
+     * Deleta registros com status 'queued', opcionalmente filtrado por template e/ou número remetente.
+     * Usa lotes de PRUNE_BATCH_SIZE para evitar table locks em volumes grandes.
+     *
+     * @return int Total de registros deletados
+     */
+    public function deleteQueued(?string $templateName = null, ?string $senderName = null): int
+    {
+        $conn      = $this->getEntityManager()->getConnection();
+        $tableName = $this->getEntityManager()->getClassMetadata(MessageLog::class)->getTableName();
+        $meta      = $this->getEntityManager()->getClassMetadata(MessageLog::class);
+
+        $where  = ['status = :status'];
+        $params = ['status' => MessageLog::STATUS_QUEUED];
+        $types  = ['status' => \PDO::PARAM_STR];
+
+        if (null !== $templateName) {
+            $col                    = $meta->getColumnName('templateName');
+            $where[]                = "`{$col}` = :templateName";
+            $params['templateName'] = $templateName;
+            $types['templateName']  = \PDO::PARAM_STR;
+        }
+
+        if (null !== $senderName) {
+            $col                  = $meta->getColumnName('senderName');
+            $where[]              = "`{$col}` = :senderName";
+            $params['senderName'] = $senderName;
+            $types['senderName']  = \PDO::PARAM_STR;
+        }
+
+        $whereClause = implode(' AND ', $where);
+        $total       = 0;
+
+        do {
+            $deleted = (int) $conn->executeStatement(
+                "DELETE FROM `{$tableName}` WHERE {$whereClause} LIMIT " . self::PRUNE_BATCH_SIZE,
+                $params,
+                $types
+            );
+            $total += $deleted;
+        } while ($deleted === self::PRUNE_BATCH_SIZE);
+
+        return $total;
+    }
 
     /**
      * Remove registros antigos por dois critérios aplicados em sequência:
