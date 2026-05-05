@@ -103,32 +103,31 @@ MAUTIC_MESSENGER_DSN_WHATSAPP=amqp://user:password@localhost:5672/%2f
 MAUTIC_MESSENGER_DSN_WHATSAPP_DIRECT=redis://localhost:6379/3
 
 # Dead Letter Queue — mensagens que esgotam os 3 retries
-MAUTIC_MESSENGER_DSN_WHATSAPP_FAILED=amqp://user:password@localhost:5672/%2f?exchange[name]=whatsapp_failed&exchange[type]=fanout
+MAUTIC_MESSENGER_DSN_WHATSAPP_FAILED=amqp://user:password@localhost:5672/%2f
 ```
 
 Sem configuração, o padrão é `null://null` (envio inline, sem fila).
 
 ### 2. Setup inicial do RabbitMQ
 
-Execute **uma única vez** após configurar o `.env.local`:
+O plugin usa o **exchange default do RabbitMQ** (`name=''`), que roteia mensagens diretamente para a fila pelo routing key (= nome da fila). Não é necessário criar exchanges nomeados nem bindings manuais.
+
+> ⚠️ **Não execute `messenger:setup-transports`** — o exchange default é um exchange built-in do RabbitMQ que não pode ser declarado via protocolo AMQP. O comando retornará `ACCESS_REFUSED` e falhará. A criação das filas deve ser feita manualmente conforme abaixo.
+
+Execute **uma única vez** por fila configurada nos Números WhatsApp:
 
 ```bash
-# Cria o exchange 'whatsapp' e o exchange 'delays' (retry)
-php bin/console messenger:setup-transports whatsapp
-
-# Para cada fila do número, criar e vincular ao exchange 'whatsapp'
 rabbitmqadmin declare queue name=minha_fila durable=true
-rabbitmqadmin declare binding source=whatsapp destination=minha_fila routing_key=minha_fila
-```
 
-> Mensagens enviadas para uma fila sem binding ao exchange `whatsapp` são descartadas silenciosamente.
+# Exemplo com as filas padrão bulk + batch
+rabbitmqadmin declare queue name=queue durable=true
+rabbitmqadmin declare queue name=batch durable=true
+```
 
 **Dead Letter Queue** (opcional):
 
 ```bash
-rabbitmqadmin declare exchange name=whatsapp_failed type=fanout durable=true
 rabbitmqadmin declare queue name=whatsapp_failed durable=true
-rabbitmqadmin declare binding source=whatsapp_failed destination=whatsapp_failed
 ```
 
 ### 3. Cron
