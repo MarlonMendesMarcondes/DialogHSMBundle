@@ -151,7 +151,8 @@ class LeadTimelineSubscriberTest extends TestCase
         $stats    = ['total' => 1, 'results' => [
             ['id' => 7, 'template_name' => 'first_welcome', 'phone_number' => '+5511999999999',
              'status' => MessageLog::STATUS_SENT, 'error_message' => null,
-             'campaign_id' => 3, 'sender_name' => 'Sandbox', 'date_sent' => $dateSent],
+             'campaign_id' => 3, 'sender_name' => 'Sandbox', 'date_sent' => $dateSent,
+             'date_delivered' => null, 'date_read' => null],
         ]];
 
         $event = $this->getMockBuilder(LeadTimelineEvent::class)
@@ -166,14 +167,71 @@ class LeadTimelineSubscriberTest extends TestCase
 
         $event->expects($this->once())
             ->method('addEvent')
-            ->with($this->callback(function (array $e): bool {
+            ->with($this->callback(function (array $e) use ($dateSent): bool {
                 return 'dialoghsm.sent' === $e['event']
                     && 'dialoghsm.sent7' === $e['eventId']
-                    && 'first_welcome' === $e['eventLabel']
+                    && 'dialoghsm.log.status.sent — first_welcome' === $e['eventLabel']
+                    && $dateSent === $e['timestamp']
                     && 'ri-checkbox-circle-line' === $e['icon']
                     && 42 === $e['contactId']
                     && '@DialogHSM/Timeline/whatsapp_message.html.twig' === $e['contentTemplate'];
             }));
+
+        $this->subscriber->onTimelineGenerate($event);
+    }
+
+    public function testOnTimelineGenerateUsesDateDeliveredTimestampForDeliveredStatus(): void
+    {
+        $dateSent      = new \DateTime('2026-01-15 10:00:00');
+        $dateDelivered = new \DateTime('2026-01-15 10:05:00');
+        $stats         = ['total' => 1, 'results' => [
+            ['id' => 8, 'template_name' => 'welcome', 'phone_number' => '+55119',
+             'status' => MessageLog::STATUS_DELIVERED, 'error_message' => null,
+             'campaign_id' => null, 'sender_name' => 'num',
+             'date_sent' => $dateSent, 'date_delivered' => $dateDelivered, 'date_read' => null],
+        ]];
+
+        $event = $this->getMockBuilder(LeadTimelineEvent::class)
+            ->disableOriginalConstructor()
+            ->onlyMethods(['addEventType', 'isApplicable', 'getLeadId', 'getQueryOptions', 'addToCounter', 'isEngagementCount', 'addEvent'])
+            ->getMock();
+        $event->method('isApplicable')->willReturnCallback(fn ($t) => 'dialoghsm.delivered' === $t);
+        $event->method('getLeadId')->willReturn(10);
+        $event->method('isEngagementCount')->willReturn(false);
+        $event->method('getQueryOptions')->willReturn(['paginated' => true, 'limit' => 25, 'start' => 0]);
+        $this->repository->method('getLogsForTimeline')->willReturn($stats);
+
+        $event->expects($this->once())
+            ->method('addEvent')
+            ->with($this->callback(fn (array $e) => $dateDelivered === $e['timestamp']));
+
+        $this->subscriber->onTimelineGenerate($event);
+    }
+
+    public function testOnTimelineGenerateUsesDateReadTimestampForReadStatus(): void
+    {
+        $dateSent  = new \DateTime('2026-01-15 10:00:00');
+        $dateRead  = new \DateTime('2026-01-15 10:10:00');
+        $stats     = ['total' => 1, 'results' => [
+            ['id' => 9, 'template_name' => 'welcome', 'phone_number' => '+55119',
+             'status' => MessageLog::STATUS_READ, 'error_message' => null,
+             'campaign_id' => null, 'sender_name' => 'num',
+             'date_sent' => $dateSent, 'date_delivered' => null, 'date_read' => $dateRead],
+        ]];
+
+        $event = $this->getMockBuilder(LeadTimelineEvent::class)
+            ->disableOriginalConstructor()
+            ->onlyMethods(['addEventType', 'isApplicable', 'getLeadId', 'getQueryOptions', 'addToCounter', 'isEngagementCount', 'addEvent'])
+            ->getMock();
+        $event->method('isApplicable')->willReturnCallback(fn ($t) => 'dialoghsm.read' === $t);
+        $event->method('getLeadId')->willReturn(10);
+        $event->method('isEngagementCount')->willReturn(false);
+        $event->method('getQueryOptions')->willReturn(['paginated' => true, 'limit' => 25, 'start' => 0]);
+        $this->repository->method('getLogsForTimeline')->willReturn($stats);
+
+        $event->expects($this->once())
+            ->method('addEvent')
+            ->with($this->callback(fn (array $e) => $dateRead === $e['timestamp']));
 
         $this->subscriber->onTimelineGenerate($event);
     }

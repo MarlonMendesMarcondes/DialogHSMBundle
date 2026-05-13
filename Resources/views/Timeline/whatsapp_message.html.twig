@@ -1,6 +1,7 @@
 {#
   Variables: event, lead
-  event.extra contains: template_name, phone_number, sender_name, status, error_message, campaign_id
+  event.extra contains: template_name, phone_number, sender_name, status, error_message, campaign_id,
+                        date_sent, date_delivered, date_read
 #}
 {% set item = event.extra is defined ? event.extra : {} %}
 {% if item is not empty %}
@@ -20,6 +21,14 @@
     {% if item.campaign_id is defined and item.campaign_id %}
         <dt>{{ 'dialoghsm.log.campaign'|trans }}</dt>
         <dd>#{{ item.campaign_id }}</dd>
+    {% endif %}
+    {% if item.date_delivered is defined and item.date_delivered %}
+        <dt>{{ 'dialoghsm.log.date_delivered'|trans }}</dt>
+        <dd>{{ item.date_delivered|date('d/m/Y H:i') }}</dd>
+    {% endif %}
+    {% if item.date_read is defined and item.date_read %}
+        <dt>{{ 'dialoghsm.log.date_read'|trans }}</dt>
+        <dd>{{ item.date_read|date('d/m/Y H:i') }}</dd>
     {% endif %}
     {% if item.error_message is defined and item.error_message %}
         <dt>{{ 'dialoghsm.log.error'|trans }}</dt>

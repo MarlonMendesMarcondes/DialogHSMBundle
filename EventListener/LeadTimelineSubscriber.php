@@ -66,12 +66,18 @@ class LeadTimelineSubscriber implements EventSubscriberInterface
         }
 
         foreach ($stats['results'] as $row) {
+            $timestamp = match ($status) {
+                MessageLog::STATUS_DELIVERED => $row['date_delivered'] ?? $row['date_sent'],
+                MessageLog::STATUS_READ      => $row['date_read']      ?? $row['date_sent'],
+                default                      => $row['date_sent'],
+            };
+
             $event->addEvent([
                 'event'           => $eventTypeKey,
                 'eventId'         => $eventTypeKey.$row['id'],
-                'eventLabel'      => $row['template_name'] ?: $eventTypeName,
+                'eventLabel'      => $row['template_name'] ? $eventTypeName.' — '.$row['template_name'] : $eventTypeName,
                 'eventType'       => $eventTypeName,
-                'timestamp'       => $row['date_sent'],
+                'timestamp'       => $timestamp,
                 'extra'           => $row,
                 'contentTemplate' => '@DialogHSM/Timeline/whatsapp_message.html.twig',
                 'icon'            => $icon,
