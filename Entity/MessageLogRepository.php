@@ -203,6 +203,13 @@ class MessageLogRepository extends CommonRepository
             }
         }
 
+        // Funil cumulativo por dia — consistente com getStatsByPeriod()
+        foreach ($data as &$day) {
+            $day['sent']      += $day['delivered'] + $day['read'];
+            $day['delivered'] += $day['read'];
+        }
+        unset($day);
+
         return $data;
     }
 

@@ -75,7 +75,7 @@
     {# ── Gráfico ── #}
     <div class="panel panel-default">
         <div class="panel-heading" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
-            <h3 class="panel-title" style="margin: 0;">{{ 'dialoghsm.dashboard.chart.title'|trans }}</h3>
+            <h3 class="panel-title" style="margin: 0;">{{ ('dialoghsm.dashboard.period.' ~ chartDays ~ 'd')|trans }}</h3>
             <div class="btn-group btn-group-xs" role="group">
                 <a href="{{ path('mautic_dialoghsm_dashboard', {days: 7}) }}"
                    class="btn {{ chartDays == 7 ? 'btn-primary' : 'btn-secondary' }}">7d</a>
