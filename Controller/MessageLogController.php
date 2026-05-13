@@ -51,9 +51,10 @@ class MessageLogController extends FormController
         $from24h = (clone $now)->modify('-24 hours');
         $from7d  = (clone $now)->modify('-7 days')->setTime(0, 0, 0);
 
-        $stats24h  = $messageLogRepository->getStatsByPeriod($from24h);
-        $stats7d   = $messageLogRepository->getStatsByPeriod($from7d);
-        $chartRaw  = $messageLogRepository->getChartData($chartDays);
+        $stats24h   = $messageLogRepository->getStatsByPeriod($from24h);
+        $stats7d    = $messageLogRepository->getStatsByPeriod($from7d);
+        $chartRaw   = $messageLogRepository->getChartData($chartDays);
+        $dispatches = $messageLogRepository->getGroupedDispatches();
 
         // Prepara dados para Chart.js
         $labels   = array_keys($chartRaw);
@@ -78,12 +79,13 @@ class MessageLogController extends FormController
 
         return $this->delegateView([
             'viewParameters'  => [
-                'stats24h'  => $stats24h,
-                'stats7d'   => $stats7d,
-                'chartJson' => json_encode(['labels' => $labels, 'datasets' => $datasets]),
-                'chartDays' => $chartDays,
-                'timezone'  => $this->coreParametersHelper->get('default_timezone', 'UTC'),
-                'tmpl'      => 'index',
+                'stats24h'   => $stats24h,
+                'stats7d'    => $stats7d,
+                'chartJson'  => json_encode(['labels' => $labels, 'datasets' => $datasets]),
+                'chartDays'  => $chartDays,
+                'timezone'   => $this->coreParametersHelper->get('default_timezone', 'UTC'),
+                'dispatches' => $dispatches,
+                'tmpl'       => 'index',
             ],
             'contentTemplate' => '@DialogHSM/MessageLog/dashboard.html.twig',
             'passthroughVars' => [

@@ -7,7 +7,19 @@
 .dialoghsm-card-label { font-size: 11px; margin-top: 3px; color: var(--text-helper); }
 .dialoghsm-stat-row { display: flex; flex-wrap: nowrap; gap: 6px; margin-bottom: 20px; }
 .dialoghsm-stat-row > div { flex: 1 1 0; min-width: 0; }
+.dialoghsm-dispatches { border-collapse: separate; border-spacing: 0; }
+.dialoghsm-dispatches thead tr th { background: var(--layer-01); color: var(--text-secondary); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; border-bottom: 2px solid var(--border-subtle-01) !important; padding: 10px 12px; }
+.dialoghsm-dispatches tbody tr { transition: background .15s; }
+.dialoghsm-dispatches tbody tr:nth-child(odd)  { background: var(--background); }
+.dialoghsm-dispatches tbody tr:nth-child(even) { background: var(--layer-01); }
+.dialoghsm-dispatches tbody tr:hover { background: var(--background-hover) !important; }
+.dialoghsm-dispatches td { vertical-align: middle !important; color: var(--text-primary); border-top: 1px solid var(--border-subtle-01) !important; padding: 9px 12px; font-size: 13px; }
+.dialoghsm-stat-pill { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 12px; min-width: 32px; text-align: center; }
+.dialoghsm-template-badge { font-family: monospace; font-size: 12px; background: var(--layer-accent-01); color: var(--text-primary); padding: 2px 8px; border-radius: 6px; border: 1px solid var(--border-subtle-02); }
+.dialoghsm-campaign-link { font-size: 12px; font-weight: 600; color: var(--text-secondary); text-decoration: none; background: var(--layer-02); padding: 2px 7px; border-radius: 6px; border: 1px solid var(--border-subtle-01); }
+.dialoghsm-campaign-link:hover { background: var(--layer-hover-02); color: var(--text-primary); }
 </style>
+
 <div class="row" style="margin-bottom: 20px;">
     <div class="col-xs-12" style="display: flex; flex-wrap: wrap; gap: 8px;">
         <a href="{{ path('mautic_dialoghsm_log_index') }}" class="btn btn-secondary btn-sm">
@@ -19,55 +31,130 @@
     </div>
 </div>
 
-{# ── Últimas 24h ── #}
-<h4 class="text-muted" style="margin: 0 0 12px;">{{ 'dialoghsm.dashboard.period.24h'|trans }}</h4>
-<div class="dialoghsm-stat-row">
-    {{ _self.statCard('dialoghsm.dashboard.total',     stats24h.total,     'ri-send-plane-line',      '#555') }}
-    {{ _self.statCard('dialoghsm.dashboard.queued',    stats24h.queued,    'ri-time-line',             '#888') }}
-    {{ _self.statCard('dialoghsm.dashboard.sent',      stats24h.sent,      'ri-checkbox-circle-line',  '#5cb85c') }}
-    {{ _self.statCard('dialoghsm.dashboard.delivered', stats24h.delivered, 'ri-check-double-line',     '#17a2b8') }}
-    {{ _self.statCard('dialoghsm.dashboard.read',      stats24h.read,      'ri-eye-line',              '#0275d8') }}
-    {{ _self.statCard('dialoghsm.dashboard.failed',    stats24h.failed,    'ri-close-circle-line',     '#d9534f') }}
-    {{ _self.statCard('dialoghsm.dashboard.dlq',       stats24h.dlq,       'ri-error-warning-line',    '#f0ad4e') }}
-    {% set processed24h = stats24h.sent + stats24h.failed + stats24h.dlq %}
-    {% set rate = processed24h > 0 ? (stats24h.sent / processed24h * 100)|round(1) : 0 %}
-    {{ _self.rateCard('dialoghsm.dashboard.success_rate', rate, rate >= 90 ? '#5cb85c' : (rate >= 70 ? '#f0ad4e' : '#d9534f')) }}
-</div>
+{# ── Abas ── #}
+<ul class="nav nav-tabs" style="margin-bottom: 20px;">
+    <li class="active"><a href="#tab-metricas" data-toggle="tab">{{ 'dialoghsm.dashboard.tab.metrics'|trans }}</a></li>
+    <li><a href="#tab-disparos" data-toggle="tab">{{ 'dialoghsm.dashboard.tab.dispatches'|trans }}</a></li>
+</ul>
 
-{# ── Últimos 7 dias ── #}
-<h4 class="text-muted" style="margin: 0 0 12px;">{{ 'dialoghsm.dashboard.period.7d'|trans }}</h4>
-<div class="dialoghsm-stat-row" style="margin-bottom: 32px;">
-    {{ _self.statCard('dialoghsm.dashboard.total',     stats7d.total,     'ri-send-plane-line',      '#555') }}
-    {{ _self.statCard('dialoghsm.dashboard.queued',    stats7d.queued,    'ri-time-line',             '#888') }}
-    {{ _self.statCard('dialoghsm.dashboard.sent',      stats7d.sent,      'ri-checkbox-circle-line',  '#5cb85c') }}
-    {{ _self.statCard('dialoghsm.dashboard.delivered', stats7d.delivered, 'ri-check-double-line',     '#17a2b8') }}
-    {{ _self.statCard('dialoghsm.dashboard.read',      stats7d.read,      'ri-eye-line',              '#0275d8') }}
-    {{ _self.statCard('dialoghsm.dashboard.failed',    stats7d.failed,    'ri-close-circle-line',     '#d9534f') }}
-    {{ _self.statCard('dialoghsm.dashboard.dlq',       stats7d.dlq,       'ri-error-warning-line',    '#f0ad4e') }}
-    {% set processed7d = stats7d.sent + stats7d.failed + stats7d.dlq %}
-    {% set rate7 = processed7d > 0 ? (stats7d.sent / processed7d * 100)|round(1) : 0 %}
-    {{ _self.rateCard('dialoghsm.dashboard.success_rate', rate7, rate7 >= 90 ? '#5cb85c' : (rate7 >= 70 ? '#f0ad4e' : '#d9534f')) }}
-</div>
+<div class="tab-content">
 
-{# ── Gráfico ── #}
-<div class="panel panel-default">
-    <div class="panel-heading" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
-        <h3 class="panel-title" style="margin: 0;">{{ 'dialoghsm.dashboard.chart.title'|trans }}</h3>
-        <div class="btn-group btn-group-xs" role="group">
-            <a href="{{ path('mautic_dialoghsm_dashboard', {days: 7}) }}"
-               class="btn {{ chartDays == 7 ? 'btn-primary' : 'btn-secondary' }}">7d</a>
-            <a href="{{ path('mautic_dialoghsm_dashboard', {days: 14}) }}"
-               class="btn {{ chartDays == 14 ? 'btn-primary' : 'btn-secondary' }}">14d</a>
-            <a href="{{ path('mautic_dialoghsm_dashboard', {days: 30}) }}"
-               class="btn {{ chartDays == 30 ? 'btn-primary' : 'btn-secondary' }}">30d</a>
+{# ══ ABA MÉTRICAS ══ #}
+<div class="tab-pane active" id="tab-metricas">
+
+    {# ── Últimas 24h ── #}
+    <h4 class="text-muted" style="margin: 0 0 12px;">{{ 'dialoghsm.dashboard.period.24h'|trans }}</h4>
+    <div class="dialoghsm-stat-row">
+        {{ _self.statCard('dialoghsm.dashboard.total',     stats24h.total,     'ri-send-plane-line',      '#555') }}
+        {{ _self.statCard('dialoghsm.dashboard.queued',    stats24h.queued,    'ri-time-line',             '#888') }}
+        {{ _self.statCard('dialoghsm.dashboard.sent',      stats24h.sent,      'ri-checkbox-circle-line',  '#5cb85c') }}
+        {{ _self.statCard('dialoghsm.dashboard.delivered', stats24h.delivered, 'ri-check-double-line',     '#17a2b8') }}
+        {{ _self.statCard('dialoghsm.dashboard.read',      stats24h.read,      'ri-eye-line',              '#0275d8') }}
+        {{ _self.statCard('dialoghsm.dashboard.failed',    stats24h.failed,    'ri-close-circle-line',     '#d9534f') }}
+        {{ _self.statCard('dialoghsm.dashboard.dlq',       stats24h.dlq,       'ri-error-warning-line',    '#f0ad4e') }}
+        {% set processed24h = stats24h.sent + stats24h.failed + stats24h.dlq %}
+        {% set rate = processed24h > 0 ? (stats24h.sent / processed24h * 100)|round(1) : 0 %}
+        {{ _self.rateCard('dialoghsm.dashboard.success_rate', rate, rate >= 90 ? '#5cb85c' : (rate >= 70 ? '#f0ad4e' : '#d9534f')) }}
+    </div>
+
+    {# ── Últimos 7 dias ── #}
+    <h4 class="text-muted" style="margin: 0 0 12px;">{{ 'dialoghsm.dashboard.period.7d'|trans }}</h4>
+    <div class="dialoghsm-stat-row" style="margin-bottom: 32px;">
+        {{ _self.statCard('dialoghsm.dashboard.total',     stats7d.total,     'ri-send-plane-line',      '#555') }}
+        {{ _self.statCard('dialoghsm.dashboard.queued',    stats7d.queued,    'ri-time-line',             '#888') }}
+        {{ _self.statCard('dialoghsm.dashboard.sent',      stats7d.sent,      'ri-checkbox-circle-line',  '#5cb85c') }}
+        {{ _self.statCard('dialoghsm.dashboard.delivered', stats7d.delivered, 'ri-check-double-line',     '#17a2b8') }}
+        {{ _self.statCard('dialoghsm.dashboard.read',      stats7d.read,      'ri-eye-line',              '#0275d8') }}
+        {{ _self.statCard('dialoghsm.dashboard.failed',    stats7d.failed,    'ri-close-circle-line',     '#d9534f') }}
+        {{ _self.statCard('dialoghsm.dashboard.dlq',       stats7d.dlq,       'ri-error-warning-line',    '#f0ad4e') }}
+        {% set processed7d = stats7d.sent + stats7d.failed + stats7d.dlq %}
+        {% set rate7 = processed7d > 0 ? (stats7d.sent / processed7d * 100)|round(1) : 0 %}
+        {{ _self.rateCard('dialoghsm.dashboard.success_rate', rate7, rate7 >= 90 ? '#5cb85c' : (rate7 >= 70 ? '#f0ad4e' : '#d9534f')) }}
+    </div>
+
+    {# ── Gráfico ── #}
+    <div class="panel panel-default">
+        <div class="panel-heading" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+            <h3 class="panel-title" style="margin: 0;">{{ 'dialoghsm.dashboard.chart.title'|trans }}</h3>
+            <div class="btn-group btn-group-xs" role="group">
+                <a href="{{ path('mautic_dialoghsm_dashboard', {days: 7}) }}"
+                   class="btn {{ chartDays == 7 ? 'btn-primary' : 'btn-secondary' }}">7d</a>
+                <a href="{{ path('mautic_dialoghsm_dashboard', {days: 14}) }}"
+                   class="btn {{ chartDays == 14 ? 'btn-primary' : 'btn-secondary' }}">14d</a>
+                <a href="{{ path('mautic_dialoghsm_dashboard', {days: 30}) }}"
+                   class="btn {{ chartDays == 30 ? 'btn-primary' : 'btn-secondary' }}">30d</a>
+            </div>
+        </div>
+        <div class="panel-body">
+            <div style="position: relative; height: 320px;">
+                <canvas id="dialoghsm-chart"></canvas>
+            </div>
         </div>
     </div>
-    <div class="panel-body">
-        <div style="position: relative; height: 320px;">
-            <canvas id="dialoghsm-chart"></canvas>
+
+</div>{# /tab-metricas #}
+
+{# ══ ABA DISPAROS ══ #}
+<div class="tab-pane" id="tab-disparos">
+    <div class="panel panel-default">
+        <div class="panel-body" style="padding: 0;">
+            {% if dispatches is empty %}
+                <p class="text-muted" style="padding: 20px; margin: 0;">{{ 'dialoghsm.dashboard.dispatches.noresults'|trans }}</p>
+            {% else %}
+            <div class="table-responsive">
+                <table class="table dialoghsm-dispatches" style="margin: 0;">
+                    <thead>
+                        <tr>
+                            <th>{{ 'dialoghsm.dashboard.dispatches.template'|trans }}</th>
+                            <th>{{ 'dialoghsm.dashboard.dispatches.campaign'|trans }}</th>
+                            <th class="text-center">{{ 'dialoghsm.dashboard.total'|trans }}</th>
+                            <th class="text-center"><i class="ri-checkbox-circle-line" style="color:#5cb85c"></i> {{ 'dialoghsm.dashboard.sent'|trans }}</th>
+                            <th class="text-center"><i class="ri-check-double-line" style="color:#17a2b8"></i> {{ 'dialoghsm.dashboard.delivered'|trans }}</th>
+                            <th class="text-center"><i class="ri-eye-line" style="color:#0275d8"></i> {{ 'dialoghsm.dashboard.read'|trans }}</th>
+                            <th class="text-center"><i class="ri-close-circle-line" style="color:#d9534f"></i> {{ 'dialoghsm.dashboard.failed'|trans }}</th>
+                            <th class="text-center"><i class="ri-error-warning-line" style="color:#f0ad4e"></i> {{ 'dialoghsm.dashboard.dlq'|trans }}</th>
+                            <th>{{ 'dialoghsm.dashboard.dispatches.date'|trans }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    {% for row in dispatches %}
+                        {% set total    = row.total|default(0) %}
+                        {% set sent     = row.sent|default(0) %}
+                        {% set delivered = row.delivered|default(0) %}
+                        {% set readCount = row.read|default(0) %}
+                        {% set failed   = row.failed|default(0) %}
+                        {% set dlq      = row.dlq|default(0) %}
+                        <tr>
+                            <td><span class="dialoghsm-template-badge">{{ row.template_name }}</span></td>
+                            <td>
+                                {% if row.campaign_id %}
+                                    <a class="dialoghsm-campaign-link" href="{{ path('mautic_campaign_action', {'objectAction': 'view', 'objectId': row.campaign_id}) }}" target="_blank">
+                                        <i class="ri-share-box-line"></i> #{{ row.campaign_id }}
+                                    </a>
+                                {% else %}
+                                    <span class="text-muted">—</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-center"><strong style="font-size:14px;">{{ total }}</strong></td>
+                            <td class="text-center">{{ _self.pill(sent,      '#5cb85c') }}</td>
+                            <td class="text-center">{{ _self.pill(delivered, '#17a2b8') }}</td>
+                            <td class="text-center">{{ _self.pill(readCount, '#0275d8') }}</td>
+                            <td class="text-center">{{ _self.pill(failed,    '#d9534f') }}</td>
+                            <td class="text-center">{{ _self.pill(dlq,       '#f0ad4e') }}</td>
+                            <td style="white-space: nowrap; color: #999; font-size: 12px;">
+                                <i class="ri-calendar-line"></i> {{ row.date }}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
         </div>
     </div>
-</div>
+</div>{# /tab-disparos #}
+
+</div>{# /tab-content #}
 
 <script>
 (function () {
@@ -146,4 +233,9 @@
         <div class="dialoghsm-card-label">{{ labelKey|trans }}</div>
     </div>
 </div>
+{% endmacro %}
+
+{% macro pill(value, color) %}
+{% set v = value|default(0) %}
+<span class="dialoghsm-stat-pill" style="background: {{ color }}22; color: {{ v > 0 ? color : 'var(--text-helper)' }};">{{ v }}</span>
 {% endmacro %}

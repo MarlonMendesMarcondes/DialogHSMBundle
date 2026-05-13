@@ -324,4 +324,32 @@ class MessageLogRepository extends CommonRepository
             $toDelete -= $deleted;
         }
     }
+
+    /**
+     * Retorna os últimos 50 disparos agrupados por (template, campaign_id, data).
+     *
+     * @return array<int, array{template_name: string, campaign_id: int|null, date: string, total: int, sent: int, delivered: int, read: int, failed: int, dlq: int}>
+     */
+    public function getGroupedDispatches(int $limit = 50): array
+    {
+        $conn      = $this->getEntityManager()->getConnection();
+        $tableName = $this->getEntityManager()->getClassMetadata(MessageLog::class)->getTableName();
+
+        return $conn->fetchAllAssociative(
+            "SELECT
+                template_name,
+                campaign_id,
+                DATE(date_sent)                                    AS date,
+                COUNT(*)                                           AS total,
+                SUM(status = 'sent')                               AS sent,
+                SUM(status = 'delivered')                          AS delivered,
+                SUM(status = 'read')                               AS `read`,
+                SUM(status = 'failed')                             AS failed,
+                SUM(status = 'dlq')                                AS dlq
+             FROM `{$tableName}`
+             GROUP BY template_name, campaign_id, DATE(date_sent)
+             ORDER BY DATE(date_sent) DESC, template_name ASC
+             LIMIT {$limit}"
+        );
+    }
 }
