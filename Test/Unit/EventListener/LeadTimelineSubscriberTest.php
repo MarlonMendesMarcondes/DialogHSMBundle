@@ -29,11 +29,21 @@ class LeadTimelineSubscriberTest extends TestCase
         $this->subscriber = new LeadTimelineSubscriber($this->repository, $this->translator);
     }
 
+    /** Retorna um allStats vazio para todos os 5 status. */
+    private function emptyAllStats(): array
+    {
+        return array_fill_keys(
+            [MessageLog::STATUS_SENT, MessageLog::STATUS_DELIVERED, MessageLog::STATUS_READ,
+             MessageLog::STATUS_FAILED, MessageLog::STATUS_DLQ],
+            ['total' => 0, 'results' => []]
+        );
+    }
+
     private function makeEvent(
         bool $applicable = true,
         ?int $leadId = 42,
         bool $engagementCount = false,
-        array $stats = ['total' => 0, 'results' => []]
+        array $allStats = []
     ): LeadTimelineEvent&MockObject {
         $event = $this->getMockBuilder(LeadTimelineEvent::class)
             ->disableOriginalConstructor()
@@ -45,7 +55,9 @@ class LeadTimelineSubscriberTest extends TestCase
         $event->method('isEngagementCount')->willReturn($engagementCount);
         $event->method('getQueryOptions')->willReturn(['paginated' => true, 'limit' => 25, 'start' => 0]);
 
-        $this->repository->method('getLogsForTimeline')->willReturn($stats);
+        $this->repository->method('getAllLogsForTimeline')->willReturn(
+            empty($allStats) ? $this->emptyAllStats() : $allStats
+        );
 
         return $event;
     }
@@ -71,11 +83,8 @@ class LeadTimelineSubscriberTest extends TestCase
         $event = $this->makeEvent(applicable: false);
 
         $expectedTypes = [
-            'dialoghsm.sent',
-            'dialoghsm.delivered',
-            'dialoghsm.read',
-            'dialoghsm.failed',
-            'dialoghsm.dlq',
+            'dialoghsm.sent', 'dialoghsm.delivered', 'dialoghsm.read',
+            'dialoghsm.failed', 'dialoghsm.dlq',
         ];
 
         $event->expects($this->exactly(5))
@@ -96,7 +105,7 @@ class LeadTimelineSubscriberTest extends TestCase
     {
         $event = $this->makeEvent(applicable: false);
 
-        $this->repository->expects($this->never())->method('getLogsForTimeline');
+        $this->repository->expects($this->never())->method('getAllLogsForTimeline');
 
         $this->subscriber->onTimelineGenerate($event);
     }
@@ -105,7 +114,7 @@ class LeadTimelineSubscriberTest extends TestCase
     {
         $event = $this->makeEvent(applicable: true, leadId: null);
 
-        $this->repository->expects($this->never())->method('getLogsForTimeline');
+        $this->repository->expects($this->never())->method('getAllLogsForTimeline');
 
         $this->subscriber->onTimelineGenerate($event);
     }
@@ -114,10 +123,9 @@ class LeadTimelineSubscriberTest extends TestCase
     // onTimelineGenerate — counter
     // =========================================================================
 
-    public function testOnTimelineGenerateAddsToCounterForEachApplicableStatus(): void
+    public function testOnTimelineGenerateAddsToCounterForEachStatus(): void
     {
-        $stats = ['total' => 3, 'results' => []];
-        $event = $this->makeEvent(applicable: true, leadId: 42, stats: $stats);
+        $event = $this->makeEvent(applicable: true, leadId: 42);
 
         $event->expects($this->exactly(5))->method('addToCounter');
 
@@ -130,11 +138,14 @@ class LeadTimelineSubscriberTest extends TestCase
 
     public function testOnTimelineGenerateSkipsAddEventWhenEngagementCount(): void
     {
-        $stats = ['total' => 2, 'results' => [
+        $allStats = $this->emptyAllStats();
+        $allStats[MessageLog::STATUS_SENT] = ['total' => 1, 'results' => [
             ['id' => 1, 'template_name' => 'tpl', 'phone_number' => '+55119', 'status' => 'sent',
-             'error_message' => null, 'campaign_id' => null, 'sender_name' => 'num', 'date_sent' => new \DateTime()],
+             'error_message' => null, 'campaign_id' => null, 'sender_name' => 'num',
+             'date_sent' => new \DateTime(), 'date_delivered' => null, 'date_read' => null],
         ]];
-        $event = $this->makeEvent(applicable: true, leadId: 42, engagementCount: true, stats: $stats);
+
+        $event = $this->makeEvent(applicable: true, leadId: 42, engagementCount: true, allStats: $allStats);
 
         $event->expects($this->never())->method('addEvent');
 
@@ -148,11 +159,12 @@ class LeadTimelineSubscriberTest extends TestCase
     public function testOnTimelineGenerateAddsEventWithCorrectStructure(): void
     {
         $dateSent = new \DateTime('2026-01-15 10:00:00');
-        $stats    = ['total' => 1, 'results' => [
+        $allStats = $this->emptyAllStats();
+        $allStats[MessageLog::STATUS_SENT] = ['total' => 1, 'results' => [
             ['id' => 7, 'template_name' => 'first_welcome', 'phone_number' => '+5511999999999',
              'status' => MessageLog::STATUS_SENT, 'error_message' => null,
-             'campaign_id' => 3, 'sender_name' => 'Sandbox', 'date_sent' => $dateSent,
-             'date_delivered' => null, 'date_read' => null],
+             'campaign_id' => 3, 'sender_name' => 'Sandbox',
+             'date_sent' => $dateSent, 'date_delivered' => null, 'date_read' => null],
         ]];
 
         $event = $this->getMockBuilder(LeadTimelineEvent::class)
@@ -163,7 +175,7 @@ class LeadTimelineSubscriberTest extends TestCase
         $event->method('getLeadId')->willReturn(42);
         $event->method('isEngagementCount')->willReturn(false);
         $event->method('getQueryOptions')->willReturn(['paginated' => true, 'limit' => 25, 'start' => 0]);
-        $this->repository->method('getLogsForTimeline')->willReturn($stats);
+        $this->repository->method('getAllLogsForTimeline')->willReturn($allStats);
 
         $event->expects($this->once())
             ->method('addEvent')
@@ -184,7 +196,8 @@ class LeadTimelineSubscriberTest extends TestCase
     {
         $dateSent      = new \DateTime('2026-01-15 10:00:00');
         $dateDelivered = new \DateTime('2026-01-15 10:05:00');
-        $stats         = ['total' => 1, 'results' => [
+        $allStats      = $this->emptyAllStats();
+        $allStats[MessageLog::STATUS_DELIVERED] = ['total' => 1, 'results' => [
             ['id' => 8, 'template_name' => 'welcome', 'phone_number' => '+55119',
              'status' => MessageLog::STATUS_DELIVERED, 'error_message' => null,
              'campaign_id' => null, 'sender_name' => 'num',
@@ -199,7 +212,7 @@ class LeadTimelineSubscriberTest extends TestCase
         $event->method('getLeadId')->willReturn(10);
         $event->method('isEngagementCount')->willReturn(false);
         $event->method('getQueryOptions')->willReturn(['paginated' => true, 'limit' => 25, 'start' => 0]);
-        $this->repository->method('getLogsForTimeline')->willReturn($stats);
+        $this->repository->method('getAllLogsForTimeline')->willReturn($allStats);
 
         $event->expects($this->once())
             ->method('addEvent')
@@ -210,9 +223,10 @@ class LeadTimelineSubscriberTest extends TestCase
 
     public function testOnTimelineGenerateUsesDateReadTimestampForReadStatus(): void
     {
-        $dateSent  = new \DateTime('2026-01-15 10:00:00');
-        $dateRead  = new \DateTime('2026-01-15 10:10:00');
-        $stats     = ['total' => 1, 'results' => [
+        $dateSent = new \DateTime('2026-01-15 10:00:00');
+        $dateRead = new \DateTime('2026-01-15 10:10:00');
+        $allStats = $this->emptyAllStats();
+        $allStats[MessageLog::STATUS_READ] = ['total' => 1, 'results' => [
             ['id' => 9, 'template_name' => 'welcome', 'phone_number' => '+55119',
              'status' => MessageLog::STATUS_READ, 'error_message' => null,
              'campaign_id' => null, 'sender_name' => 'num',
@@ -227,7 +241,7 @@ class LeadTimelineSubscriberTest extends TestCase
         $event->method('getLeadId')->willReturn(10);
         $event->method('isEngagementCount')->willReturn(false);
         $event->method('getQueryOptions')->willReturn(['paginated' => true, 'limit' => 25, 'start' => 0]);
-        $this->repository->method('getLogsForTimeline')->willReturn($stats);
+        $this->repository->method('getAllLogsForTimeline')->willReturn($allStats);
 
         $event->expects($this->once())
             ->method('addEvent')
@@ -238,10 +252,12 @@ class LeadTimelineSubscriberTest extends TestCase
 
     public function testOnTimelineGenerateUsesEventTypeNameWhenTemplateNameEmpty(): void
     {
-        $stats = ['total' => 1, 'results' => [
+        $allStats = $this->emptyAllStats();
+        $allStats[MessageLog::STATUS_FAILED] = ['total' => 1, 'results' => [
             ['id' => 9, 'template_name' => '', 'phone_number' => '+55119',
              'status' => MessageLog::STATUS_FAILED, 'error_message' => 'timeout',
-             'campaign_id' => null, 'sender_name' => 'num', 'date_sent' => new \DateTime()],
+             'campaign_id' => null, 'sender_name' => 'num',
+             'date_sent' => new \DateTime(), 'date_delivered' => null, 'date_read' => null],
         ]];
 
         $event = $this->getMockBuilder(LeadTimelineEvent::class)
@@ -252,14 +268,26 @@ class LeadTimelineSubscriberTest extends TestCase
         $event->method('getLeadId')->willReturn(5);
         $event->method('isEngagementCount')->willReturn(false);
         $event->method('getQueryOptions')->willReturn(['paginated' => true, 'limit' => 25, 'start' => 0]);
-        $this->repository->method('getLogsForTimeline')->willReturn($stats);
+        $this->repository->method('getAllLogsForTimeline')->willReturn($allStats);
 
         $event->expects($this->once())
             ->method('addEvent')
             ->with($this->callback(function (array $e): bool {
-                // eventLabel falls back to eventTypeName (translation key returned as-is by mock)
                 return 'dialoghsm.log.status.failed' === $e['eventLabel'];
             }));
+
+        $this->subscriber->onTimelineGenerate($event);
+    }
+
+    // =========================================================================
+    // getAllLogsForTimeline é chamado apenas uma vez por request
+    // =========================================================================
+
+    public function testOnTimelineGenerateCallsRepositoryOnlyOnce(): void
+    {
+        $event = $this->makeEvent(applicable: true, leadId: 42);
+
+        $this->repository->expects($this->once())->method('getAllLogsForTimeline');
 
         $this->subscriber->onTimelineGenerate($event);
     }

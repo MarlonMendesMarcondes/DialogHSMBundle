@@ -11,6 +11,8 @@ use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Security\Core\Exception\AccessDeniedException;
+use Symfony\Contracts\Cache\CacheInterface;
+use Symfony\Contracts\Cache\ItemInterface;
 
 class MessageLogControllerTest extends TestCase
 {
@@ -59,6 +61,16 @@ class MessageLogControllerTest extends TestCase
             $prop = new \ReflectionProperty(\Mautic\CoreBundle\Controller\CommonController::class, 'coreParametersHelper');
             $prop->setValue($controller, $params);
         }
+
+        // Cache pass-through: executa o callback diretamente, sem armazenar.
+        // Isso garante que os testes continuem verificando as chamadas ao repositório.
+        $item  = $this->createMock(ItemInterface::class);
+        $item->method('expiresAfter')->willReturnSelf();
+        $cache = $this->createMock(CacheInterface::class);
+        $cache->method('get')->willReturnCallback(
+            static fn (string $key, callable $callback) => $callback($item)
+        );
+        $controller->setCache($cache);
 
         return $controller;
     }
@@ -328,6 +340,123 @@ class MessageLogControllerTest extends TestCase
         $controller->dashboardAction(Request::create('/dashboard', 'GET', ['days' => '99']), $this->repo);
 
         $this->assertSame(7, $capturedArgs['viewParameters']['chartDays']);
+    }
+
+    // =========================================================================
+    // Cache — verifica que o cache protege as queries do repositório
+    // =========================================================================
+
+    /**
+     * Cache quente: cache->get() retorna valor direto sem invocar callback.
+     * Repositório NÃO deve ser chamado.
+     */
+    public function testDashboardCacheHitSkipsRepositoryQueries(): void
+    {
+        $methods = ['isCsrfTokenValid', 'postActionRedirect', 'delegateView', 'generateUrl'];
+        $controller = $this->getMockBuilder(MessageLogController::class)
+            ->disableOriginalConstructor()
+            ->onlyMethods($methods)
+            ->getMock();
+
+        $params = $this->createMock(CoreParametersHelper::class);
+        $params->method('get')->willReturn('UTC');
+        $prop = new \ReflectionProperty(\Mautic\CoreBundle\Controller\CommonController::class, 'coreParametersHelper');
+        $prop->setValue($controller, $params);
+
+        // Cache quente: retorna dado fixo sem chamar o callback
+        $cachedStats      = ['total' => 5, 'queued' => 0, 'sent' => 5, 'delivered' => 3, 'read' => 1, 'failed' => 0, 'dlq' => 0];
+        $cachedDispatches = [['template_name' => 'cached_tpl', 'campaign_id' => null, 'date' => '2026-01-01', 'total' => 5, 'sent_plus' => 5, 'delivered_plus' => 3, 'read_count' => 1, 'failed' => 0, 'dlq' => 0]];
+
+        $cache = $this->createMock(CacheInterface::class);
+        $cache->method('get')->willReturnCallback(
+            static function (string $key) use ($cachedStats, $cachedDispatches): mixed {
+                if (str_contains($key, 'dispatches')) {
+                    return $cachedDispatches;
+                }
+                if (str_contains($key, 'chart')) {
+                    return [];
+                }
+                return $cachedStats;
+            }
+        );
+        $controller->setCache($cache);
+
+        // Repositório NÃO deve ser chamado nenhuma vez
+        $this->repo->expects($this->never())->method('getStatsByPeriod');
+        $this->repo->expects($this->never())->method('getChartData');
+        $this->repo->expects($this->never())->method('getGroupedDispatches');
+
+        $controller->method('delegateView')->willReturn(new Response());
+        $controller->method('generateUrl')->willReturn('/');
+
+        $controller->dashboardAction(Request::create('/dashboard'), $this->repo);
+    }
+
+    /**
+     * Cache frio: cache->get() invoca o callback.
+     * Repositório DEVE ser chamado exatamente uma vez por query.
+     */
+    public function testDashboardCacheMissCallsRepositoryOnce(): void
+    {
+        $controller = $this->makeController([], withParams: true);
+
+        // makeController já injeta cache pass-through (chama o callback)
+        $this->repo->expects($this->exactly(2))->method('getStatsByPeriod')->willReturn(
+            ['total' => 0, 'queued' => 0, 'sent' => 0, 'delivered' => 0, 'read' => 0, 'failed' => 0, 'dlq' => 0]
+        );
+        $this->repo->expects($this->once())->method('getChartData')->willReturn([]);
+        $this->repo->expects($this->once())->method('getGroupedDispatches')->willReturn([]);
+
+        $controller->method('delegateView')->willReturn(new Response());
+        $controller->method('generateUrl')->willReturn('/');
+
+        $controller->dashboardAction(Request::create('/dashboard'), $this->repo);
+    }
+
+    /**
+     * Verifica que as chaves de cache contêm o slot horário para evitar stale cross-hour.
+     */
+    public function testDashboardCacheKeysContainHourSlot(): void
+    {
+        $methods = ['isCsrfTokenValid', 'postActionRedirect', 'delegateView', 'generateUrl'];
+        $controller = $this->getMockBuilder(MessageLogController::class)
+            ->disableOriginalConstructor()
+            ->onlyMethods($methods)
+            ->getMock();
+
+        $params = $this->createMock(CoreParametersHelper::class);
+        $params->method('get')->willReturn('UTC');
+        $prop = new \ReflectionProperty(\Mautic\CoreBundle\Controller\CommonController::class, 'coreParametersHelper');
+        $prop->setValue($controller, $params);
+
+        $capturedKeys = [];
+        $item         = $this->createMock(ItemInterface::class);
+        $item->method('expiresAfter')->willReturnSelf();
+        $cache = $this->createMock(CacheInterface::class);
+        $cache->method('get')->willReturnCallback(
+            static function (string $key, callable $callback) use (&$capturedKeys, $item): mixed {
+                $capturedKeys[] = $key;
+                return $callback($item);
+            }
+        );
+        $controller->setCache($cache);
+
+        $this->repo->method('getStatsByPeriod')->willReturn(
+            ['total' => 0, 'queued' => 0, 'sent' => 0, 'delivered' => 0, 'read' => 0, 'failed' => 0, 'dlq' => 0]
+        );
+        $this->repo->method('getChartData')->willReturn([]);
+        $this->repo->method('getGroupedDispatches')->willReturn([]);
+
+        $controller->method('delegateView')->willReturn(new Response());
+        $controller->method('generateUrl')->willReturn('/');
+
+        $controller->dashboardAction(Request::create('/dashboard'), $this->repo);
+
+        $expectedSlot = (new \DateTime())->format('YmdH');
+        foreach ($capturedKeys as $key) {
+            $this->assertStringContainsString($expectedSlot, $key, "Chave '{$key}' não contém o slot horário");
+        }
+        $this->assertCount(4, $capturedKeys, 'Devem haver exatamente 4 chaves de cache');
     }
 
     public function testPurgeQueuedPostTrimsWhitespaceFromFilters(): void

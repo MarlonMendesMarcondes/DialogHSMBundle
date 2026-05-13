@@ -340,36 +340,114 @@ class MessageLogRepository extends CommonRepository
     }
 
     /**
-     * Retorna registros de um lead filtrados por status para a linha do tempo do contato.
-     * Quando $options['paginated'] = true retorna ['total' => int, 'results' => array[]].
+     * Retorna todos os eventos de timeline de um lead em UMA query,
+     * divididos por status em PHP. Evita os 10 round-trips do método
+     * anterior (2 por status × 5 status = COUNT + SELECT cada).
      *
-     * @return array<string,mixed>
+     * @return array<string, array{total: int, results: array[]}>
      */
-    public function getLogsForTimeline(int $leadId, array $options, string $status): array
+    public function getAllLogsForTimeline(int $leadId, array $options): array
     {
         $conn      = $this->getEntityManager()->getConnection();
         $tableName = $this->getEntityManager()->getClassMetadata(MessageLog::class)->getTableName();
 
-        $query = $conn->createQueryBuilder()
-            ->from($tableName, 'ml')
+        $qb = $conn->createQueryBuilder()
             ->select('ml.id, ml.template_name, ml.phone_number, ml.status, ml.error_message, ml.campaign_id, ml.sender_name, ml.date_sent, ml.date_delivered, ml.date_read, ml.lead_id')
-            ->andWhere('ml.lead_id = :leadId')
+            ->from($tableName, 'ml')
+            ->where('ml.lead_id = :leadId')
             ->setParameter('leadId', $leadId);
 
-        [$timestampCol, $dateTimeCol] = match ($status) {
-            MessageLog::STATUS_DELIVERED => ['ml.date_delivered', 'date_delivered'],
-            MessageLog::STATUS_READ      => ['ml.date_read',      'date_read'],
-            default                      => ['ml.date_sent',      'date_sent'],
-        };
+        if (!empty($options['fromDate'])) {
+            $qb->andWhere('ml.date_sent >= :dateFrom')
+               ->setParameter('dateFrom', $options['fromDate']->format('Y-m-d H:i:s'));
+        }
+        if (!empty($options['toDate'])) {
+            $qb->andWhere('ml.date_sent <= :dateTo')
+               ->setParameter('dateTo', $options['toDate']->format('Y-m-d H:i:s'));
+        }
 
-        match ($status) {
-            MessageLog::STATUS_SENT      => $query->andWhere("ml.status IN ('sent', 'delivered', 'read')"),
-            MessageLog::STATUS_DELIVERED => $query->andWhere('ml.date_delivered IS NOT NULL'),
-            MessageLog::STATUS_READ      => $query->andWhere('ml.date_read IS NOT NULL'),
-            default                      => $query->andWhere('ml.status = :status')->setParameter('status', $status),
-        };
+        $allRows = $qb->executeQuery()->fetchAllAssociative();
 
-        return $this->getTimelineResults($query, $options, 'ml.template_name', $timestampCol, [], [$dateTimeCol]);
+        // Converter colunas de data para \DateTime (igual ao TimelineTrait)
+        foreach ($allRows as &$row) {
+            foreach (['date_sent', 'date_delivered', 'date_read'] as $col) {
+                if (!empty($row[$col]) && !($row[$col] instanceof \DateTimeInterface)) {
+                    $dt       = new \Mautic\CoreBundle\Helper\DateTimeHelper($row[$col], 'Y-m-d H:i:s', 'UTC');
+                    $row[$col] = $dt->getLocalDateTime();
+                }
+            }
+        }
+        unset($row);
+
+        // Separar em buckets por status (mesmas regras do método anterior)
+        $buckets = [
+            MessageLog::STATUS_SENT      => [],
+            MessageLog::STATUS_DELIVERED => [],
+            MessageLog::STATUS_READ      => [],
+            MessageLog::STATUS_FAILED    => [],
+            MessageLog::STATUS_DLQ       => [],
+        ];
+
+        foreach ($allRows as $row) {
+            if (in_array($row['status'], ['sent', 'delivered', 'read'], true)) {
+                $buckets[MessageLog::STATUS_SENT][] = $row;
+            }
+            if (!empty($row['date_delivered'])) {
+                $buckets[MessageLog::STATUS_DELIVERED][] = $row;
+            }
+            if (!empty($row['date_read'])) {
+                $buckets[MessageLog::STATUS_READ][] = $row;
+            }
+            if (MessageLog::STATUS_FAILED === $row['status']) {
+                $buckets[MessageLog::STATUS_FAILED][] = $row;
+            }
+            if (MessageLog::STATUS_DLQ === $row['status']) {
+                $buckets[MessageLog::STATUS_DLQ][] = $row;
+            }
+        }
+
+        // Ordenar cada bucket pelo timestamp relevante e paginar
+        $limit      = !empty($options['limit']) ? (int) $options['limit'] : null;
+        $start      = !empty($options['start']) ? (int) $options['start'] : 0;
+        $isPaginated = !empty($options['paginated']);
+
+        $result = [];
+        foreach ($buckets as $status => $rows) {
+            usort($rows, static function (array $a, array $b) use ($status): int {
+                $colA = match ($status) {
+                    MessageLog::STATUS_DELIVERED => $a['date_delivered'],
+                    MessageLog::STATUS_READ      => $a['date_read'],
+                    default                      => $a['date_sent'],
+                };
+                $colB = match ($status) {
+                    MessageLog::STATUS_DELIVERED => $b['date_delivered'],
+                    MessageLog::STATUS_READ      => $b['date_read'],
+                    default                      => $b['date_sent'],
+                };
+
+                // \DateTime ou null — DESC
+                if ($colA === $colB) {
+                    return 0;
+                }
+                if (null === $colA) {
+                    return 1;
+                }
+                if (null === $colB) {
+                    return -1;
+                }
+
+                return $colB <=> $colA;
+            });
+
+            $total   = count($rows);
+            $sliced  = $limit !== null ? array_slice($rows, $start, $limit) : array_slice($rows, $start);
+
+            $result[$status] = $isPaginated
+                ? ['total' => $total, 'results' => $sliced]
+                : $sliced;
+        }
+
+        return $result;
     }
 
     /**

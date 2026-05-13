@@ -11,21 +11,31 @@ use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Integration\DialogHSMIntegration;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Contracts\Cache\CacheInterface;
+use Symfony\Contracts\Cache\ItemInterface;
 use Symfony\Contracts\Service\Attribute\Required;
 
 class MessageLogController extends FormController
 {
-    private const DEFAULT_MAX_LOGS = 100_000;
-    private const PAGE_LIMIT       = 50;
+    private const DEFAULT_MAX_LOGS  = 100_000;
+    private const PAGE_LIMIT        = 50;
+    private const DASHBOARD_CACHE_TTL = 60;
 
     private const FILTER_KEYS = ['status', 'dateFrom', 'dateTo', 'senderName', 'contact', 'templateName'];
 
     private IntegrationsHelper $integrationsHelper;
+    private CacheInterface $cache;
 
     #[Required]
     public function setIntegrationsHelper(IntegrationsHelper $integrationsHelper): void
     {
         $this->integrationsHelper = $integrationsHelper;
+    }
+
+    #[Required]
+    public function setCache(CacheInterface $cache): void
+    {
+        $this->cache = $cache;
     }
 
     private function getMaxLogs(): int
@@ -51,10 +61,45 @@ class MessageLogController extends FormController
         $from24h = (clone $now)->modify('-24 hours');
         $from7d  = (clone $now)->modify('-7 days')->setTime(0, 0, 0);
 
-        $stats24h   = $messageLogRepository->getStatsByPeriod($from24h);
-        $stats7d    = $messageLogRepository->getStatsByPeriod($from7d);
-        $chartRaw   = $messageLogRepository->getChartData($chartDays);
-        $dispatches = $messageLogRepository->getGroupedDispatches();
+        // Chave inclui hora atual para que o cache expire organicamente a cada 60s
+        // e o slot horário garante que não haja stale excessivo entre janelas.
+        $hourSlot = $now->format('YmdH');
+
+        $stats24h = $this->cache->get(
+            "dialoghsm.dashboard.stats24h.{$hourSlot}",
+            function (ItemInterface $item) use ($messageLogRepository, $from24h): array {
+                $item->expiresAfter(self::DASHBOARD_CACHE_TTL);
+
+                return $messageLogRepository->getStatsByPeriod($from24h);
+            }
+        );
+
+        $stats7d = $this->cache->get(
+            "dialoghsm.dashboard.stats7d.{$hourSlot}",
+            function (ItemInterface $item) use ($messageLogRepository, $from7d): array {
+                $item->expiresAfter(self::DASHBOARD_CACHE_TTL);
+
+                return $messageLogRepository->getStatsByPeriod($from7d);
+            }
+        );
+
+        $chartRaw = $this->cache->get(
+            "dialoghsm.dashboard.chart.{$chartDays}.{$hourSlot}",
+            function (ItemInterface $item) use ($messageLogRepository, $chartDays): array {
+                $item->expiresAfter(self::DASHBOARD_CACHE_TTL);
+
+                return $messageLogRepository->getChartData($chartDays);
+            }
+        );
+
+        $dispatches = $this->cache->get(
+            "dialoghsm.dashboard.dispatches.{$hourSlot}",
+            function (ItemInterface $item) use ($messageLogRepository): array {
+                $item->expiresAfter(self::DASHBOARD_CACHE_TTL);
+
+                return $messageLogRepository->getGroupedDispatches();
+            }
+        );
 
         // Prepara dados para Chart.js
         $labels   = array_keys($chartRaw);

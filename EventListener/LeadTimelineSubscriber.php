@@ -36,20 +36,9 @@ class LeadTimelineSubscriber implements EventSubscriberInterface
 
     public function onTimelineGenerate(LeadTimelineEvent $event): void
     {
+        // Registrar todos os tipos antes de verificar aplicabilidade
         foreach (self::STATUS_CONFIG as $status => $cfg) {
-            $this->addEvents($event, $status, $cfg['icon']);
-        }
-    }
-
-    private function addEvents(LeadTimelineEvent $event, string $status, string $icon): void
-    {
-        $eventTypeKey  = 'dialoghsm.'.$status;
-        $eventTypeName = $this->translator->trans('dialoghsm.log.status.'.$status);
-
-        $event->addEventType($eventTypeKey, $eventTypeName);
-
-        if (!$event->isApplicable($eventTypeKey)) {
-            return;
+            $event->addEventType('dialoghsm.'.$status, $this->translator->trans('dialoghsm.log.status.'.$status));
         }
 
         $leadId = $event->getLeadId();
@@ -57,32 +46,48 @@ class LeadTimelineSubscriber implements EventSubscriberInterface
             return;
         }
 
-        $stats = $this->repository->getLogsForTimeline($leadId, $event->getQueryOptions(), $status);
+        $applicableStatuses = array_filter(
+            array_keys(self::STATUS_CONFIG),
+            fn (string $s) => $event->isApplicable('dialoghsm.'.$s)
+        );
 
-        $event->addToCounter($eventTypeKey, $stats);
-
-        if ($event->isEngagementCount()) {
+        if (empty($applicableStatuses)) {
             return;
         }
 
-        foreach ($stats['results'] as $row) {
-            $timestamp = match ($status) {
-                MessageLog::STATUS_DELIVERED => $row['date_delivered'] ?? $row['date_sent'],
-                MessageLog::STATUS_READ      => $row['date_read']      ?? $row['date_sent'],
-                default                      => $row['date_sent'],
-            };
+        // Uma única query para todos os status aplicáveis
+        $allStats = $this->repository->getAllLogsForTimeline($leadId, $event->getQueryOptions());
 
-            $event->addEvent([
-                'event'           => $eventTypeKey,
-                'eventId'         => $eventTypeKey.$row['id'],
-                'eventLabel'      => $row['template_name'] ? $eventTypeName.' — '.$row['template_name'] : $eventTypeName,
-                'eventType'       => $eventTypeName,
-                'timestamp'       => $timestamp,
-                'extra'           => $row,
-                'contentTemplate' => '@DialogHSM/Timeline/whatsapp_message.html.twig',
-                'icon'            => $icon,
-                'contactId'       => $leadId,
-            ]);
+        foreach (self::STATUS_CONFIG as $status => $cfg) {
+            $eventTypeKey  = 'dialoghsm.'.$status;
+            $eventTypeName = $this->translator->trans('dialoghsm.log.status.'.$status);
+            $stats         = $allStats[$status] ?? ['total' => 0, 'results' => []];
+
+            $event->addToCounter($eventTypeKey, $stats);
+
+            if (!$event->isApplicable($eventTypeKey) || $event->isEngagementCount()) {
+                continue;
+            }
+
+            foreach ($stats['results'] as $row) {
+                $timestamp = match ($status) {
+                    MessageLog::STATUS_DELIVERED => $row['date_delivered'] ?? $row['date_sent'],
+                    MessageLog::STATUS_READ      => $row['date_read']      ?? $row['date_sent'],
+                    default                      => $row['date_sent'],
+                };
+
+                $event->addEvent([
+                    'event'           => $eventTypeKey,
+                    'eventId'         => $eventTypeKey.$row['id'],
+                    'eventLabel'      => $row['template_name'] ? $eventTypeName.' — '.$row['template_name'] : $eventTypeName,
+                    'eventType'       => $eventTypeName,
+                    'timestamp'       => $timestamp,
+                    'extra'           => $row,
+                    'contentTemplate' => '@DialogHSM/Timeline/whatsapp_message.html.twig',
+                    'icon'            => $cfg['icon'],
+                    'contactId'       => $leadId,
+                ]);
+            }
         }
     }
 }

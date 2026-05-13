@@ -1110,110 +1110,113 @@ class MessageLogRepositoryTest extends TestCase
     }
 
     // =========================================================================
-    // getLogsForTimeline
+    // getAllLogsForTimeline — consolidação em 1 query
     // =========================================================================
 
-    private function makeDbalQbMock(array $rows, int|string $total = 0): \Doctrine\DBAL\Query\QueryBuilder&\PHPUnit\Framework\MockObject\MockObject
+    private function makeDbalQbMockForTimeline(array $rows): \Doctrine\DBAL\Query\QueryBuilder&\PHPUnit\Framework\MockObject\MockObject
     {
-        $mockResult1 = $this->createMock(\Doctrine\DBAL\Result::class);
-        $mockResult1->method('fetchAllAssociative')->willReturn($rows);
-
-        $mockResult2 = $this->createMock(\Doctrine\DBAL\Result::class);
-        $mockResult2->method('fetchOne')->willReturn((string) $total);
-
-        $qb = $this->getMockBuilder(\Doctrine\DBAL\Query\QueryBuilder::class)
-            ->disableOriginalConstructor()
-            ->getMock();
-        $qb->method('from')->willReturnSelf();
-        $qb->method('select')->willReturnSelf();
-        $qb->method('andWhere')->willReturnSelf();
-        $qb->method('setParameter')->willReturnSelf();
-        $qb->method('setMaxResults')->willReturnSelf();
-        $qb->method('setFirstResult')->willReturnSelf();
-        $qb->method('orderBy')->willReturnSelf();
-        $qb->method('resetQueryParts')->willReturnSelf();
-        $qb->method('executeQuery')->willReturnOnConsecutiveCalls($mockResult1, $mockResult2);
-
-        return $qb;
-    }
-
-    public function testGetLogsForTimelineReturnsPaginatedResults(): void
-    {
-        $dateSent = '2026-01-15 10:00:00';
-        $rows     = [
-            ['id' => 1, 'template_name' => 'tpl_a', 'phone_number' => '+5511', 'status' => 'sent',
-             'error_message' => null, 'campaign_id' => 3, 'sender_name' => 'num', 'date_sent' => $dateSent],
-        ];
-
-        $qb = $this->makeDbalQbMock($rows, 1);
-        $this->mockConnection->method('createQueryBuilder')->willReturn($qb);
-
-        $result = $this->repository->getLogsForTimeline(42, ['paginated' => true, 'limit' => 25, 'start' => 0], 'sent');
-
-        $this->assertArrayHasKey('total', $result);
-        $this->assertArrayHasKey('results', $result);
-        $this->assertCount(1, $result['results']);
-        $this->assertSame('tpl_a', $result['results'][0]['template_name']);
-    }
-
-    public function testGetLogsForTimelineFiltersLeadIdForDeliveredStatus(): void
-    {
-        // 'delivered' uses date_delivered IS NOT NULL — no 'status' parameter
-        $qb = $this->makeDbalQbMock([], 0);
-        $this->mockConnection->method('createQueryBuilder')->willReturn($qb);
-
-        $qb->expects($this->once())
-            ->method('setParameter')
-            ->with('leadId', 99)
-            ->willReturnSelf();
-
-        $this->repository->getLogsForTimeline(99, ['paginated' => true, 'limit' => 25, 'start' => 0], 'delivered');
-    }
-
-    public function testGetLogsForTimelineFiltersStatusParameterForFailedStatus(): void
-    {
-        // 'failed' uses status = :status — parameter is set
-        $qb = $this->makeDbalQbMock([], 0);
-        $this->mockConnection->method('createQueryBuilder')->willReturn($qb);
-
-        $qb->expects($this->atLeastOnce())
-            ->method('setParameter')
-            ->with(
-                $this->logicalOr($this->equalTo('leadId'), $this->equalTo('status')),
-                $this->logicalOr($this->equalTo(7), $this->equalTo('failed'))
-            )
-            ->willReturnSelf();
-
-        $this->repository->getLogsForTimeline(7, ['paginated' => true, 'limit' => 25, 'start' => 0], 'failed');
-    }
-
-    public function testGetLogsForTimelineReturnsFlatArrayWhenNotPaginated(): void
-    {
-        $rows = [
-            ['id' => 5, 'template_name' => 'tpl_b', 'phone_number' => '+5522', 'status' => 'read',
-             'error_message' => null, 'campaign_id' => null, 'sender_name' => 'num',
-             'date_sent' => '2026-02-01 08:00:00', 'date_delivered' => null, 'date_read' => null],
-        ];
-
         $mockResult = $this->createMock(\Doctrine\DBAL\Result::class);
         $mockResult->method('fetchAllAssociative')->willReturn($rows);
 
         $qb = $this->getMockBuilder(\Doctrine\DBAL\Query\QueryBuilder::class)
             ->disableOriginalConstructor()
             ->getMock();
-        $qb->method('from')->willReturnSelf();
         $qb->method('select')->willReturnSelf();
+        $qb->method('from')->willReturnSelf();
+        $qb->method('where')->willReturnSelf();
         $qb->method('andWhere')->willReturnSelf();
         $qb->method('setParameter')->willReturnSelf();
+        $qb->method('orderBy')->willReturnSelf();
         $qb->method('executeQuery')->willReturn($mockResult);
 
+        return $qb;
+    }
+
+    public function testGetAllLogsForTimelineReturnsPaginatedResultsPerStatus(): void
+    {
+        $rows = [
+            ['id' => 1, 'template_name' => 'tpl', 'phone_number' => '+55', 'status' => 'sent',
+             'error_message' => null, 'campaign_id' => null, 'sender_name' => 'n',
+             'date_sent' => '2026-01-15 10:00:00', 'date_delivered' => null, 'date_read' => null],
+        ];
+
+        $qb = $this->makeDbalQbMockForTimeline($rows);
         $this->mockConnection->method('createQueryBuilder')->willReturn($qb);
 
-        $result = $this->repository->getLogsForTimeline(7, ['paginated' => false], 'read');
+        $result = $this->repository->getAllLogsForTimeline(42, ['paginated' => true, 'limit' => 25, 'start' => 0]);
 
-        $this->assertIsArray($result);
-        $this->assertArrayNotHasKey('total', $result);
-        $this->assertCount(1, $result);
-        $this->assertSame('tpl_b', $result[0]['template_name']);
+        $this->assertArrayHasKey('sent', $result);
+        $this->assertArrayHasKey('total', $result['sent']);
+        $this->assertArrayHasKey('results', $result['sent']);
+        $this->assertSame(1, $result['sent']['total']);
+        $this->assertCount(1, $result['sent']['results']);
+        $this->assertSame(0, $result['delivered']['total']);
+    }
+
+    public function testGetAllLogsForTimelineSplitsDeliveredByDateColumn(): void
+    {
+        $rows = [
+            ['id' => 2, 'template_name' => 'tpl', 'phone_number' => '+55', 'status' => 'delivered',
+             'error_message' => null, 'campaign_id' => null, 'sender_name' => 'n',
+             'date_sent' => '2026-01-15 10:00:00', 'date_delivered' => '2026-01-15 10:05:00', 'date_read' => null],
+        ];
+
+        $qb = $this->makeDbalQbMockForTimeline($rows);
+        $this->mockConnection->method('createQueryBuilder')->willReturn($qb);
+
+        $result = $this->repository->getAllLogsForTimeline(5, ['paginated' => true, 'limit' => 25, 'start' => 0]);
+
+        // aparece em 'sent' (status IN sent/delivered/read) E em 'delivered' (date_delivered IS NOT NULL)
+        $this->assertSame(1, $result['sent']['total']);
+        $this->assertSame(1, $result['delivered']['total']);
+        $this->assertSame(0, $result['read']['total']);
+    }
+
+    public function testGetAllLogsForTimelineSplitsReadByDateColumn(): void
+    {
+        $rows = [
+            ['id' => 3, 'template_name' => 'tpl', 'phone_number' => '+55', 'status' => 'read',
+             'error_message' => null, 'campaign_id' => null, 'sender_name' => 'n',
+             'date_sent' => '2026-01-15 10:00:00', 'date_delivered' => '2026-01-15 10:05:00',
+             'date_read' => '2026-01-15 10:10:00'],
+        ];
+
+        $qb = $this->makeDbalQbMockForTimeline($rows);
+        $this->mockConnection->method('createQueryBuilder')->willReturn($qb);
+
+        $result = $this->repository->getAllLogsForTimeline(5, ['paginated' => true, 'limit' => 25, 'start' => 0]);
+
+        $this->assertSame(1, $result['sent']['total']);
+        $this->assertSame(1, $result['delivered']['total']);
+        $this->assertSame(1, $result['read']['total']);
+    }
+
+    public function testGetAllLogsForTimelineIssuesOnlyOneDatabaseQuery(): void
+    {
+        $qb = $this->makeDbalQbMockForTimeline([]);
+        $this->mockConnection->expects($this->once())
+            ->method('createQueryBuilder')
+            ->willReturn($qb);
+
+        $this->repository->getAllLogsForTimeline(42, ['paginated' => true, 'limit' => 25, 'start' => 0]);
+    }
+
+    public function testGetAllLogsForTimelineReturnsFlatBucketsWhenNotPaginated(): void
+    {
+        $rows = [
+            ['id' => 4, 'template_name' => 'tpl', 'phone_number' => '+55', 'status' => 'failed',
+             'error_message' => 'err', 'campaign_id' => null, 'sender_name' => 'n',
+             'date_sent' => '2026-01-15 08:00:00', 'date_delivered' => null, 'date_read' => null],
+        ];
+
+        $qb = $this->makeDbalQbMockForTimeline($rows);
+        $this->mockConnection->method('createQueryBuilder')->willReturn($qb);
+
+        $result = $this->repository->getAllLogsForTimeline(7, ['paginated' => false]);
+
+        // Sem paginated, cada bucket é array plano (sem total/results)
+        $this->assertIsArray($result['failed']);
+        $this->assertArrayNotHasKey('total', $result['failed']);
+        $this->assertCount(1, $result['failed']);
     }
 }
