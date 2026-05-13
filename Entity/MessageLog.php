@@ -30,6 +30,8 @@ class MessageLog
     private ?string $apiResponse = null;
     private ?string $errorMessage = null;
     private ?\DateTimeInterface $dateSent = null;
+    private ?\DateTimeInterface $dateDelivered = null;
+    private ?\DateTimeInterface $dateRead = null;
 
     /**
      * @param ClassMetadata<self> $metadata
@@ -117,6 +119,18 @@ class MessageLog
         $builder
             ->createField('dateSent', Types::DATETIME_MUTABLE)
             ->columnName('date_sent')
+            ->build();
+
+        $builder
+            ->createField('dateDelivered', Types::DATETIME_MUTABLE)
+            ->columnName('date_delivered')
+            ->nullable()
+            ->build();
+
+        $builder
+            ->createField('dateRead', Types::DATETIME_MUTABLE)
+            ->columnName('date_read')
+            ->nullable()
             ->build();
     }
 
@@ -265,6 +279,30 @@ class MessageLog
     public function setDateSent(\DateTimeInterface $dateSent): self
     {
         $this->dateSent = $dateSent;
+
+        return $this;
+    }
+
+    public function getDateDelivered(): ?\DateTimeInterface
+    {
+        return $this->dateDelivered;
+    }
+
+    public function setDateDelivered(\DateTimeInterface $dateDelivered): self
+    {
+        $this->dateDelivered = $dateDelivered;
+
+        return $this;
+    }
+
+    public function getDateRead(): ?\DateTimeInterface
+    {
+        return $this->dateRead;
+    }
+
+    public function setDateRead(\DateTimeInterface $dateRead): self
+    {
+        $this->dateRead = $dateRead;
 
         return $this;
     }

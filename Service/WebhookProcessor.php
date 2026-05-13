@@ -58,6 +58,14 @@ class WebhookProcessor
         }
 
         $log->setStatus($status);
+
+        $now = new \DateTime();
+        if (MessageLog::STATUS_DELIVERED === $status) {
+            $log->setDateDelivered($now);
+        } elseif (MessageLog::STATUS_READ === $status) {
+            $log->setDateRead($now);
+        }
+
         $this->em->persist($log);
         $this->em->flush();
     }

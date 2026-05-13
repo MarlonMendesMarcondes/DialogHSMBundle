@@ -1156,33 +1156,43 @@ class MessageLogRepositoryTest extends TestCase
         $this->assertSame('tpl_a', $result['results'][0]['template_name']);
     }
 
-    public function testGetLogsForTimelineFiltersLeadIdAndStatus(): void
+    public function testGetLogsForTimelineFiltersLeadIdForDeliveredStatus(): void
     {
+        // 'delivered' uses date_delivered IS NOT NULL — no 'status' parameter
+        $qb = $this->makeDbalQbMock([], 0);
+        $this->mockConnection->method('createQueryBuilder')->willReturn($qb);
+
+        $qb->expects($this->once())
+            ->method('setParameter')
+            ->with('leadId', 99)
+            ->willReturnSelf();
+
+        $this->repository->getLogsForTimeline(99, ['paginated' => true, 'limit' => 25, 'start' => 0], 'delivered');
+    }
+
+    public function testGetLogsForTimelineFiltersStatusParameterForFailedStatus(): void
+    {
+        // 'failed' uses status = :status — parameter is set
         $qb = $this->makeDbalQbMock([], 0);
         $this->mockConnection->method('createQueryBuilder')->willReturn($qb);
 
         $qb->expects($this->atLeastOnce())
             ->method('setParameter')
             ->with(
-                $this->logicalOr(
-                    $this->equalTo('leadId'),
-                    $this->equalTo('status')
-                ),
-                $this->logicalOr(
-                    $this->equalTo(99),
-                    $this->equalTo('delivered')
-                )
+                $this->logicalOr($this->equalTo('leadId'), $this->equalTo('status')),
+                $this->logicalOr($this->equalTo(7), $this->equalTo('failed'))
             )
             ->willReturnSelf();
 
-        $this->repository->getLogsForTimeline(99, ['paginated' => true, 'limit' => 25, 'start' => 0], 'delivered');
+        $this->repository->getLogsForTimeline(7, ['paginated' => true, 'limit' => 25, 'start' => 0], 'failed');
     }
 
     public function testGetLogsForTimelineReturnsFlatArrayWhenNotPaginated(): void
     {
         $rows = [
             ['id' => 5, 'template_name' => 'tpl_b', 'phone_number' => '+5522', 'status' => 'read',
-             'error_message' => null, 'campaign_id' => null, 'sender_name' => 'num', 'date_sent' => '2026-02-01 08:00:00'],
+             'error_message' => null, 'campaign_id' => null, 'sender_name' => 'num',
+             'date_sent' => '2026-02-01 08:00:00', 'date_delivered' => null, 'date_read' => null],
         ];
 
         $mockResult = $this->createMock(\Doctrine\DBAL\Result::class);

@@ -352,13 +352,24 @@ class MessageLogRepository extends CommonRepository
 
         $query = $conn->createQueryBuilder()
             ->from($tableName, 'ml')
-            ->select('ml.id, ml.template_name, ml.phone_number, ml.status, ml.error_message, ml.campaign_id, ml.sender_name, ml.date_sent, ml.lead_id')
+            ->select('ml.id, ml.template_name, ml.phone_number, ml.status, ml.error_message, ml.campaign_id, ml.sender_name, ml.date_sent, ml.date_delivered, ml.date_read, ml.lead_id')
             ->andWhere('ml.lead_id = :leadId')
-            ->andWhere('ml.status = :status')
-            ->setParameter('leadId', $leadId)
-            ->setParameter('status', $status);
+            ->setParameter('leadId', $leadId);
 
-        return $this->getTimelineResults($query, $options, 'ml.template_name', 'ml.date_sent', [], ['date_sent']);
+        [$timestampCol, $dateTimeCol] = match ($status) {
+            MessageLog::STATUS_DELIVERED => ['ml.date_delivered', 'date_delivered'],
+            MessageLog::STATUS_READ      => ['ml.date_read',      'date_read'],
+            default                      => ['ml.date_sent',      'date_sent'],
+        };
+
+        match ($status) {
+            MessageLog::STATUS_SENT      => $query->andWhere("ml.status IN ('sent', 'delivered', 'read')"),
+            MessageLog::STATUS_DELIVERED => $query->andWhere('ml.date_delivered IS NOT NULL'),
+            MessageLog::STATUS_READ      => $query->andWhere('ml.date_read IS NOT NULL'),
+            default                      => $query->andWhere('ml.status = :status')->setParameter('status', $status),
+        };
+
+        return $this->getTimelineResults($query, $options, 'ml.template_name', $timestampCol, [], [$dateTimeCol]);
     }
 
     /**
@@ -391,7 +402,7 @@ class MessageLogRepository extends CommonRepository
                 SUM(status = 'dlq')                                            AS dlq
              FROM `{$tableName}`
              GROUP BY template_name, campaign_id, DATE(date_sent)
-             ORDER BY DATE(date_sent) DESC, template_name ASC
+             ORDER BY MAX(date_sent) DESC
              LIMIT {$limit}"
         );
     }

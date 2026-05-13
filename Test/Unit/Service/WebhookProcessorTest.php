@@ -407,6 +407,64 @@ class WebhookProcessorTest extends TestCase
     }
 
     // =========================================================================
+    // Timestamps de transição
+    // =========================================================================
+
+    public function testDeliveredTransitionSetsDateDelivered(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_SENT);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+        $this->em->method('flush');
+
+        $before = new \DateTime();
+
+        $this->processor->process('+5511999999999', $this->makePayload([
+            $this->makeStatusEntry('wamid.abc', 'delivered'),
+        ]));
+
+        $this->assertNotNull($log->getDateDelivered());
+        $this->assertGreaterThanOrEqual($before, $log->getDateDelivered());
+        $this->assertNull($log->getDateRead());
+    }
+
+    public function testReadTransitionSetsDateRead(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_DELIVERED);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+        $this->em->method('flush');
+
+        $before = new \DateTime();
+
+        $this->processor->process('+5511999999999', $this->makePayload([
+            $this->makeStatusEntry('wamid.abc', 'read'),
+        ]));
+
+        $this->assertNotNull($log->getDateRead());
+        $this->assertGreaterThanOrEqual($before, $log->getDateRead());
+        $this->assertNull($log->getDateDelivered());
+    }
+
+    public function testInvalidTransitionDoesNotSetTimestamp(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_READ);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+        $this->em->expects($this->never())->method('flush');
+
+        $this->processor->process('+5511999999999', $this->makePayload([
+            $this->makeStatusEntry('wamid.abc', 'delivered'),
+        ]));
+
+        $this->assertNull($log->getDateDelivered());
+        $this->assertNull($log->getDateRead());
+    }
+
+    // =========================================================================
     // Valor de retorno
     // =========================================================================
 
