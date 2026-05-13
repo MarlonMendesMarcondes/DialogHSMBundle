@@ -5,12 +5,15 @@ declare(strict_types=1);
 namespace MauticPlugin\DialogHSMBundle\Entity;
 
 use Mautic\CoreBundle\Entity\CommonRepository;
+use Mautic\LeadBundle\Entity\TimelineTrait;
 
 /**
  * @extends CommonRepository<MessageLog>
  */
 class MessageLogRepository extends CommonRepository
 {
+    use TimelineTrait;
+
     public function getTableAlias(): string
     {
         return 'dhml';
@@ -334,6 +337,28 @@ class MessageLogRepository extends CommonRepository
 
             $toDelete -= $deleted;
         }
+    }
+
+    /**
+     * Retorna registros de um lead filtrados por status para a linha do tempo do contato.
+     * Quando $options['paginated'] = true retorna ['total' => int, 'results' => array[]].
+     *
+     * @return array<string,mixed>
+     */
+    public function getLogsForTimeline(int $leadId, array $options, string $status): array
+    {
+        $conn      = $this->getEntityManager()->getConnection();
+        $tableName = $this->getEntityManager()->getClassMetadata(MessageLog::class)->getTableName();
+
+        $query = $conn->createQueryBuilder()
+            ->from($tableName, 'ml')
+            ->select('ml.id, ml.template_name, ml.phone_number, ml.status, ml.error_message, ml.campaign_id, ml.sender_name, ml.date_sent, ml.lead_id')
+            ->andWhere('ml.lead_id = :leadId')
+            ->andWhere('ml.status = :status')
+            ->setParameter('leadId', $leadId)
+            ->setParameter('status', $status);
+
+        return $this->getTimelineResults($query, $options, 'ml.template_name', 'ml.date_sent', [], ['date_sent']);
     }
 
     /**

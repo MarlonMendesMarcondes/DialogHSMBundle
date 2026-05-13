@@ -1,0 +1,29 @@
+{#
+  Variables: event, lead
+  event.extra contains: template_name, phone_number, sender_name, status, error_message, campaign_id
+#}
+{% set item = event.extra is defined ? event.extra : {} %}
+{% if item is not empty %}
+<dl class="dl-horizontal" style="margin-bottom: 0;">
+    {% if item.template_name is defined and item.template_name %}
+        <dt>{{ 'dialoghsm.log.template'|trans }}</dt>
+        <dd><code>{{ item.template_name }}</code></dd>
+    {% endif %}
+    {% if item.sender_name is defined and item.sender_name %}
+        <dt>{{ 'dialoghsm.log.sender'|trans }}</dt>
+        <dd>{{ item.sender_name }}</dd>
+    {% endif %}
+    {% if item.phone_number is defined and item.phone_number %}
+        <dt>{{ 'dialoghsm.log.phone'|trans }}</dt>
+        <dd>{{ item.phone_number }}</dd>
+    {% endif %}
+    {% if item.campaign_id is defined and item.campaign_id %}
+        <dt>{{ 'dialoghsm.log.campaign'|trans }}</dt>
+        <dd>#{{ item.campaign_id }}</dd>
+    {% endif %}
+    {% if item.error_message is defined and item.error_message %}
+        <dt>{{ 'dialoghsm.log.error'|trans }}</dt>
+        <dd class="text-danger small">{{ item.error_message }}</dd>
+    {% endif %}
+</dl>
+{% endif %}
