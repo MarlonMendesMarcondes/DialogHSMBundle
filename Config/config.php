@@ -17,6 +17,16 @@ return [
                 'path'       => '/dialoghsm/numbers/{objectAction}/{objectId}',
                 'controller' => 'MauticPlugin\DialogHSMBundle\Controller\WhatsAppNumberController::executeAction',
             ],
+            'mautic_dialoghsm_number_webhook_check' => [
+                'path'       => '/dialoghsm/numbers/{objectId}/webhook/check',
+                'controller' => 'MauticPlugin\DialogHSMBundle\Controller\WhatsAppNumberController::webhookCheckAction',
+                'methods'    => ['GET'],
+            ],
+            'mautic_dialoghsm_number_webhook_register' => [
+                'path'       => '/dialoghsm/numbers/{objectId}/webhook/register',
+                'controller' => 'MauticPlugin\DialogHSMBundle\Controller\WhatsAppNumberController::webhookRegisterAction',
+                'methods'    => ['POST'],
+            ],
             'mautic_dialoghsm_log_purge_queued' => [
                 'path'       => '/dialoghsm/logs/purge-queued',
                 'controller' => 'MauticPlugin\DialogHSMBundle\Controller\MessageLogController::purgeQueuedAction',

@@ -53,7 +53,89 @@
 {% block rightFormContent %}
 {{ form_row(form.isPublished) }}
 
+{% if isExisting and entity.apiKey is not empty %}
+<hr>
+<div class="panel panel-default">
+    <div class="panel-heading">
+        <h5 class="panel-title"><i class="ri-webhook-line"></i> {{ 'dialoghsm.number.webhook.title'|trans }}</h5>
+    </div>
+    <div class="panel-body">
+        <p class="small text-muted">{{ 'dialoghsm.number.webhook.description'|trans }}</p>
+
+        <div id="webhook-result" class="alert" style="display:none"></div>
+
+        <div class="btn-group btn-group-sm" style="display:flex; gap:6px; flex-wrap:wrap">
+            <button type="button" class="btn btn-default" id="btn-webhook-check">
+                <i class="ri-search-eye-line"></i> {{ 'dialoghsm.number.webhook.check'|trans }}
+            </button>
+            <button type="button" class="btn btn-primary" id="btn-webhook-register">
+                <i class="ri-link-m"></i> {{ 'dialoghsm.number.webhook.register'|trans }}
+            </button>
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <div class="hide">
     {{ form_rest(form) }}
 </div>
+
+{% if isExisting and entity.apiKey is not empty %}
+<script>
+(function () {
+    var checkUrl    = '{{ path('mautic_dialoghsm_number_webhook_check',    {'objectId': entity.getId()}) }}';
+    var registerUrl = '{{ path('mautic_dialoghsm_number_webhook_register', {'objectId': entity.getId()}) }}';
+    var resultDiv   = document.getElementById('webhook-result');
+
+    function showResult(html, type) {
+        resultDiv.className = 'alert alert-' + type;
+        resultDiv.innerHTML = html;
+        resultDiv.style.display = 'block';
+    }
+
+    function formatCheck(data) {
+        if (data.error) {
+            return '<strong>Erro:</strong> ' + data.error;
+        }
+        var html = '<strong>{{ 'dialoghsm.number.webhook.enabled'|trans }}:</strong> ' + (data.enabled ? '✓' : '✗') + '<br>';
+        var dests = data.destinations || [];
+        if (dests.length === 0) {
+            html += '<em>{{ 'dialoghsm.number.webhook.no_destinations'|trans }}</em>';
+        } else {
+            html += '<strong>{{ 'dialoghsm.number.webhook.destinations'|trans }}:</strong><ul style="margin:4px 0 0 0">';
+            dests.forEach(function (d) {
+                html += '<li><code>' + d.name + '</code>: ' + d.url + '</li>';
+            });
+            html += '</ul>';
+        }
+        return html;
+    }
+
+    document.getElementById('btn-webhook-check').addEventListener('click', function () {
+        showResult('<i class="ri-loader-line"></i> ...', 'info');
+        mQuery.ajax({ url: checkUrl, method: 'GET', dataType: 'json',
+            success: function (d) { showResult(formatCheck(d), d.error ? 'danger' : 'info'); },
+            error:   function (x) { showResult('HTTP ' + x.status, 'danger'); }
+        });
+    });
+
+    document.getElementById('btn-webhook-register').addEventListener('click', function () {
+        showResult('<i class="ri-loader-line"></i> ...', 'info');
+        mQuery.ajax({ url: registerUrl, method: 'POST', dataType: 'json',
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            success: function (d) {
+                if (d.success) {
+                    var msg = '✓ <strong>' + d.action + '</strong>';
+                    if (d.url) msg += '<br><code>' + d.url + '</code>';
+                    showResult(msg, 'success');
+                } else {
+                    showResult('<strong>Erro [' + d.action + ']:</strong> ' + d.message, 'danger');
+                }
+            },
+            error: function (x) { showResult('HTTP ' + x.status, 'danger'); }
+        });
+    });
+}());
+</script>
+{% endif %}
 {% endblock %}

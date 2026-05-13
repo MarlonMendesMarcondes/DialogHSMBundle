@@ -7,12 +7,23 @@ namespace MauticPlugin\DialogHSMBundle\Controller;
 use Mautic\CoreBundle\Controller\FormController;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
 use MauticPlugin\DialogHSMBundle\Model\WhatsAppNumberModel;
+use MauticPlugin\DialogHSMBundle\Service\MultiWebhookService;
+use Symfony\Contracts\Service\Attribute\Required;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 
 class WhatsAppNumberController extends FormController
 {
+    private MultiWebhookService $multiWebhookService;
+
+    #[Required]
+    public function setMultiWebhookService(MultiWebhookService $service): void
+    {
+        $this->multiWebhookService = $service;
+    }
+
     /**
      * @return JsonResponse|Response
      */
@@ -273,6 +284,46 @@ class WhatsAppNumberController extends FormController
         }
 
         return $this->postActionRedirect(array_merge($postActionVars, ['flashes' => $flashes]));
+    }
+
+    public function webhookCheckAction(int $objectId): JsonResponse
+    {
+        $model = $this->getModel('dialoghsm.whatsappnumber');
+        \assert($model instanceof WhatsAppNumberModel);
+        $entity = $model->getEntity($objectId);
+
+        if (null === $entity) {
+            return new JsonResponse(['error' => 'Number not found'], 404);
+        }
+
+        $result = $this->multiWebhookService->check($entity->getApiKey() ?? '');
+
+        return new JsonResponse($result);
+    }
+
+    public function webhookRegisterAction(Request $request, int $objectId): JsonResponse
+    {
+        if ('POST' !== $request->getMethod()) {
+            return new JsonResponse(['error' => 'Method not allowed'], 405);
+        }
+
+        $model = $this->getModel('dialoghsm.whatsappnumber');
+        \assert($model instanceof WhatsAppNumberModel);
+        $entity = $model->getEntity($objectId);
+
+        if (null === $entity) {
+            return new JsonResponse(['error' => 'Number not found'], 404);
+        }
+
+        $webhookUrl = $this->generateUrl(
+            'mautic_dialoghsm_webhook',
+            ['phoneNumber' => $entity->getPhoneNumber()],
+            UrlGeneratorInterface::ABSOLUTE_URL
+        );
+
+        $result = $this->multiWebhookService->register($entity->getApiKey() ?? '', $webhookUrl);
+
+        return new JsonResponse(array_merge($result, ['url' => $webhookUrl]));
     }
 
     protected function getModelName(): string
