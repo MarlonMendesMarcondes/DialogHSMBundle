@@ -20,6 +20,7 @@ use MauticPlugin\DialogHSMBundle\Migrations\Version_1_0_8;
 use MauticPlugin\DialogHSMBundle\Migrations\Version_1_1_0;
 use MauticPlugin\DialogHSMBundle\Migrations\Version_1_1_1;
 use MauticPlugin\DialogHSMBundle\Migrations\Version_1_2_0;
+use MauticPlugin\DialogHSMBundle\Migrations\Version_1_4_1;
 use Mautic\IntegrationsBundle\Migration\AbstractMigration;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
@@ -539,6 +540,41 @@ class MigrationIdempotencyTest extends TestCase
     }
 
     // =========================================================================
+    // Version_1_4_1 — adiciona date_delivered e date_read
+    // =========================================================================
+
+    public function testV141ApplicableWhenColumnAbsent(): void
+    {
+        $migration = $this->migration(Version_1_4_1::class);
+        $this->assertTrue($this->callProtected($migration, 'isApplicable', $this->schemaWithTable([])));
+    }
+
+    public function testV141NotApplicableWhenColumnPresent(): void
+    {
+        $migration = $this->migration(Version_1_4_1::class);
+        $this->assertFalse($this->callProtected($migration, 'isApplicable', $this->schemaWithTable(['date_delivered'])));
+    }
+
+    public function testV141NotApplicableWhenTableAbsent(): void
+    {
+        $migration = $this->migration(Version_1_4_1::class);
+        $this->assertFalse($this->callProtected($migration, 'isApplicable', $this->schemaWithoutTable()));
+    }
+
+    public function testV141SqlAddsDateDeliveredColumn(): void
+    {
+        $sql = implode(' ', $this->collectSql($this->migration(Version_1_4_1::class)));
+        $this->assertStringContainsStringIgnoringCase('ADD COLUMN IF NOT EXISTS', $sql);
+        $this->assertStringContainsString('date_delivered', $sql);
+    }
+
+    public function testV141SqlAddsDateReadColumn(): void
+    {
+        $sql = implode(' ', $this->collectSql($this->migration(Version_1_4_1::class)));
+        $this->assertStringContainsString('date_read', $sql);
+    }
+
+    // =========================================================================
     // Contrato geral: nenhuma migration gera SQL vazio
     // =========================================================================
 
@@ -568,6 +604,7 @@ class MigrationIdempotencyTest extends TestCase
             [Version_1_1_0::class],
             [Version_1_1_1::class],
             [Version_1_2_0::class],
+            [Version_1_4_1::class],
         ];
     }
 }

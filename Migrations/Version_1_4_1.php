@@ -30,7 +30,7 @@ class Version_1_4_1 extends AbstractMigration
     {
         $tableName = $this->concatPrefix('dialog_hsm_message_log');
 
-        $this->addSql("ALTER TABLE `{$tableName}` ADD COLUMN `date_delivered` DATETIME NULL DEFAULT NULL AFTER `date_sent`");
-        $this->addSql("ALTER TABLE `{$tableName}` ADD COLUMN `date_read` DATETIME NULL DEFAULT NULL AFTER `date_delivered`");
+        $this->addSql("ALTER TABLE `{$tableName}` ADD COLUMN IF NOT EXISTS `date_delivered` DATETIME NULL DEFAULT NULL AFTER `date_sent`");
+        $this->addSql("ALTER TABLE `{$tableName}` ADD COLUMN IF NOT EXISTS `date_read` DATETIME NULL DEFAULT NULL AFTER `date_delivered`");
     }
 }
