@@ -723,6 +723,81 @@ class MessageLogRepositoryTest extends TestCase
         $this->assertSame(1400, $result);
     }
 
+    public function testDeleteQueuedWithCampaignIdFilterAddsCampaignCondition(): void
+    {
+        $this->mockClassMetadata->method('getColumnName')->willReturnMap([
+            ['templateName', 'template_name'],
+            ['senderName', 'sender_name'],
+            ['campaignId', 'campaign_id'],
+        ]);
+
+        $this->mockConnection
+            ->expects($this->once())
+            ->method('executeStatement')
+            ->with(
+                $this->logicalAnd(
+                    $this->stringContains('status = :status'),
+                    $this->stringContains('`campaign_id` = :campaignId')
+                ),
+                $this->arrayHasKey('campaignId'),
+                $this->anything()
+            )
+            ->willReturn(7);
+
+        $result = $this->repository->deleteQueued(null, null, 42);
+
+        $this->assertSame(7, $result);
+    }
+
+    public function testDeleteQueuedWithAllThreeFiltersAddsAllConditions(): void
+    {
+        $this->mockClassMetadata->method('getColumnName')->willReturnMap([
+            ['templateName', 'template_name'],
+            ['senderName', 'sender_name'],
+            ['campaignId', 'campaign_id'],
+        ]);
+
+        $capturedSql    = null;
+        $capturedParams = null;
+        $this->mockConnection
+            ->expects($this->once())
+            ->method('executeStatement')
+            ->willReturnCallback(static function (string $sql, array $params) use (&$capturedSql, &$capturedParams): int {
+                $capturedSql    = $sql;
+                $capturedParams = $params;
+                return 3;
+            });
+
+        $result = $this->repository->deleteQueued('tmpl', 'sender', 99);
+
+        $this->assertSame(3, $result);
+        $this->assertStringContainsString('`template_name` = :templateName', $capturedSql);
+        $this->assertStringContainsString('`sender_name` = :senderName', $capturedSql);
+        $this->assertStringContainsString('`campaign_id` = :campaignId', $capturedSql);
+        $this->assertSame(99, $capturedParams['campaignId']);
+    }
+
+    public function testDeleteQueuedWithNullCampaignIdDoesNotAddCampaignCondition(): void
+    {
+        $this->mockClassMetadata->method('getColumnName')->willReturnMap([
+            ['templateName', 'template_name'],
+            ['senderName', 'sender_name'],
+        ]);
+
+        $capturedSql = null;
+        $this->mockConnection
+            ->expects($this->once())
+            ->method('executeStatement')
+            ->willReturnCallback(static function (string $sql) use (&$capturedSql): int {
+                $capturedSql = $sql;
+                return 0;
+            });
+
+        $this->repository->deleteQueued(null, null, null);
+
+        $this->assertStringNotContainsString('campaign_id', $capturedSql);
+    }
+
     public function testDeleteQueuedReturnsZeroWhenNothingToDelete(): void
     {
         $this->mockClassMetadata->method('getColumnName')->willReturnMap([

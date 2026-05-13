@@ -94,7 +94,7 @@ class MultiWebhookService
         return ['success' => true, 'action' => $action, 'message' => 'OK'];
     }
 
-    private function makeClient(string $apiKey): Client
+    protected function makeClient(string $apiKey): Client
     {
         return new Client([
             'base_uri' => self::BASE_URI,

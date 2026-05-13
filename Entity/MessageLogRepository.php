@@ -228,7 +228,7 @@ class MessageLogRepository extends CommonRepository
      *
      * @return int Total de registros deletados
      */
-    public function deleteQueued(?string $templateName = null, ?string $senderName = null): int
+    public function deleteQueued(?string $templateName = null, ?string $senderName = null, ?int $campaignId = null): int
     {
         $conn      = $this->getEntityManager()->getConnection();
         $tableName = $this->getEntityManager()->getClassMetadata(MessageLog::class)->getTableName();
@@ -250,6 +250,13 @@ class MessageLogRepository extends CommonRepository
             $where[]              = "`{$col}` = :senderName";
             $params['senderName'] = $senderName;
             $types['senderName']  = \PDO::PARAM_STR;
+        }
+
+        if (null !== $campaignId) {
+            $col                   = $meta->getColumnName('campaignId');
+            $where[]               = "`{$col}` = :campaignId";
+            $params['campaignId']  = $campaignId;
+            $types['campaignId']   = \PDO::PARAM_INT;
         }
 
         $whereClause = implode(' AND ', $where);

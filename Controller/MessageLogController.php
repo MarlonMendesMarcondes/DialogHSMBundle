@@ -179,10 +179,12 @@ class MessageLogController extends FormController
 
             $templateName = trim((string) $request->request->get('templateName', ''));
             $senderName   = trim((string) $request->request->get('senderName', ''));
+            $campaignId   = (int) $request->request->get('campaignId', 0);
 
             $deleted = $messageLogRepository->deleteQueued(
                 $templateName !== '' ? $templateName : null,
                 $senderName !== '' ? $senderName : null,
+                $campaignId > 0 ? $campaignId : null,
             );
 
             return $this->postActionRedirect([
