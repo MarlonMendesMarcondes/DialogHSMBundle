@@ -912,6 +912,26 @@ class MessageLogRepositoryTest extends TestCase
         $this->repository->getStatsByPeriod($from);
     }
 
+    public function testGetStatsByPeriodAppliesCumulativeFunnel(): void
+    {
+        // 50 sent + 30 delivered + 20 read
+        // After funnel: sent=100, delivered=50, read=20
+        $this->mockConnection
+            ->method('fetchAllAssociative')
+            ->willReturn([
+                ['status' => 'sent',      'cnt' => '50'],
+                ['status' => 'delivered', 'cnt' => '30'],
+                ['status' => 'read',      'cnt' => '20'],
+            ]);
+
+        $result = $this->repository->getStatsByPeriod(new \DateTime('-24 hours'));
+
+        $this->assertSame(100, $result['total']);
+        $this->assertSame(100, $result['sent']);      // 50 + 30 + 20
+        $this->assertSame(50,  $result['delivered']); // 30 + 20
+        $this->assertSame(20,  $result['read']);
+    }
+
     // =========================================================================
     // getChartData
     // =========================================================================
@@ -994,15 +1014,15 @@ class MessageLogRepositoryTest extends TestCase
     {
         $rows = [
             [
-                'template_name' => 'hello_world',
-                'campaign_id'   => 5,
-                'date'          => '2026-05-10',
-                'total'         => 100,
-                'sent'          => 90,
-                'delivered'     => 80,
-                'read'          => 70,
-                'failed'        => 10,
-                'dlq'           => 0,
+                'template_name'  => 'hello_world',
+                'campaign_id'    => 5,
+                'date'           => '2026-05-10',
+                'total'          => 100,
+                'sent_plus'      => 90,
+                'delivered_plus' => 80,
+                'read_count'     => 70,
+                'failed'         => 10,
+                'dlq'            => 0,
             ],
         ];
 
@@ -1015,7 +1035,30 @@ class MessageLogRepositoryTest extends TestCase
         $this->assertCount(1, $result);
         $this->assertSame('hello_world', $result[0]['template_name']);
         $this->assertSame(5, $result[0]['campaign_id']);
-        $this->assertSame(90, $result[0]['sent']);
+        $this->assertSame(90, $result[0]['sent_plus']);
+        $this->assertSame(80, $result[0]['delivered_plus']);
+        $this->assertSame(70, $result[0]['read_count']);
+    }
+
+    public function testGetGroupedDispatchesSqlUsesCumulativeCounts(): void
+    {
+        $capturedSql = null;
+        $this->mockConnection
+            ->expects($this->once())
+            ->method('fetchAllAssociative')
+            ->willReturnCallback(static function (string $sql) use (&$capturedSql): array {
+                $capturedSql = $sql;
+                return [];
+            });
+
+        $this->repository->getGroupedDispatches();
+
+        // funil cumulativo
+        $this->assertStringContainsString("status IN ('sent', 'delivered', 'read')", $capturedSql);
+        $this->assertStringContainsString("status IN ('delivered', 'read')", $capturedSql);
+        $this->assertStringContainsString('sent_plus', $capturedSql);
+        $this->assertStringContainsString('delivered_plus', $capturedSql);
+        $this->assertStringContainsString('read_count', $capturedSql);
     }
 
     public function testGetGroupedDispatchesSqlContainsGroupBy(): void

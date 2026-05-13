@@ -8,7 +8,7 @@
 .dialoghsm-stat-row { display: flex; flex-wrap: nowrap; gap: 6px; margin-bottom: 20px; }
 .dialoghsm-stat-row > div { flex: 1 1 0; min-width: 0; }
 .dialoghsm-dispatches { border-collapse: separate; border-spacing: 0; }
-.dialoghsm-dispatches thead tr th { background: var(--layer-01); color: var(--text-secondary); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; border-bottom: 2px solid var(--border-subtle-01) !important; padding: 10px 12px; }
+.dialoghsm-dispatches thead tr th { background: var(--layer-01); color: var(--text-secondary); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; border-bottom: 2px solid var(--border-subtle-01) !important; padding: 10px 12px; white-space: nowrap; }
 .dialoghsm-dispatches tbody tr { transition: background .15s; }
 .dialoghsm-dispatches tbody tr:nth-child(odd)  { background: var(--background); }
 .dialoghsm-dispatches tbody tr:nth-child(even) { background: var(--layer-01); }
@@ -108,22 +108,31 @@
                             <th>{{ 'dialoghsm.dashboard.dispatches.template'|trans }}</th>
                             <th>{{ 'dialoghsm.dashboard.dispatches.campaign'|trans }}</th>
                             <th class="text-center">{{ 'dialoghsm.dashboard.total'|trans }}</th>
-                            <th class="text-center"><i class="ri-checkbox-circle-line" style="color:#5cb85c"></i> {{ 'dialoghsm.dashboard.sent'|trans }}</th>
-                            <th class="text-center"><i class="ri-check-double-line" style="color:#17a2b8"></i> {{ 'dialoghsm.dashboard.delivered'|trans }}</th>
-                            <th class="text-center"><i class="ri-eye-line" style="color:#0275d8"></i> {{ 'dialoghsm.dashboard.read'|trans }}</th>
-                            <th class="text-center"><i class="ri-close-circle-line" style="color:#d9534f"></i> {{ 'dialoghsm.dashboard.failed'|trans }}</th>
+                            <th class="text-center" title="{{ 'dialoghsm.dashboard.dispatches.funnel_hint'|trans }}">
+                                <i class="ri-checkbox-circle-line" style="color:#5cb85c"></i> {{ 'dialoghsm.dashboard.sent'|trans }}
+                            </th>
                             <th class="text-center"><i class="ri-error-warning-line" style="color:#f0ad4e"></i> {{ 'dialoghsm.dashboard.dlq'|trans }}</th>
-                            <th>{{ 'dialoghsm.dashboard.dispatches.date'|trans }}</th>
+                            <th class="text-center"><i class="ri-close-circle-line" style="color:#d9534f"></i> {{ 'dialoghsm.dashboard.failed'|trans }}</th>
+                            <th class="text-center" title="{{ 'dialoghsm.dashboard.dispatches.funnel_hint'|trans }}">
+                                <i class="ri-check-double-line" style="color:#17a2b8"></i> {{ 'dialoghsm.dashboard.delivered'|trans }}
+                            </th>
+                            <th class="text-center">
+                                <i class="ri-eye-line" style="color:#0275d8"></i> {{ 'dialoghsm.dashboard.read'|trans }}
+                            </th>
+                            <th class="text-center">{{ 'dialoghsm.dashboard.dispatches.rate'|trans }}</th>
+                            <th class="text-center">{{ 'dialoghsm.dashboard.dispatches.date'|trans }}</th>
                         </tr>
                     </thead>
                     <tbody>
                     {% for row in dispatches %}
-                        {% set total    = row.total|default(0) %}
-                        {% set sent     = row.sent|default(0) %}
-                        {% set delivered = row.delivered|default(0) %}
-                        {% set readCount = row.read|default(0) %}
-                        {% set failed   = row.failed|default(0) %}
-                        {% set dlq      = row.dlq|default(0) %}
+                        {% set total         = row.total|default(0) %}
+                        {% set sentPlus      = row.sent_plus|default(0) %}
+                        {% set deliveredPlus = row.delivered_plus|default(0) %}
+                        {% set readCount     = row.read_count|default(0) %}
+                        {% set failed        = row.failed|default(0) %}
+                        {% set dlq           = row.dlq|default(0) %}
+                        {% set rate          = total > 0 ? (sentPlus / total * 100)|round(0) : 0 %}
+                        {% set rateColor     = rate >= 90 ? '#5cb85c' : (rate >= 70 ? '#f0ad4e' : '#d9534f') %}
                         <tr>
                             <td><span class="dialoghsm-template-badge">{{ row.template_name }}</span></td>
                             <td>
@@ -136,12 +145,13 @@
                                 {% endif %}
                             </td>
                             <td class="text-center"><strong style="font-size:14px;">{{ total }}</strong></td>
-                            <td class="text-center">{{ _self.pill(sent,      '#5cb85c') }}</td>
-                            <td class="text-center">{{ _self.pill(delivered, '#17a2b8') }}</td>
-                            <td class="text-center">{{ _self.pill(readCount, '#0275d8') }}</td>
-                            <td class="text-center">{{ _self.pill(failed,    '#d9534f') }}</td>
-                            <td class="text-center">{{ _self.pill(dlq,       '#f0ad4e') }}</td>
-                            <td style="white-space: nowrap; color: #999; font-size: 12px;">
+                            <td class="text-center">{{ _self.pill(sentPlus,      '#5cb85c') }}</td>
+                            <td class="text-center">{{ _self.pill(dlq,           '#f0ad4e') }}</td>
+                            <td class="text-center">{{ _self.pill(failed,        '#d9534f') }}</td>
+                            <td class="text-center">{{ _self.pill(deliveredPlus, '#17a2b8') }}</td>
+                            <td class="text-center">{{ _self.pill(readCount,     '#0275d8') }}</td>
+                            <td class="text-center">{{ _self.pill(rate ~ '%', rateColor) }}</td>
+                            <td class="text-center" style="white-space: nowrap; color: var(--text-helper); font-size: 12px;">
                                 <i class="ri-calendar-line"></i> {{ row.date }}
                             </td>
                         </tr>

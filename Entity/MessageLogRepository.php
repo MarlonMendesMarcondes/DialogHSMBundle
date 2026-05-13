@@ -153,6 +153,10 @@ class MessageLogRepository extends CommonRepository
             }
         }
 
+        // Funil cumulativo: cada status inclui mensagens que avançaram além dele
+        $stats['sent']      += $stats['delivered'] + $stats['read'];
+        $stats['delivered'] += $stats['read'];
+
         return $stats;
     }
 
@@ -333,9 +337,16 @@ class MessageLogRepository extends CommonRepository
     }
 
     /**
-     * Retorna os últimos 50 disparos agrupados por (template, campaign_id, data).
+     * Retorna os últimos N disparos agrupados por (template, campaign_id, data).
      *
-     * @return array<int, array{template_name: string, campaign_id: int|null, date: string, total: int, sent: int, delivered: int, read: int, failed: int, dlq: int}>
+     * As colunas são cumulativas (visão de funil):
+     *   sent_plus      = status IN ('sent', 'delivered', 'read')  — chegou ao menos em "sent"
+     *   delivered_plus = status IN ('delivered', 'read')          — chegou ao menos em "delivered"
+     *   read_count     = status = 'read'
+     *
+     * Evita que mensagens lidas "desapareçam" dos contadores de enviadas/entregues.
+     *
+     * @return array<int, array{template_name: string, campaign_id: int|null, date: string, total: int, sent_plus: int, delivered_plus: int, read_count: int, failed: int, dlq: int}>
      */
     public function getGroupedDispatches(int $limit = 50): array
     {
@@ -346,13 +357,13 @@ class MessageLogRepository extends CommonRepository
             "SELECT
                 template_name,
                 campaign_id,
-                DATE(date_sent)                                    AS date,
-                COUNT(*)                                           AS total,
-                SUM(status = 'sent')                               AS sent,
-                SUM(status = 'delivered')                          AS delivered,
-                SUM(status = 'read')                               AS `read`,
-                SUM(status = 'failed')                             AS failed,
-                SUM(status = 'dlq')                                AS dlq
+                DATE(date_sent)                                                AS date,
+                COUNT(*)                                                       AS total,
+                SUM(status IN ('sent', 'delivered', 'read'))                   AS sent_plus,
+                SUM(status IN ('delivered', 'read'))                           AS delivered_plus,
+                SUM(status = 'read')                                           AS read_count,
+                SUM(status = 'failed')                                         AS failed,
+                SUM(status = 'dlq')                                            AS dlq
              FROM `{$tableName}`
              GROUP BY template_name, campaign_id, DATE(date_sent)
              ORDER BY DATE(date_sent) DESC, template_name ASC
