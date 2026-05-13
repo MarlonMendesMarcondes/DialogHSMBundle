@@ -4,7 +4,9 @@
 
 {% block content %}
 <style>
-.dialoghsm-card-label { font-size: 11px; margin-top: 4px; color: var(--text-helper); }
+.dialoghsm-card-label { font-size: 11px; margin-top: 3px; color: var(--text-helper); }
+.dialoghsm-stat-row { display: flex; flex-wrap: nowrap; gap: 6px; margin-bottom: 20px; }
+.dialoghsm-stat-row > div { flex: 1 1 0; min-width: 0; }
 </style>
 <div class="row" style="margin-bottom: 20px;">
     <div class="col-xs-12" style="display: flex; flex-wrap: wrap; gap: 8px;">
@@ -19,7 +21,7 @@
 
 {# ── Últimas 24h ── #}
 <h4 class="text-muted" style="margin: 0 0 12px;">{{ 'dialoghsm.dashboard.period.24h'|trans }}</h4>
-<div class="row" style="margin-bottom: 24px;">
+<div class="dialoghsm-stat-row">
     {{ _self.statCard('dialoghsm.dashboard.total',     stats24h.total,     'ri-send-plane-line',      '#555') }}
     {{ _self.statCard('dialoghsm.dashboard.queued',    stats24h.queued,    'ri-time-line',             '#888') }}
     {{ _self.statCard('dialoghsm.dashboard.sent',      stats24h.sent,      'ri-checkbox-circle-line',  '#5cb85c') }}
@@ -28,30 +30,22 @@
     {{ _self.statCard('dialoghsm.dashboard.failed',    stats24h.failed,    'ri-close-circle-line',     '#d9534f') }}
     {{ _self.statCard('dialoghsm.dashboard.dlq',       stats24h.dlq,       'ri-error-warning-line',    '#f0ad4e') }}
     {% set processed24h = stats24h.sent + stats24h.failed + stats24h.dlq %}
-    {% if processed24h > 0 %}
-        {% set rate = (stats24h.sent / processed24h * 100)|round(1) %}
-    {% else %}
-        {% set rate = 0 %}
-    {% endif %}
+    {% set rate = processed24h > 0 ? (stats24h.sent / processed24h * 100)|round(1) : 0 %}
     {{ _self.rateCard('dialoghsm.dashboard.success_rate', rate, rate >= 90 ? '#5cb85c' : (rate >= 70 ? '#f0ad4e' : '#d9534f')) }}
 </div>
 
 {# ── Últimos 7 dias ── #}
 <h4 class="text-muted" style="margin: 0 0 12px;">{{ 'dialoghsm.dashboard.period.7d'|trans }}</h4>
-<div class="row" style="margin-bottom: 32px;">
+<div class="dialoghsm-stat-row" style="margin-bottom: 32px;">
     {{ _self.statCard('dialoghsm.dashboard.total',     stats7d.total,     'ri-send-plane-line',      '#555') }}
-    {{ _self.statCard('dialoghsm.dashboard.queued',   stats7d.queued,   'ri-time-line',             '#888') }}
-    {{ _self.statCard('dialoghsm.dashboard.sent',     stats7d.sent,     'ri-checkbox-circle-line',  '#5cb85c') }}
-    {{ _self.statCard('dialoghsm.dashboard.delivered', stats7d.delivered, 'ri-check-double-line',   '#17a2b8') }}
-    {{ _self.statCard('dialoghsm.dashboard.read',     stats7d.read,     'ri-eye-line',              '#0275d8') }}
-    {{ _self.statCard('dialoghsm.dashboard.failed',   stats7d.failed,   'ri-close-circle-line',     '#d9534f') }}
-    {{ _self.statCard('dialoghsm.dashboard.dlq',      stats7d.dlq,      'ri-error-warning-line',    '#f0ad4e') }}
+    {{ _self.statCard('dialoghsm.dashboard.queued',    stats7d.queued,    'ri-time-line',             '#888') }}
+    {{ _self.statCard('dialoghsm.dashboard.sent',      stats7d.sent,      'ri-checkbox-circle-line',  '#5cb85c') }}
+    {{ _self.statCard('dialoghsm.dashboard.delivered', stats7d.delivered, 'ri-check-double-line',     '#17a2b8') }}
+    {{ _self.statCard('dialoghsm.dashboard.read',      stats7d.read,      'ri-eye-line',              '#0275d8') }}
+    {{ _self.statCard('dialoghsm.dashboard.failed',    stats7d.failed,    'ri-close-circle-line',     '#d9534f') }}
+    {{ _self.statCard('dialoghsm.dashboard.dlq',       stats7d.dlq,       'ri-error-warning-line',    '#f0ad4e') }}
     {% set processed7d = stats7d.sent + stats7d.failed + stats7d.dlq %}
-    {% if processed7d > 0 %}
-        {% set rate7 = (stats7d.sent / processed7d * 100)|round(1) %}
-    {% else %}
-        {% set rate7 = 0 %}
-    {% endif %}
+    {% set rate7 = processed7d > 0 ? (stats7d.sent / processed7d * 100)|round(1) : 0 %}
     {{ _self.rateCard('dialoghsm.dashboard.success_rate', rate7, rate7 >= 90 ? '#5cb85c' : (rate7 >= 70 ? '#f0ad4e' : '#d9534f')) }}
 </div>
 
@@ -135,20 +129,20 @@
 {% endblock %}
 
 {% macro statCard(labelKey, value, icon, color) %}
-<div class="col-xs-6 col-sm-4 col-md-2" style="margin-bottom: 12px;">
-    <div class="panel panel-default" style="margin-bottom: 0; text-align: center; padding: 16px 8px;">
-        <i class="{{ icon }}" style="font-size: 24px; color: {{ color }};"></i>
-        <div style="font-size: 28px; font-weight: bold; color: {{ color }}; line-height: 1.2;">{{ value }}</div>
+<div>
+    <div class="panel panel-default" style="margin-bottom: 0; text-align: center; padding: 10px 4px;">
+        <i class="{{ icon }}" style="font-size: 22px; color: {{ color }};"></i>
+        <div style="font-size: 26px; font-weight: bold; color: {{ color }}; line-height: 1.2;">{{ value }}</div>
         <div class="dialoghsm-card-label">{{ labelKey|trans }}</div>
     </div>
 </div>
 {% endmacro %}
 
 {% macro rateCard(labelKey, value, color) %}
-<div class="col-xs-6 col-sm-4 col-md-2" style="margin-bottom: 12px;">
-    <div class="panel panel-default" style="margin-bottom: 0; text-align: center; padding: 16px 8px;">
-        <i class="ri-percent-line" style="font-size: 24px; color: {{ color }};"></i>
-        <div style="font-size: 28px; font-weight: bold; color: {{ color }}; line-height: 1.2;">{{ value }}%</div>
+<div>
+    <div class="panel panel-default" style="margin-bottom: 0; text-align: center; padding: 10px 4px;">
+        <i class="ri-percent-line" style="font-size: 22px; color: {{ color }};"></i>
+        <div style="font-size: 26px; font-weight: bold; color: {{ color }}; line-height: 1.2;">{{ value }}%</div>
         <div class="dialoghsm-card-label">{{ labelKey|trans }}</div>
     </div>
 </div>
