@@ -52,4 +52,9 @@ return function (ContainerConfigurator $configurator): void {
             ->autowire()
             ->tag('controller.service_arguments');
 
+        $services->set(\MauticPlugin\DialogHSMBundle\Controller\WebhookController::class)
+            ->public()
+            ->autowire()
+            ->tag('controller.service_arguments');
+
 };

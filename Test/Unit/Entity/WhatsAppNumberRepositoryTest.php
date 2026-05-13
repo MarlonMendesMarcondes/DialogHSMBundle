@@ -286,6 +286,72 @@ class WhatsAppNumberRepositoryTest extends TestCase
         $this->repository->getNumberList([]);
     }
 
+    // -------------------------------------------------------------------------
+    // findByWebhookSecret
+    // -------------------------------------------------------------------------
+
+    public function testFindByWebhookSecretReturnsNullWhenNotFound(): void
+    {
+        $this->mockQueryBuilder->method('orderBy')->willReturnSelf();
+        $this->mockQueryBuilder->method('setMaxResults')->willReturnSelf();
+
+        $this->mockQuery->method('getResult')->willReturn([]);
+
+        $result = $this->repository->findByWebhookSecret('secret-inexistente');
+
+        $this->assertNull($result);
+    }
+
+    public function testFindByWebhookSecretReturnsNumberWhenFound(): void
+    {
+        $number = new \MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber();
+
+        $this->mockQueryBuilder->method('orderBy')->willReturnSelf();
+        $this->mockQueryBuilder->method('setMaxResults')->willReturnSelf();
+
+        $this->mockQuery->method('getResult')->willReturn([$number]);
+
+        $result = $this->repository->findByWebhookSecret('uuid-secreto-valido');
+
+        $this->assertSame($number, $result);
+    }
+
+    public function testFindByWebhookSecretPassesSecretAsParameter(): void
+    {
+        $this->mockQueryBuilder->method('orderBy')->willReturnSelf();
+        $this->mockQueryBuilder->method('setMaxResults')->willReturnSelf();
+
+        $this->mockQueryBuilder
+            ->expects($this->atLeastOnce())
+            ->method('setParameter')
+            ->with('webhookSecret', 'meu-uuid-secreto')
+            ->willReturnSelf();
+
+        $this->mockQuery->method('getResult')->willReturn([]);
+
+        $this->repository->findByWebhookSecret('meu-uuid-secreto');
+    }
+
+    public function testFindByWebhookSecretReturnsFirstResultOnDuplicates(): void
+    {
+        $first  = new \MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber();
+        $second = new \MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber();
+
+        $this->mockQueryBuilder->method('orderBy')->willReturnSelf();
+        $this->mockQueryBuilder->method('setMaxResults')->willReturnSelf();
+
+        // setMaxResults(1) garante que o banco retorna no máximo um registro
+        $this->mockQuery->method('getResult')->willReturn([$first, $second]);
+
+        $result = $this->repository->findByWebhookSecret('uuid-duplicado');
+
+        $this->assertSame($first, $result);
+    }
+
+    // -------------------------------------------------------------------------
+    // Testes cruzados: bulk e batch são independentes
+    // -------------------------------------------------------------------------
+
     public function testBulkAndBatchUseIndependentQueryBuilders(): void
     {
         // Cada chamada ao createQueryBuilder devolve um resultado diferente

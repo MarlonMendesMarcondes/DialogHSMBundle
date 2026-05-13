@@ -20,11 +20,13 @@
 {# ── Últimas 24h ── #}
 <h4 class="text-muted" style="margin: 0 0 12px;">{{ 'dialoghsm.dashboard.period.24h'|trans }}</h4>
 <div class="row" style="margin-bottom: 24px;">
-    {{ _self.statCard('dialoghsm.dashboard.total',  stats24h.total,  'ri-send-plane-line',      '#555') }}
-    {{ _self.statCard('dialoghsm.dashboard.queued', stats24h.queued, 'ri-time-line',             '#888') }}
-    {{ _self.statCard('dialoghsm.dashboard.sent',   stats24h.sent,   'ri-checkbox-circle-line',  '#5cb85c') }}
-    {{ _self.statCard('dialoghsm.dashboard.failed', stats24h.failed, 'ri-close-circle-line',     '#d9534f') }}
-    {{ _self.statCard('dialoghsm.dashboard.dlq',    stats24h.dlq,    'ri-error-warning-line',    '#f0ad4e') }}
+    {{ _self.statCard('dialoghsm.dashboard.total',     stats24h.total,     'ri-send-plane-line',      '#555') }}
+    {{ _self.statCard('dialoghsm.dashboard.queued',    stats24h.queued,    'ri-time-line',             '#888') }}
+    {{ _self.statCard('dialoghsm.dashboard.sent',      stats24h.sent,      'ri-checkbox-circle-line',  '#5cb85c') }}
+    {{ _self.statCard('dialoghsm.dashboard.delivered', stats24h.delivered, 'ri-check-double-line',     '#17a2b8') }}
+    {{ _self.statCard('dialoghsm.dashboard.read',      stats24h.read,      'ri-eye-line',              '#0275d8') }}
+    {{ _self.statCard('dialoghsm.dashboard.failed',    stats24h.failed,    'ri-close-circle-line',     '#d9534f') }}
+    {{ _self.statCard('dialoghsm.dashboard.dlq',       stats24h.dlq,       'ri-error-warning-line',    '#f0ad4e') }}
     {% set processed24h = stats24h.sent + stats24h.failed + stats24h.dlq %}
     {% if processed24h > 0 %}
         {% set rate = (stats24h.sent / processed24h * 100)|round(1) %}
@@ -37,11 +39,13 @@
 {# ── Últimos 7 dias ── #}
 <h4 class="text-muted" style="margin: 0 0 12px;">{{ 'dialoghsm.dashboard.period.7d'|trans }}</h4>
 <div class="row" style="margin-bottom: 32px;">
-    {{ _self.statCard('dialoghsm.dashboard.total',  stats7d.total,  'ri-send-plane-line',      '#555') }}
-    {{ _self.statCard('dialoghsm.dashboard.queued', stats7d.queued, 'ri-time-line',             '#888') }}
-    {{ _self.statCard('dialoghsm.dashboard.sent',   stats7d.sent,   'ri-checkbox-circle-line',  '#5cb85c') }}
-    {{ _self.statCard('dialoghsm.dashboard.failed', stats7d.failed, 'ri-close-circle-line', '#d9534f') }}
-    {{ _self.statCard('dialoghsm.dashboard.dlq', stats7d.dlq, 'ri-error-warning-line', '#f0ad4e') }}
+    {{ _self.statCard('dialoghsm.dashboard.total',     stats7d.total,     'ri-send-plane-line',      '#555') }}
+    {{ _self.statCard('dialoghsm.dashboard.queued',   stats7d.queued,   'ri-time-line',             '#888') }}
+    {{ _self.statCard('dialoghsm.dashboard.sent',     stats7d.sent,     'ri-checkbox-circle-line',  '#5cb85c') }}
+    {{ _self.statCard('dialoghsm.dashboard.delivered', stats7d.delivered, 'ri-check-double-line',   '#17a2b8') }}
+    {{ _self.statCard('dialoghsm.dashboard.read',     stats7d.read,     'ri-eye-line',              '#0275d8') }}
+    {{ _self.statCard('dialoghsm.dashboard.failed',   stats7d.failed,   'ri-close-circle-line',     '#d9534f') }}
+    {{ _self.statCard('dialoghsm.dashboard.dlq',      stats7d.dlq,      'ri-error-warning-line',    '#f0ad4e') }}
     {% set processed7d = stats7d.sent + stats7d.failed + stats7d.dlq %}
     {% if processed7d > 0 %}
         {% set rate7 = (stats7d.sent / processed7d * 100)|round(1) %}
@@ -76,10 +80,12 @@
     var chartData = {{ chartJson|raw }};
 
     var labelMap = {
-        queued: '{{ 'dialoghsm.log.status.queued'|trans }}',
-        sent:   '{{ 'dialoghsm.log.status.sent'|trans }}',
-        failed: '{{ 'dialoghsm.log.status.failed'|trans }}',
-        dlq:    '{{ 'dialoghsm.log.status.dlq'|trans }}'
+        queued:    '{{ 'dialoghsm.log.status.queued'|trans }}',
+        sent:      '{{ 'dialoghsm.log.status.sent'|trans }}',
+        delivered: '{{ 'dialoghsm.log.status.delivered'|trans }}',
+        read:      '{{ 'dialoghsm.log.status.read'|trans }}',
+        failed:    '{{ 'dialoghsm.log.status.failed'|trans }}',
+        dlq:       '{{ 'dialoghsm.log.status.dlq'|trans }}'
     };
 
     chartData.datasets.forEach(function (ds) {
