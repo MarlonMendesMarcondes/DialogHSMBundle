@@ -34,7 +34,7 @@ return [
         ],
         'public' => [
             'mautic_dialoghsm_webhook' => [
-                'path'       => '/dialoghsm/webhook/{webhookSecret}',
+                'path'       => '/dialoghsm/webhook/{phoneNumber}',
                 'controller' => 'MauticPlugin\DialogHSMBundle\Controller\WebhookController::processAction',
                 'methods'    => ['POST'],
             ],

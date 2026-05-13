@@ -18,15 +18,13 @@ class WebhookProcessor
     ) {}
 
     /**
-     * Processa o payload de callbacks do 360dialog e atualiza os logs de mensagem.
-     *
      * @param array<mixed> $payload
      *
-     * @return int 200 em sucesso, 404 se o secret não corresponder a nenhum número cadastrado
+     * @return int 200 em sucesso, 404 se o número não existir
      */
-    public function process(string $webhookSecret, array $payload): int
+    public function process(string $phoneNumber, array $payload): int
     {
-        $number = $this->numberRepository->findByWebhookSecret($webhookSecret);
+        $number = $this->numberRepository->findByPhoneNumber($phoneNumber);
         if (!$number) {
             return 404;
         }

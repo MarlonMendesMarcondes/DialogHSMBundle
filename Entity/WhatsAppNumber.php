@@ -21,7 +21,6 @@ class WhatsAppNumber extends FormEntity
     private ?string $baseUrl = null;
     private ?string $queueName = null;
     private ?string $batchQueueName = null;
-    private ?string $webhookSecret = null;
 
     public static function loadMetadata(ORM\ClassMetadata $metadata): void
     {
@@ -65,12 +64,6 @@ class WhatsAppNumber extends FormEntity
             ->nullable()
             ->build();
 
-        $builder
-            ->createField('webhookSecret', 'string')
-            ->columnName('webhook_secret')
-            ->length(64)
-            ->nullable()
-            ->build();
     }
 
     public static function loadValidatorMetadata(ClassMetadata $metadata): void
@@ -181,18 +174,6 @@ class WhatsAppNumber extends FormEntity
     {
         $this->isChanged('batchQueueName', $batchQueueName);
         $this->batchQueueName = $batchQueueName ?: null;
-
-        return $this;
-    }
-
-    public function getWebhookSecret(): ?string
-    {
-        return $this->webhookSecret;
-    }
-
-    public function setWebhookSecret(?string $webhookSecret): self
-    {
-        $this->webhookSecret = $webhookSecret;
 
         return $this;
     }

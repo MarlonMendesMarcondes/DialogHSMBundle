@@ -15,10 +15,10 @@ class WebhookController extends AbstractController
         private readonly WebhookProcessor $processor,
     ) {}
 
-    public function processAction(Request $request, string $webhookSecret): JsonResponse
+    public function processAction(Request $request, string $phoneNumber): JsonResponse
     {
         $payload = json_decode($request->getContent(), true) ?? [];
-        $status  = $this->processor->process($webhookSecret, $payload);
+        $status  = $this->processor->process($phoneNumber, $payload);
 
         return new JsonResponse(null, $status);
     }

@@ -63,11 +63,11 @@ class WhatsAppNumberRepository extends CommonRepository
         return array_values(array_filter(array_column($rows, 'q')));
     }
 
-    public function findByWebhookSecret(string $webhookSecret): ?WhatsAppNumber
+    public function findByPhoneNumber(string $phoneNumber): ?WhatsAppNumber
     {
         $results = $this->createQueryBuilder('wn')
-            ->andWhere('wn.webhookSecret = :webhookSecret')
-            ->setParameter('webhookSecret', $webhookSecret)
+            ->andWhere('wn.phoneNumber = :phoneNumber')
+            ->setParameter('phoneNumber', $phoneNumber)
             ->setMaxResults(1)
             ->getQuery()
             ->getResult();

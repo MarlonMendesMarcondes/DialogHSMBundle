@@ -23,7 +23,7 @@ class WebhookProcessorTest extends TestCase
     {
         $this->numberRepository = $this->getMockBuilder(WhatsAppNumberRepository::class)
             ->disableOriginalConstructor()
-            ->onlyMethods(['findByWebhookSecret'])
+            ->onlyMethods(['findByPhoneNumber'])
             ->getMock();
 
         $this->logRepository = $this->createMock(MessageLogRepository::class);
@@ -39,9 +39,6 @@ class WebhookProcessorTest extends TestCase
         return $log;
     }
 
-    /**
-     * Monta o envelope de payload padrão do 360dialog com os statuses informados.
-     */
     private function makePayload(array $statuses): array
     {
         return [
@@ -64,37 +61,37 @@ class WebhookProcessorTest extends TestCase
     }
 
     // =========================================================================
-    // Validação do secret
+    // Validação do phoneNumber
     // =========================================================================
 
-    public function testUnknownSecretReturns404(): void
+    public function testUnknownPhoneNumberReturns404(): void
     {
-        $this->numberRepository->method('findByWebhookSecret')->willReturn(null);
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(null);
 
-        $result = $this->processor->process('secret-desconhecido', $this->makePayload([]));
+        $result = $this->processor->process('+5511999999999', $this->makePayload([]));
 
         $this->assertSame(404, $result);
     }
 
-    public function testValidSecretWithEmptyStatusesReturns200(): void
+    public function testValidPhoneNumberWithEmptyStatusesReturns200(): void
     {
-        $this->numberRepository->method('findByWebhookSecret')->willReturn(new WhatsAppNumber());
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
         $this->logRepository->expects($this->never())->method('findByWamid');
 
-        $result = $this->processor->process('secret-valido', $this->makePayload([]));
+        $result = $this->processor->process('+5511999999999', $this->makePayload([]));
 
         $this->assertSame(200, $result);
     }
 
-    public function testFindByWebhookSecretIsCalledWithCorrectSecret(): void
+    public function testFindByPhoneNumberIsCalledWithCorrectNumber(): void
     {
         $this->numberRepository
             ->expects($this->once())
-            ->method('findByWebhookSecret')
-            ->with('meu-secret-uuid')
+            ->method('findByPhoneNumber')
+            ->with('+5511911703871')
             ->willReturn(null);
 
-        $this->processor->process('meu-secret-uuid', $this->makePayload([]));
+        $this->processor->process('+5511911703871', $this->makePayload([]));
     }
 
     // =========================================================================
@@ -105,11 +102,11 @@ class WebhookProcessorTest extends TestCase
     {
         $log = $this->makeLog(MessageLog::STATUS_SENT);
 
-        $this->numberRepository->method('findByWebhookSecret')->willReturn(new WhatsAppNumber());
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
         $this->logRepository->method('findByWamid')->with('wamid.abc')->willReturn($log);
         $this->em->expects($this->once())->method('flush');
 
-        $this->processor->process('secret', $this->makePayload([
+        $this->processor->process('+5511999999999', $this->makePayload([
             $this->makeStatusEntry('wamid.abc', 'delivered'),
         ]));
 
@@ -120,11 +117,11 @@ class WebhookProcessorTest extends TestCase
     {
         $log = $this->makeLog(MessageLog::STATUS_DELIVERED);
 
-        $this->numberRepository->method('findByWebhookSecret')->willReturn(new WhatsAppNumber());
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
         $this->logRepository->method('findByWamid')->willReturn($log);
         $this->em->expects($this->never())->method('flush');
 
-        $this->processor->process('secret', $this->makePayload([
+        $this->processor->process('+5511999999999', $this->makePayload([
             $this->makeStatusEntry('wamid.abc', 'delivered'),
         ]));
 
@@ -135,11 +132,11 @@ class WebhookProcessorTest extends TestCase
     {
         $log = $this->makeLog(MessageLog::STATUS_READ);
 
-        $this->numberRepository->method('findByWebhookSecret')->willReturn(new WhatsAppNumber());
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
         $this->logRepository->method('findByWamid')->willReturn($log);
         $this->em->expects($this->never())->method('flush');
 
-        $this->processor->process('secret', $this->makePayload([
+        $this->processor->process('+5511999999999', $this->makePayload([
             $this->makeStatusEntry('wamid.abc', 'delivered'),
         ]));
 
@@ -150,11 +147,11 @@ class WebhookProcessorTest extends TestCase
     {
         $log = $this->makeLog(MessageLog::STATUS_FAILED);
 
-        $this->numberRepository->method('findByWebhookSecret')->willReturn(new WhatsAppNumber());
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
         $this->logRepository->method('findByWamid')->willReturn($log);
         $this->em->expects($this->never())->method('flush');
 
-        $this->processor->process('secret', $this->makePayload([
+        $this->processor->process('+5511999999999', $this->makePayload([
             $this->makeStatusEntry('wamid.abc', 'delivered'),
         ]));
 
@@ -165,11 +162,11 @@ class WebhookProcessorTest extends TestCase
     {
         $log = $this->makeLog(MessageLog::STATUS_DLQ);
 
-        $this->numberRepository->method('findByWebhookSecret')->willReturn(new WhatsAppNumber());
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
         $this->logRepository->method('findByWamid')->willReturn($log);
         $this->em->expects($this->never())->method('flush');
 
-        $this->processor->process('secret', $this->makePayload([
+        $this->processor->process('+5511999999999', $this->makePayload([
             $this->makeStatusEntry('wamid.xyz', 'delivered'),
         ]));
 
@@ -184,11 +181,11 @@ class WebhookProcessorTest extends TestCase
     {
         $log = $this->makeLog(MessageLog::STATUS_SENT);
 
-        $this->numberRepository->method('findByWebhookSecret')->willReturn(new WhatsAppNumber());
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
         $this->logRepository->method('findByWamid')->willReturn($log);
         $this->em->expects($this->once())->method('flush');
 
-        $this->processor->process('secret', $this->makePayload([
+        $this->processor->process('+5511999999999', $this->makePayload([
             $this->makeStatusEntry('wamid.abc', 'read'),
         ]));
 
@@ -197,14 +194,13 @@ class WebhookProcessorTest extends TestCase
 
     public function testReadFromDeliveredUpdatesStatus(): void
     {
-        // 360dialog não garante ordem; read pode chegar antes de delivered
         $log = $this->makeLog(MessageLog::STATUS_DELIVERED);
 
-        $this->numberRepository->method('findByWebhookSecret')->willReturn(new WhatsAppNumber());
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
         $this->logRepository->method('findByWamid')->willReturn($log);
         $this->em->expects($this->once())->method('flush');
 
-        $this->processor->process('secret', $this->makePayload([
+        $this->processor->process('+5511999999999', $this->makePayload([
             $this->makeStatusEntry('wamid.abc', 'read'),
         ]));
 
@@ -215,11 +211,11 @@ class WebhookProcessorTest extends TestCase
     {
         $log = $this->makeLog(MessageLog::STATUS_READ);
 
-        $this->numberRepository->method('findByWebhookSecret')->willReturn(new WhatsAppNumber());
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
         $this->logRepository->method('findByWamid')->willReturn($log);
         $this->em->expects($this->never())->method('flush');
 
-        $this->processor->process('secret', $this->makePayload([
+        $this->processor->process('+5511999999999', $this->makePayload([
             $this->makeStatusEntry('wamid.abc', 'read'),
         ]));
 
@@ -230,11 +226,11 @@ class WebhookProcessorTest extends TestCase
     {
         $log = $this->makeLog(MessageLog::STATUS_FAILED);
 
-        $this->numberRepository->method('findByWebhookSecret')->willReturn(new WhatsAppNumber());
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
         $this->logRepository->method('findByWamid')->willReturn($log);
         $this->em->expects($this->never())->method('flush');
 
-        $this->processor->process('secret', $this->makePayload([
+        $this->processor->process('+5511999999999', $this->makePayload([
             $this->makeStatusEntry('wamid.abc', 'read'),
         ]));
 
@@ -242,18 +238,18 @@ class WebhookProcessorTest extends TestCase
     }
 
     // =========================================================================
-    // Status 'sent' vindo do webhook (ignorado — o plugin já gerencia esse estado)
+    // Status 'sent' vindo do webhook (ignorado)
     // =========================================================================
 
     public function testSentFromWebhookIsIgnored(): void
     {
         $log = $this->makeLog(MessageLog::STATUS_SENT);
 
-        $this->numberRepository->method('findByWebhookSecret')->willReturn(new WhatsAppNumber());
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
         $this->logRepository->method('findByWamid')->willReturn($log);
         $this->em->expects($this->never())->method('flush');
 
-        $this->processor->process('secret', $this->makePayload([
+        $this->processor->process('+5511999999999', $this->makePayload([
             $this->makeStatusEntry('wamid.abc', 'sent'),
         ]));
 
@@ -266,11 +262,11 @@ class WebhookProcessorTest extends TestCase
 
     public function testUnknownWamidIsSkippedGracefully(): void
     {
-        $this->numberRepository->method('findByWebhookSecret')->willReturn(new WhatsAppNumber());
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
         $this->logRepository->method('findByWamid')->willReturn(null);
         $this->em->expects($this->never())->method('flush');
 
-        $result = $this->processor->process('secret', $this->makePayload([
+        $result = $this->processor->process('+5511999999999', $this->makePayload([
             $this->makeStatusEntry('wamid.inexistente', 'delivered'),
         ]));
 
@@ -283,23 +279,23 @@ class WebhookProcessorTest extends TestCase
 
     public function testEmptyPayloadReturns200WithoutCrash(): void
     {
-        $this->numberRepository->method('findByWebhookSecret')->willReturn(new WhatsAppNumber());
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
         $this->logRepository->expects($this->never())->method('findByWamid');
 
-        $result = $this->processor->process('secret', []);
+        $result = $this->processor->process('+5511999999999', []);
 
         $this->assertSame(200, $result);
     }
 
     public function testMissingStatusesKeyReturns200WithoutCrash(): void
     {
-        $this->numberRepository->method('findByWebhookSecret')->willReturn(new WhatsAppNumber());
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
         $this->logRepository->expects($this->never())->method('findByWamid');
 
-        $result = $this->processor->process('secret', [
+        $result = $this->processor->process('+5511999999999', [
             'entry' => [[
                 'changes' => [[
-                    'value' => [], // sem chave 'statuses'
+                    'value' => [],
                 ]],
             ]],
         ]);
@@ -309,11 +305,11 @@ class WebhookProcessorTest extends TestCase
 
     public function testStatusEntryWithoutIdIsSkipped(): void
     {
-        $this->numberRepository->method('findByWebhookSecret')->willReturn(new WhatsAppNumber());
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
         $this->logRepository->expects($this->never())->method('findByWamid');
 
-        $result = $this->processor->process('secret', $this->makePayload([
-            ['status' => 'delivered'], // sem chave 'id'
+        $result = $this->processor->process('+5511999999999', $this->makePayload([
+            ['status' => 'delivered'],
         ]));
 
         $this->assertSame(200, $result);
@@ -321,10 +317,10 @@ class WebhookProcessorTest extends TestCase
 
     public function testStatusEntryWithEmptyIdIsSkipped(): void
     {
-        $this->numberRepository->method('findByWebhookSecret')->willReturn(new WhatsAppNumber());
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
         $this->logRepository->expects($this->never())->method('findByWamid');
 
-        $result = $this->processor->process('secret', $this->makePayload([
+        $result = $this->processor->process('+5511999999999', $this->makePayload([
             ['id' => '', 'status' => 'delivered'],
         ]));
 
@@ -340,7 +336,7 @@ class WebhookProcessorTest extends TestCase
         $log1 = $this->makeLog(MessageLog::STATUS_SENT);
         $log2 = $this->makeLog(MessageLog::STATUS_SENT);
 
-        $this->numberRepository->method('findByWebhookSecret')->willReturn(new WhatsAppNumber());
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
         $this->logRepository->method('findByWamid')
             ->willReturnMap([
                 ['wamid.1', $log1],
@@ -348,7 +344,7 @@ class WebhookProcessorTest extends TestCase
             ]);
         $this->em->expects($this->exactly(2))->method('flush');
 
-        $this->processor->process('secret', $this->makePayload([
+        $this->processor->process('+5511999999999', $this->makePayload([
             $this->makeStatusEntry('wamid.1', 'delivered'),
             $this->makeStatusEntry('wamid.2', 'read'),
         ]));
@@ -359,11 +355,10 @@ class WebhookProcessorTest extends TestCase
 
     public function testMultipleEntriesAndChangesAreFullyTraversed(): void
     {
-        // 360dialog pode enviar múltiplas entries com múltiplas changes
         $log1 = $this->makeLog(MessageLog::STATUS_SENT);
         $log2 = $this->makeLog(MessageLog::STATUS_DELIVERED);
 
-        $this->numberRepository->method('findByWebhookSecret')->willReturn(new WhatsAppNumber());
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
         $this->logRepository->method('findByWamid')
             ->willReturnMap([
                 ['wamid.entry1', $log1],
@@ -371,7 +366,7 @@ class WebhookProcessorTest extends TestCase
             ]);
         $this->em->expects($this->exactly(2))->method('flush');
 
-        $this->processor->process('secret', [
+        $this->processor->process('+5511999999999', [
             'entry' => [
                 [
                     'changes' => [[
@@ -394,7 +389,7 @@ class WebhookProcessorTest extends TestCase
     {
         $log = $this->makeLog(MessageLog::STATUS_SENT);
 
-        $this->numberRepository->method('findByWebhookSecret')->willReturn(new WhatsAppNumber());
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
         $this->logRepository->method('findByWamid')
             ->willReturnMap([
                 ['wamid.existe', $log],
@@ -402,7 +397,7 @@ class WebhookProcessorTest extends TestCase
             ]);
         $this->em->expects($this->once())->method('flush');
 
-        $result = $this->processor->process('secret', $this->makePayload([
+        $result = $this->processor->process('+5511999999999', $this->makePayload([
             $this->makeStatusEntry('wamid.existe', 'delivered'),
             $this->makeStatusEntry('wamid.naoexiste', 'delivered'),
         ]));
@@ -417,10 +412,10 @@ class WebhookProcessorTest extends TestCase
 
     public function testProcessReturns200OnSuccess(): void
     {
-        $this->numberRepository->method('findByWebhookSecret')->willReturn(new WhatsAppNumber());
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
         $this->logRepository->method('findByWamid')->willReturn(null);
 
-        $result = $this->processor->process('secret', $this->makePayload([
+        $result = $this->processor->process('+5511999999999', $this->makePayload([
             $this->makeStatusEntry('wamid.abc', 'delivered'),
         ]));
 
@@ -429,11 +424,11 @@ class WebhookProcessorTest extends TestCase
 
     public function testProcessReturns200EvenWhenNoStatusesMatch(): void
     {
-        $this->numberRepository->method('findByWebhookSecret')->willReturn(new WhatsAppNumber());
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
         $this->logRepository->method('findByWamid')->willReturn(null);
 
-        $result = $this->processor->process('secret', $this->makePayload([
-            $this->makeStatusEntry('wamid.abc', 'sent'), // ignorado
+        $result = $this->processor->process('+5511999999999', $this->makePayload([
+            $this->makeStatusEntry('wamid.abc', 'sent'),
         ]));
 
         $this->assertSame(200, $result);
