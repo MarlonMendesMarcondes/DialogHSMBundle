@@ -973,4 +973,96 @@ class MessageLogRepositoryTest extends TestCase
         $this->assertCount(3,  $this->repository->getChartData(3));
         $this->assertCount(14, $this->repository->getChartData(14));
     }
+
+    // =========================================================================
+    // getGroupedDispatches
+    // =========================================================================
+
+    public function testGetGroupedDispatchesReturnsEmptyArrayWhenNoRows(): void
+    {
+        $this->mockConnection
+            ->expects($this->once())
+            ->method('fetchAllAssociative')
+            ->willReturn([]);
+
+        $result = $this->repository->getGroupedDispatches();
+
+        $this->assertSame([], $result);
+    }
+
+    public function testGetGroupedDispatchesReturnsRowsFromConnection(): void
+    {
+        $rows = [
+            [
+                'template_name' => 'hello_world',
+                'campaign_id'   => 5,
+                'date'          => '2026-05-10',
+                'total'         => 100,
+                'sent'          => 90,
+                'delivered'     => 80,
+                'read'          => 70,
+                'failed'        => 10,
+                'dlq'           => 0,
+            ],
+        ];
+
+        $this->mockConnection
+            ->method('fetchAllAssociative')
+            ->willReturn($rows);
+
+        $result = $this->repository->getGroupedDispatches();
+
+        $this->assertCount(1, $result);
+        $this->assertSame('hello_world', $result[0]['template_name']);
+        $this->assertSame(5, $result[0]['campaign_id']);
+        $this->assertSame(90, $result[0]['sent']);
+    }
+
+    public function testGetGroupedDispatchesSqlContainsGroupBy(): void
+    {
+        $capturedSql = null;
+        $this->mockConnection
+            ->expects($this->once())
+            ->method('fetchAllAssociative')
+            ->willReturnCallback(static function (string $sql) use (&$capturedSql): array {
+                $capturedSql = $sql;
+                return [];
+            });
+
+        $this->repository->getGroupedDispatches();
+
+        $this->assertStringContainsString('GROUP BY', $capturedSql);
+        $this->assertStringContainsString('template_name', $capturedSql);
+        $this->assertStringContainsString('campaign_id', $capturedSql);
+    }
+
+    public function testGetGroupedDispatchesDefaultLimitIs50(): void
+    {
+        $capturedSql = null;
+        $this->mockConnection
+            ->method('fetchAllAssociative')
+            ->willReturnCallback(static function (string $sql) use (&$capturedSql): array {
+                $capturedSql = $sql;
+                return [];
+            });
+
+        $this->repository->getGroupedDispatches();
+
+        $this->assertStringContainsString('LIMIT 50', $capturedSql);
+    }
+
+    public function testGetGroupedDispatchesCustomLimitIsRespected(): void
+    {
+        $capturedSql = null;
+        $this->mockConnection
+            ->method('fetchAllAssociative')
+            ->willReturnCallback(static function (string $sql) use (&$capturedSql): array {
+                $capturedSql = $sql;
+                return [];
+            });
+
+        $this->repository->getGroupedDispatches(10);
+
+        $this->assertStringContainsString('LIMIT 10', $capturedSql);
+    }
 }
