@@ -10,7 +10,7 @@ use Psr\Log\LoggerInterface;
 
 class MultiWebhookService
 {
-    private const BASE_URI  = 'https://waba.360dialog.io';
+    private const BASE_URI  = 'https://waba-v2.360dialog.io';
     private const DEST_NAME = 'mautic';
 
     public function __construct(private readonly LoggerInterface $logger) {}
