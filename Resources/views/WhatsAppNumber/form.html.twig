@@ -104,7 +104,7 @@
         } else {
             html += '<strong>{{ 'dialoghsm.number.webhook.destinations'|trans }}:</strong><ul style="margin:4px 0 0 0">';
             dests.forEach(function (d) {
-                html += '<li><code>' + d.name + '</code>: ' + d.url + '</li>';
+                html += '<li><code>' + d.name + '</code>: <span style="word-break:break-all">' + d.url + '</span></li>';
             });
             html += '</ul>';
         }
