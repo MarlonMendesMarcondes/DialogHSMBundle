@@ -994,11 +994,10 @@ class MessageLogRepositoryTest extends TestCase
         $this->assertCount(14, $this->repository->getChartData(14));
     }
 
-    public function testGetChartDataAppliesCumulativeFunnelPerDay(): void
+    public function testGetChartDataReturnsRawCountsPerDay(): void
     {
         $today = (new \DateTime())->format('Y-m-d');
 
-        // Mensagem com status 'read' deve contar em sent, delivered e read
         $this->mockConnection->method('fetchAllAssociative')->willReturn([
             ['day' => $today, 'status' => 'read',      'cnt' => 2],
             ['day' => $today, 'status' => 'delivered',  'cnt' => 3],
@@ -1007,11 +1006,9 @@ class MessageLogRepositoryTest extends TestCase
 
         $result = $this->repository->getChartData(1);
 
-        // sent = 5 (raw) + 3 (delivered) + 2 (read) = 10
-        $this->assertSame(10, $result[$today]['sent']);
-        // delivered = 3 (raw) + 2 (read) = 5
-        $this->assertSame(5, $result[$today]['delivered']);
-        // read permanece 2
+        // Raw counts — gráfico empilhado exige cada mensagem contada exatamente uma vez
+        $this->assertSame(5, $result[$today]['sent']);
+        $this->assertSame(3, $result[$today]['delivered']);
         $this->assertSame(2, $result[$today]['read']);
     }
 

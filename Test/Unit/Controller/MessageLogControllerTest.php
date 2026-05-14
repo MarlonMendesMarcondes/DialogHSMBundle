@@ -363,22 +363,17 @@ class MessageLogControllerTest extends TestCase
         $prop = new \ReflectionProperty(\Mautic\CoreBundle\Controller\CommonController::class, 'coreParametersHelper');
         $prop->setValue($controller, $params);
 
-        // Cache quente: retorna dado fixo sem chamar o callback
-        $cachedStats      = ['total' => 5, 'queued' => 0, 'sent' => 5, 'delivered' => 3, 'read' => 1, 'failed' => 0, 'dlq' => 0];
-        $cachedDispatches = [['template_name' => 'cached_tpl', 'campaign_id' => null, 'date' => '2026-01-01', 'total' => 5, 'sent_plus' => 5, 'delivered_plus' => 3, 'read_count' => 1, 'failed' => 0, 'dlq' => 0]];
+        // Cache quente: retorna o bloco unificado sem invocar o callback
+        $cachedStats = ['total' => 5, 'queued' => 0, 'sent' => 5, 'delivered' => 3, 'read' => 1, 'failed' => 0, 'dlq' => 0];
+        $cachedAll   = [
+            'stats24h'   => $cachedStats,
+            'stats7d'    => $cachedStats,
+            'chartRaw'   => [],
+            'dispatches' => [],
+        ];
 
         $cache = $this->createMock(CacheInterface::class);
-        $cache->method('get')->willReturnCallback(
-            static function (string $key) use ($cachedStats, $cachedDispatches): mixed {
-                if (str_contains($key, 'dispatches')) {
-                    return $cachedDispatches;
-                }
-                if (str_contains($key, 'chart')) {
-                    return [];
-                }
-                return $cachedStats;
-            }
-        );
+        $cache->method('get')->willReturn($cachedAll);
         $controller->setCache($cache);
 
         // Repositório NÃO deve ser chamado nenhuma vez
@@ -456,7 +451,7 @@ class MessageLogControllerTest extends TestCase
         foreach ($capturedKeys as $key) {
             $this->assertStringContainsString($expectedSlot, $key, "Chave '{$key}' não contém o slot horário");
         }
-        $this->assertCount(4, $capturedKeys, 'Devem haver exatamente 4 chaves de cache');
+        $this->assertCount(1, $capturedKeys, 'Dashboard usa uma única chave de cache unificada');
     }
 
     public function testPurgeQueuedPostTrimsWhitespaceFromFilters(): void

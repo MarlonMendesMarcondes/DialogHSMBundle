@@ -65,41 +65,24 @@ class MessageLogController extends FormController
         // e o slot horário garante que não haja stale excessivo entre janelas.
         $hourSlot = $now->format('YmdH');
 
-        $stats24h = $this->cache->get(
-            "dialoghsm.dashboard.stats24h.{$hourSlot}",
-            function (ItemInterface $item) use ($messageLogRepository, $from24h): array {
+        $dashboardData = $this->cache->get(
+            "dialoghsm.dashboard.all.{$chartDays}.{$hourSlot}",
+            function (ItemInterface $item) use ($messageLogRepository, $from24h, $from7d, $chartDays): array {
                 $item->expiresAfter(self::DASHBOARD_CACHE_TTL);
 
-                return $messageLogRepository->getStatsByPeriod($from24h);
+                return [
+                    'stats24h'   => $messageLogRepository->getStatsByPeriod($from24h),
+                    'stats7d'    => $messageLogRepository->getStatsByPeriod($from7d),
+                    'chartRaw'   => $messageLogRepository->getChartData($chartDays),
+                    'dispatches' => $messageLogRepository->getGroupedDispatches(),
+                ];
             }
         );
 
-        $stats7d = $this->cache->get(
-            "dialoghsm.dashboard.stats7d.{$hourSlot}",
-            function (ItemInterface $item) use ($messageLogRepository, $from7d): array {
-                $item->expiresAfter(self::DASHBOARD_CACHE_TTL);
-
-                return $messageLogRepository->getStatsByPeriod($from7d);
-            }
-        );
-
-        $chartRaw = $this->cache->get(
-            "dialoghsm.dashboard.chart.{$chartDays}.{$hourSlot}",
-            function (ItemInterface $item) use ($messageLogRepository, $chartDays): array {
-                $item->expiresAfter(self::DASHBOARD_CACHE_TTL);
-
-                return $messageLogRepository->getChartData($chartDays);
-            }
-        );
-
-        $dispatches = $this->cache->get(
-            "dialoghsm.dashboard.dispatches.{$hourSlot}",
-            function (ItemInterface $item) use ($messageLogRepository): array {
-                $item->expiresAfter(self::DASHBOARD_CACHE_TTL);
-
-                return $messageLogRepository->getGroupedDispatches();
-            }
-        );
+        $stats24h   = $dashboardData['stats24h'];
+        $stats7d    = $dashboardData['stats7d'];
+        $chartRaw   = $dashboardData['chartRaw'];
+        $dispatches = $dashboardData['dispatches'];
 
         // Prepara dados para Chart.js
         $labels   = array_keys($chartRaw);
