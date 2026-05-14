@@ -57,9 +57,10 @@ class MessageLogController extends FormController
             ? (int) $request->query->get('days', 7)
             : 7;
 
-        $now     = new \DateTime();
-        $from24h = (clone $now)->modify('-24 hours');
-        $from7d  = (clone $now)->modify('-7 days')->setTime(0, 0, 0);
+        $timezone = $this->coreParametersHelper->get('default_timezone', 'UTC');
+        $now      = new \DateTime('now', new \DateTimeZone($timezone));
+        $from24h  = (clone $now)->modify('-24 hours');
+        $from7d   = (clone $now)->modify('-7 days')->setTime(0, 0, 0);
 
         // Chave inclui hora atual para que o cache expire organicamente a cada 60s
         // e o slot horário garante que não haja stale excessivo entre janelas.
@@ -67,13 +68,13 @@ class MessageLogController extends FormController
 
         $dashboardData = $this->cache->get(
             "dialoghsm.dashboard.all.{$chartDays}.{$hourSlot}",
-            function (ItemInterface $item) use ($messageLogRepository, $from24h, $from7d, $chartDays): array {
+            function (ItemInterface $item) use ($messageLogRepository, $from24h, $from7d, $chartDays, $timezone): array {
                 $item->expiresAfter(self::DASHBOARD_CACHE_TTL);
 
                 return [
                     'stats24h'   => $messageLogRepository->getStatsByPeriod($from24h),
                     'stats7d'    => $messageLogRepository->getStatsByPeriod($from7d),
-                    'chartRaw'   => $messageLogRepository->getChartData($chartDays),
+                    'chartRaw'   => $messageLogRepository->getChartData($chartDays, $timezone),
                     'dispatches' => $messageLogRepository->getGroupedDispatches(),
                 ];
             }

@@ -171,19 +171,28 @@ class MessageLogRepository extends CommonRepository
      *
      * @return array<string, array{sent:int, delivered:int, read:int, failed:int, dlq:int}>
      */
-    public function getChartData(int $days = 7): array
+    public function getChartData(int $days = 7, string $timezone = 'UTC'): array
     {
         $conn      = $this->getEntityManager()->getConnection();
         $tableName = $this->getEntityManager()->getClassMetadata(MessageLog::class)->getTableName();
-        $from      = (new \DateTime())->modify("-{$days} days")->setTime(0, 0, 0);
+        $tz        = new \DateTimeZone($timezone);
+        $now       = new \DateTime('now', $tz);
+        $from      = (clone $now)->modify("-{$days} days")->setTime(0, 0, 0);
+
+        // Offset UTC do timezone configurado no Mautic (ex: -3h → '-03:00')
+        // Necessário para que DATE() agrupe por dia local, não por dia UTC.
+        $offsetSeconds = $tz->getOffset($now);
+        $sign          = $offsetSeconds >= 0 ? '+' : '-';
+        $abs           = abs($offsetSeconds);
+        $utcOffset     = sprintf('%s%02d:%02d', $sign, intdiv($abs, 3600), ($abs % 3600) / 60);
 
         $rows = $conn->fetchAllAssociative(
-            "SELECT DATE(date_sent) AS day, status, COUNT(*) AS cnt
+            "SELECT DATE(date_sent + INTERVAL ? SECOND) AS day, status, COUNT(*) AS cnt
              FROM `{$tableName}`
              WHERE date_sent >= ?
-             GROUP BY DATE(date_sent), status
+             GROUP BY DATE(date_sent + INTERVAL ? SECOND), status
              ORDER BY day ASC",
-            [$from->format('Y-m-d H:i:s')]
+            [$offsetSeconds, $from->format('Y-m-d H:i:s'), $offsetSeconds]
         );
 
         $empty = ['queued' => 0, 'sent' => 0, 'delivered' => 0, 'read' => 0, 'failed' => 0, 'dlq' => 0];
@@ -191,7 +200,7 @@ class MessageLogRepository extends CommonRepository
 
         // Preenche todos os dias do período com zeros para o gráfico ficar contínuo
         for ($i = $days - 1; $i >= 0; --$i) {
-            $day        = (new \DateTime())->modify("-{$i} days")->format('Y-m-d');
+            $day        = (clone $now)->modify("-{$i} days")->format('Y-m-d');
             $data[$day] = $empty;
         }
 
@@ -202,6 +211,14 @@ class MessageLogRepository extends CommonRepository
                 $data[$day][$status] = (int) $row['cnt'];
             }
         }
+
+        // Funil cumulativo por dia — cada status inclui mensagens que avançaram além dele,
+        // consistente com getStatsByPeriod() e os cards do dashboard. NÃO REMOVER.
+        foreach ($data as &$day) {
+            $day['sent']      += $day['delivered'] + $day['read'];
+            $day['delivered'] += $day['read'];
+        }
+        unset($day);
 
         return $data;
     }
