@@ -9,6 +9,7 @@ use Mautic\CampaignBundle\Entity\LeadEventLog;
 use Mautic\CampaignBundle\Event\PendingEvent;
 use Mautic\IntegrationsBundle\Helper\IntegrationsHelper;
 use Mautic\LeadBundle\Entity\Lead;
+use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
 use MauticPlugin\DialogHSMBundle\EventListener\CampaignSubscriber;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppDirectBatchMessage;
@@ -62,6 +63,9 @@ class CampaignSubscriberPerformanceTest extends TestCase
 
     private function makeSubscriber(string $directTransportDsn = 'null://null'): CampaignSubscriber
     {
+        $repo = $this->createMock(MessageLogRepository::class);
+        $repo->method('findByCampaignEventAndLead')->willReturn(null);
+
         return new CampaignSubscriber(
             $this->mockIntegrationsHelper,
             $this->mockBus,
@@ -70,6 +74,7 @@ class CampaignSubscriberPerformanceTest extends TestCase
             $this->mockHandler,
             $this->mockEntityManager,
             $this->mockDirectBatchHandler,
+            $repo,
             $directTransportDsn,
         );
     }

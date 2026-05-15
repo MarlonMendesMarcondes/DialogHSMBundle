@@ -7,9 +7,11 @@ use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumberRepository;
+use MauticPlugin\DialogHSMBundle\Event\WebhookMessageFailedEvent;
 use MauticPlugin\DialogHSMBundle\Service\WebhookProcessor;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
+use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
 class WebhookProcessorTest extends TestCase
 {
@@ -17,6 +19,7 @@ class WebhookProcessorTest extends TestCase
     private WhatsAppNumberRepository $numberRepository;
     private MessageLogRepository&MockObject $logRepository;
     private EntityManagerInterface&MockObject $em;
+    private EventDispatcherInterface&MockObject $dispatcher;
     private WebhookProcessor $processor;
 
     protected function setUp(): void
@@ -28,7 +31,8 @@ class WebhookProcessorTest extends TestCase
 
         $this->logRepository = $this->createMock(MessageLogRepository::class);
         $this->em            = $this->createMock(EntityManagerInterface::class);
-        $this->processor     = new WebhookProcessor($this->numberRepository, $this->logRepository, $this->em);
+        $this->dispatcher    = $this->createMock(EventDispatcherInterface::class);
+        $this->processor     = new WebhookProcessor($this->numberRepository, $this->logRepository, $this->em, $this->dispatcher);
     }
 
     private function makeLog(string $status): MessageLog
@@ -238,10 +242,25 @@ class WebhookProcessorTest extends TestCase
     }
 
     // =========================================================================
-    // Status 'sent' vindo do webhook (ignorado)
+    // Transições válidas: sent (webhook Meta confirma recepção)
     // =========================================================================
 
-    public function testSentFromWebhookIsIgnored(): void
+    public function testSentFromPendingWebhookUpdatesStatus(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_PENDING_WEBHOOK);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+        $this->em->expects($this->once())->method('flush');
+
+        $this->processor->process('+5511999999999', $this->makePayload([
+            $this->makeStatusEntry('wamid.abc', 'sent'),
+        ]));
+
+        $this->assertSame(MessageLog::STATUS_SENT, $log->getStatus());
+    }
+
+    public function testSentFromSentIsNoOp(): void
     {
         $log = $this->makeLog(MessageLog::STATUS_SENT);
 
@@ -254,6 +273,58 @@ class WebhookProcessorTest extends TestCase
         ]));
 
         $this->assertSame(MessageLog::STATUS_SENT, $log->getStatus());
+    }
+
+    // =========================================================================
+    // Transições a partir de pending_webhook
+    // =========================================================================
+
+    public function testDeliveredFromPendingWebhookUpdatesStatus(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_PENDING_WEBHOOK);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+        $this->em->expects($this->once())->method('flush');
+
+        $this->processor->process('+5511999999999', $this->makePayload([
+            $this->makeStatusEntry('wamid.abc', 'delivered'),
+        ]));
+
+        $this->assertSame(MessageLog::STATUS_DELIVERED, $log->getStatus());
+    }
+
+    public function testReadFromPendingWebhookUpdatesStatus(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_PENDING_WEBHOOK);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+        $this->em->expects($this->once())->method('flush');
+
+        $this->processor->process('+5511999999999', $this->makePayload([
+            $this->makeStatusEntry('wamid.abc', 'read'),
+        ]));
+
+        $this->assertSame(MessageLog::STATUS_READ, $log->getStatus());
+    }
+
+    public function testFailedFromPendingWebhookUpdatesStatus(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_PENDING_WEBHOOK);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+        $this->em->expects($this->once())->method('flush');
+
+        $this->processor->process('+5511999999999', $this->makePayload([[
+            'id'     => 'wamid.abc',
+            'status' => 'failed',
+            'errors' => [['code' => 131047, 'title' => 'Re-engagement message']],
+        ]]));
+
+        $this->assertSame(MessageLog::STATUS_FAILED, $log->getStatus());
+        $this->assertSame(131047, $log->getWebhookErrorCode());
     }
 
     // =========================================================================
@@ -490,5 +561,183 @@ class WebhookProcessorTest extends TestCase
         ]));
 
         $this->assertSame(200, $result);
+    }
+
+    // =========================================================================
+    // Transições válidas: failed
+    // =========================================================================
+
+    public function testFailedFromSentUpdatesStatus(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_SENT);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+        $this->em->expects($this->once())->method('flush');
+
+        $this->processor->process('+5511999999999', $this->makePayload([[
+            'id'     => 'wamid.abc',
+            'status' => 'failed',
+            'errors' => [['code' => 131047, 'title' => 'Re-engagement message']],
+        ]]));
+
+        $this->assertSame(MessageLog::STATUS_FAILED, $log->getStatus());
+    }
+
+    public function testFailedFromQueuedUpdatesStatus(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_QUEUED);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+        $this->em->expects($this->once())->method('flush');
+
+        $this->processor->process('+5511999999999', $this->makePayload([[
+            'id'     => 'wamid.abc',
+            'status' => 'failed',
+            'errors' => [['code' => 130429, 'title' => 'Rate limit hit']],
+        ]]));
+
+        $this->assertSame(MessageLog::STATUS_FAILED, $log->getStatus());
+    }
+
+    public function testFailedPersistsWebhookErrorCode(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_SENT);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+        $this->em->method('flush');
+
+        $this->processor->process('+5511999999999', $this->makePayload([[
+            'id'     => 'wamid.abc',
+            'status' => 'failed',
+            'errors' => [['code' => 131026, 'title' => 'Message undeliverable']],
+        ]]));
+
+        $this->assertSame(131026, $log->getWebhookErrorCode());
+        $this->assertSame('Message undeliverable', $log->getErrorMessage());
+    }
+
+    public function testFailedWithNoErrorsArrayLeavesCodeNull(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_SENT);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+        $this->em->method('flush');
+
+        $this->processor->process('+5511999999999', $this->makePayload([[
+            'id'     => 'wamid.abc',
+            'status' => 'failed',
+        ]]));
+
+        $this->assertSame(MessageLog::STATUS_FAILED, $log->getStatus());
+        $this->assertNull($log->getWebhookErrorCode());
+    }
+
+    public function testFailedFromReadIsNoOp(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_READ);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+        $this->em->expects($this->never())->method('flush');
+
+        $this->processor->process('+5511999999999', $this->makePayload([[
+            'id'     => 'wamid.abc',
+            'status' => 'failed',
+            'errors' => [['code' => 131047, 'title' => 'Re-engagement message']],
+        ]]));
+
+        $this->assertSame(MessageLog::STATUS_READ, $log->getStatus());
+    }
+
+    public function testFailedFromDeliveredIsNoOp(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_DELIVERED);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+        $this->em->expects($this->never())->method('flush');
+
+        $this->processor->process('+5511999999999', $this->makePayload([[
+            'id'     => 'wamid.abc',
+            'status' => 'failed',
+            'errors' => [['code' => 131047, 'title' => 'Re-engagement message']],
+        ]]));
+
+        $this->assertSame(MessageLog::STATUS_DELIVERED, $log->getStatus());
+    }
+
+    public function testFailedFromFailedIsNoOp(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_FAILED);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+        $this->em->expects($this->never())->method('flush');
+
+        $this->processor->process('+5511999999999', $this->makePayload([[
+            'id'     => 'wamid.abc',
+            'status' => 'failed',
+            'errors' => [['code' => 131047, 'title' => 'Re-engagement message']],
+        ]]));
+
+        $this->assertSame(MessageLog::STATUS_FAILED, $log->getStatus());
+    }
+
+    // =========================================================================
+    // Despacho de evento WebhookMessageFailedEvent
+    // =========================================================================
+
+    public function testFailedDispatchesWebhookMessageFailedEvent(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_SENT);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+        $this->em->method('flush');
+
+        $this->dispatcher->expects($this->once())
+            ->method('dispatch')
+            ->with($this->isInstanceOf(WebhookMessageFailedEvent::class));
+
+        $this->processor->process('+5511999999999', $this->makePayload([[
+            'id'     => 'wamid.abc',
+            'status' => 'failed',
+            'errors' => [['code' => 131047, 'title' => 'Re-engagement message']],
+        ]]));
+    }
+
+    public function testDeliveredDoesNotDispatchEvent(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_SENT);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+        $this->em->method('flush');
+
+        $this->dispatcher->expects($this->never())->method('dispatch');
+
+        $this->processor->process('+5511999999999', $this->makePayload([
+            $this->makeStatusEntry('wamid.abc', 'delivered'),
+        ]));
+    }
+
+    public function testInvalidTransitionDoesNotDispatchEvent(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_READ);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+
+        $this->dispatcher->expects($this->never())->method('dispatch');
+
+        $this->processor->process('+5511999999999', $this->makePayload([[
+            'id'     => 'wamid.abc',
+            'status' => 'failed',
+            'errors' => [['code' => 131047, 'title' => 'Re-engagement message']],
+        ]]));
     }
 }

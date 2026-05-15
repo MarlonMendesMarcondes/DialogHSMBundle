@@ -12,6 +12,8 @@ use Mautic\CampaignBundle\Event\PendingEvent;
 use Mautic\IntegrationsBundle\Helper\IntegrationsHelper;
 use Mautic\LeadBundle\Entity\Lead;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
+use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
+use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\EventListener\CampaignSubscriber;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppDirectBatchMessage;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
@@ -32,17 +34,24 @@ class CampaignSubscriberActionTest extends TestCase
     private SendWhatsAppMessageHandler&MockObject $mockHandler;
     private EntityManagerInterface&MockObject $mockEntityManager;
     private SendWhatsAppDirectBatchMessageHandler&MockObject $mockDirectBatchHandler;
+    private MessageLogRepository&MockObject $mockMessageLogRepository;
     private CampaignSubscriber $subscriber;
 
     protected function setUp(): void
     {
-        $this->mockIntegrationsHelper  = $this->createMock(IntegrationsHelper::class);
-        $this->mockBus                 = $this->createMock(MessageBusInterface::class);
-        $this->mockLogger              = $this->createMock(LoggerInterface::class);
-        $this->mockNumberModel         = $this->createMock(WhatsAppNumberModel::class);
-        $this->mockHandler             = $this->createMock(SendWhatsAppMessageHandler::class);
-        $this->mockEntityManager       = $this->createMock(EntityManagerInterface::class);
-        $this->mockDirectBatchHandler  = $this->createMock(SendWhatsAppDirectBatchMessageHandler::class);
+        $this->mockIntegrationsHelper      = $this->createMock(IntegrationsHelper::class);
+        $this->mockBus                     = $this->createMock(MessageBusInterface::class);
+        $this->mockLogger                  = $this->createMock(LoggerInterface::class);
+        $this->mockNumberModel             = $this->createMock(WhatsAppNumberModel::class);
+        $this->mockHandler                 = $this->createMock(SendWhatsAppMessageHandler::class);
+        $this->mockEntityManager           = $this->createMock(EntityManagerInterface::class);
+        $this->mockDirectBatchHandler      = $this->createMock(SendWhatsAppDirectBatchMessageHandler::class);
+        $this->mockMessageLogRepository    = $this->createMock(MessageLogRepository::class);
+
+        // Default: primeira execução — sem log existente
+        $this->mockMessageLogRepository
+            ->method('findByCampaignEventAndLead')
+            ->willReturn(null);
 
         $this->subscriber = $this->makeSubscriber();
     }
@@ -57,6 +66,7 @@ class CampaignSubscriberActionTest extends TestCase
             $this->mockHandler,
             $this->mockEntityManager,
             $this->mockDirectBatchHandler,
+            $this->mockMessageLogRepository,
             $directTransportDsn,
         );
     }
@@ -177,7 +187,8 @@ class CampaignSubscriberActionTest extends TestCase
         $this->mockHandler->expects($this->never())->method('__invoke');
         $this->mockBus->expects($this->never())->method('dispatch');
 
-        $event->expects($this->once())->method('pass');
+        // Primeira execução: pass() não é chamado (contato fica is_scheduled=1)
+        $event->expects($this->never())->method('pass');
 
         $this->subscriber->onCampaignTriggerAction($event);
     }
@@ -204,7 +215,8 @@ class CampaignSubscriberActionTest extends TestCase
         $this->mockHandler->expects($this->never())->method('__invoke');
         $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
 
-        $event->expects($this->once())->method('pass');
+        // Primeira execução: pass() não é chamado (contato fica is_scheduled=1)
+        $event->expects($this->never())->method('pass');
 
         $this->subscriber->onCampaignTriggerActionQueue($event);
     }
@@ -240,7 +252,8 @@ class CampaignSubscriberActionTest extends TestCase
 
         $this->mockLogger->expects($this->once())->method('warning');
 
-        $event->expects($this->exactly(2))->method('pass');
+        // Primeira execução: pass() não é chamado (contatos ficam is_scheduled=1)
+        $event->expects($this->never())->method('pass');
 
         $this->subscriber->onCampaignTriggerAction($event);
 
@@ -274,7 +287,8 @@ class CampaignSubscriberActionTest extends TestCase
                 $capturedBatch = $batch;
             });
 
-        $event->expects($this->exactly(3))->method('pass');
+        // Primeira execução: pass() não é chamado (contatos ficam is_scheduled=1)
+        $event->expects($this->never())->method('pass');
 
         $this->subscriber->onCampaignTriggerAction($event);
 
@@ -302,6 +316,7 @@ class CampaignSubscriberActionTest extends TestCase
 
         $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
         $event->expects($this->exactly(2))->method('fail');
+        $event->expects($this->never())->method('pass');
 
         $this->subscriber->onCampaignTriggerAction($event);
     }
@@ -423,7 +438,8 @@ class CampaignSubscriberActionTest extends TestCase
                 $capturedBatch = $batch;
             });
 
-        $event->expects($this->exactly(2))->method('pass');
+        // Primeira execução: pass() não é chamado (contatos válidos ficam is_scheduled=1)
+        $event->expects($this->never())->method('pass');
         $event->expects($this->once())
             ->method('fail')
             ->with($this->anything(), 'dialoghsm.campaign.error.invalid_phone');
@@ -464,7 +480,8 @@ class CampaignSubscriberActionTest extends TestCase
 
         $this->mockLogger->expects($this->once())->method('warning');
 
-        $event->expects($this->once())->method('pass');
+        // Primeira execução: pass() não é chamado (contato fica is_scheduled=1)
+        $event->expects($this->never())->method('pass');
 
         $this->subscriber->onCampaignTriggerAction($event);
 
@@ -490,7 +507,8 @@ class CampaignSubscriberActionTest extends TestCase
         $this->mockDirectBatchHandler->method('__invoke');
         $this->mockLogger->expects($this->never())->method('warning');
 
-        $event->expects($this->once())->method('pass');
+        // Primeira execução: pass() não é chamado (contato fica is_scheduled=1)
+        $event->expects($this->never())->method('pass');
 
         $this->subscriber->onCampaignTriggerAction($event);
     }
@@ -527,7 +545,8 @@ class CampaignSubscriberActionTest extends TestCase
 
         $this->mockLogger->expects($this->never())->method('warning');
 
-        $event->expects($this->exactly(2))->method('pass');
+        // Primeira execução: pass() não é chamado (contatos ficam is_scheduled=1)
+        $event->expects($this->never())->method('pass');
 
         $subscriber = $this->makeSubscriber('redis://localhost:6379');
         $subscriber->onCampaignTriggerAction($event);
@@ -563,7 +582,8 @@ class CampaignSubscriberActionTest extends TestCase
                 $capturedBatch = $batch;
             });
 
-        $event->expects($this->once())->method('pass');
+        // Primeira execução: pass() não é chamado (contato fica is_scheduled=1)
+        $event->expects($this->never())->method('pass');
 
         $this->subscriber->onCampaignTriggerAction($event);
 
@@ -600,7 +620,8 @@ class CampaignSubscriberActionTest extends TestCase
             ->method('dispatch')
             ->willReturn(new Envelope(new \stdClass()));
 
-        $event->expects($this->exactly(3))->method('pass');
+        // Primeira execução: pass() não é chamado (contatos ficam is_scheduled=1)
+        $event->expects($this->never())->method('pass');
 
         $start = microtime(true);
         $this->subscriber->onCampaignTriggerActionQueue($event);
@@ -638,7 +659,8 @@ class CampaignSubscriberActionTest extends TestCase
                 return new Envelope($msg);
             });
 
-        $event->expects($this->once())->method('pass');
+        // Primeira execução: pass() não é chamado (contato fica is_scheduled=1)
+        $event->expects($this->never())->method('pass');
 
         $this->subscriber->onCampaignTriggerActionQueue($event);
 
@@ -671,7 +693,8 @@ class CampaignSubscriberActionTest extends TestCase
             ->with($this->isInstanceOf(SendWhatsAppMessage::class))
             ->willReturn(new Envelope(new \stdClass()));
 
-        $event->expects($this->once())->method('pass');
+        // Primeira execução: pass() não é chamado (contato fica is_scheduled=1)
+        $event->expects($this->never())->method('pass');
 
         $this->subscriber->onCampaignTriggerActionQueue($event);
     }
@@ -706,7 +729,8 @@ class CampaignSubscriberActionTest extends TestCase
                 return new Envelope($msg);
             });
 
-        $event->expects($this->exactly(3))->method('pass');
+        // Primeira execução: pass() não é chamado (contatos ficam is_scheduled=1)
+        $event->expects($this->never())->method('pass');
 
         $this->subscriber->onCampaignTriggerActionQueue($event);
 
@@ -744,7 +768,8 @@ class CampaignSubscriberActionTest extends TestCase
                 return new Envelope($msg);
             });
 
-        $event->expects($this->exactly(3))->method('pass');
+        // Primeira execução: pass() não é chamado (contatos ficam is_scheduled=1)
+        $event->expects($this->never())->method('pass');
 
         $this->subscriber->onCampaignTriggerActionQueue($event);
 
@@ -774,7 +799,8 @@ class CampaignSubscriberActionTest extends TestCase
                 return new Envelope($msg);
             });
 
-        $event->expects($this->once())->method('pass');
+        // Primeira execução: pass() não é chamado (contato fica is_scheduled=1)
+        $event->expects($this->never())->method('pass');
 
         $this->subscriber->onCampaignTriggerActionQueue($event);
 
@@ -806,7 +832,8 @@ class CampaignSubscriberActionTest extends TestCase
                 return new Envelope($msg);
             });
 
-        $event->expects($this->once())->method('pass');
+        // Primeira execução: pass() não é chamado (contato fica is_scheduled=1)
+        $event->expects($this->never())->method('pass');
 
         $this->subscriber->onCampaignTriggerActionQueue($event);
 
@@ -838,7 +865,8 @@ class CampaignSubscriberActionTest extends TestCase
                 return new Envelope($msg);
             });
 
-        $event->expects($this->once())->method('pass');
+        // Primeira execução: pass() não é chamado (contato fica is_scheduled=1)
+        $event->expects($this->never())->method('pass');
 
         $this->subscriber->onCampaignTriggerActionQueue($event);
 
@@ -867,9 +895,9 @@ class CampaignSubscriberActionTest extends TestCase
         $this->mockLogger->expects($this->once())->method('warning')
             ->with($this->stringContains('fila não configurada'));
 
-        // Contato recebe passWithError (não pass), pois o envio não ocorreu
+        // Contato recebe fail, pois o envio não ocorreu (fila não configurada)
         $event->expects($this->never())->method('pass');
-        $event->expects($this->once())->method('passWithError');
+        $event->expects($this->once())->method('fail');
 
         $this->subscriber->onCampaignTriggerActionQueue($event);
     }
@@ -932,7 +960,8 @@ class CampaignSubscriberActionTest extends TestCase
                 $capturedBatch = $batch;
             });
 
-        $event->expects($this->once())->method('pass');
+        // Primeira execução: pass() não é chamado (contato fica is_scheduled=1)
+        $event->expects($this->never())->method('pass');
         $this->subscriber->onCampaignTriggerAction($event);
 
         $item = $capturedBatch->items[0];
@@ -1058,7 +1087,8 @@ class CampaignSubscriberActionTest extends TestCase
         $contact = $this->buildContact('+5511999999999', 1);
         $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
 
-        $event->expects($this->once())->method('pass');
+        // Primeira execução: pass() não é chamado (contato fica is_scheduled=1)
+        $event->expects($this->never())->method('pass');
 
         $this->subscriber->onCampaignTriggerAction($event);
     }
@@ -1084,7 +1114,8 @@ class CampaignSubscriberActionTest extends TestCase
                 $capturedBatch = $batch;
             });
 
-        $event->expects($this->once())->method('pass');
+        // Primeira execução: pass() não é chamado (contato fica is_scheduled=1)
+        $event->expects($this->never())->method('pass');
         $this->subscriber->onCampaignTriggerAction($event);
 
         $this->assertEquals('https://custom.plugin.url/messages', $capturedBatch->items[0]->baseUrl);
@@ -1107,7 +1138,8 @@ class CampaignSubscriberActionTest extends TestCase
                 $capturedBatch = $batch;
             });
 
-        $event->expects($this->once())->method('pass');
+        // Primeira execução: pass() não é chamado (contato fica is_scheduled=1)
+        $event->expects($this->never())->method('pass');
         $this->subscriber->onCampaignTriggerAction($event);
 
         $this->assertEquals('https://waba-v2.360dialog.io/messages', $capturedBatch->items[0]->baseUrl);
@@ -1140,7 +1172,8 @@ class CampaignSubscriberActionTest extends TestCase
             }))
             ->willReturn(new Envelope(new \stdClass()));
 
-        $event->expects($this->once())->method('pass');
+        // Primeira execução: pass() não é chamado (contato fica is_scheduled=1)
+        $event->expects($this->never())->method('pass');
 
         $subscriber = $this->makeSubscriber('redis://localhost:6379');
         $subscriber->onCampaignTriggerAction($event);
@@ -1178,7 +1211,8 @@ class CampaignSubscriberActionTest extends TestCase
             }))
             ->willReturn(new Envelope(new \stdClass()));
 
-        $event->expects($this->exactly(3))->method('pass');
+        // Primeira execução: pass() não é chamado (contatos ficam is_scheduled=1)
+        $event->expects($this->never())->method('pass');
 
         $start      = microtime(true);
         $subscriber = $this->makeSubscriber('redis://localhost:6379');
@@ -1217,7 +1251,8 @@ class CampaignSubscriberActionTest extends TestCase
                 $capturedPayload = $batch->items[0]->payloadData;
             });
 
-        $event->method('pass');
+        // Primeira execução: pass() não é chamado
+        $event->expects($this->never())->method('pass');
         $this->subscriber->onCampaignTriggerAction($event);
 
         $this->assertArrayHasKey('content', $capturedPayload);
@@ -1248,7 +1283,8 @@ class CampaignSubscriberActionTest extends TestCase
                 $capturedPayload = $batch->items[0]->payloadData;
             });
 
-        $event->method('pass');
+        // Primeira execução: pass() não é chamado
+        $event->expects($this->never())->method('pass');
         $this->subscriber->onCampaignTriggerAction($event);
 
         $this->assertArrayHasKey('content', $capturedPayload);
@@ -1280,7 +1316,8 @@ class CampaignSubscriberActionTest extends TestCase
                 $capturedPayload = $batch->items[0]->payloadData;
             });
 
-        $event->method('pass');
+        // Primeira execução: pass() não é chamado
+        $event->expects($this->never())->method('pass');
         $this->subscriber->onCampaignTriggerAction($event);
 
         $this->assertArrayHasKey('content', $capturedPayload);
@@ -1303,7 +1340,8 @@ class CampaignSubscriberActionTest extends TestCase
         $this->mockBus->expects($this->never())->method('dispatch');
         $this->mockHandler->expects($this->never())->method('__invoke');
 
-        $event->expects($this->once())->method('pass');
+        // Primeira execução: pass() não é chamado (contato fica is_scheduled=1)
+        $event->expects($this->never())->method('pass');
 
         $subscriber = $this->makeSubscriber('null://null');
         $subscriber->onCampaignTriggerAction($event);
@@ -1330,7 +1368,8 @@ class CampaignSubscriberActionTest extends TestCase
         $this->mockDirectBatchHandler->expects($this->once())->method('__invoke');
 
         $event->expects($this->never())->method('fail');
-        $event->expects($this->once())->method('pass');
+        // Primeira execução: pass() não é chamado (contato fica is_scheduled=1)
+        $event->expects($this->never())->method('pass');
 
         $this->subscriber->onCampaignTriggerAction($event);
     }
@@ -1395,6 +1434,8 @@ class CampaignSubscriberActionTest extends TestCase
 
         $contact = $this->buildContact('+5511999999999', 1);
         $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
+        // Primeira execução: pass() não é chamado
+        $event->expects($this->never())->method('pass');
         $this->subscriber->onCampaignTriggerAction($event);
 
         $this->assertNotNull($capturedBatch);
@@ -1418,6 +1459,8 @@ class CampaignSubscriberActionTest extends TestCase
 
         $contact = $this->buildContact('+5511999999999', 1);
         $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp_queue', [1 => $contact]);
+        // Primeira execução: pass() não é chamado
+        $event->expects($this->never())->method('pass');
         $this->subscriber->onCampaignTriggerActionQueue($event);
 
         $this->assertNotNull($captured);
@@ -1497,11 +1540,202 @@ class CampaignSubscriberActionTest extends TestCase
         $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
 
         $event->expects($this->never())->method('fail');
-        $event->expects($this->once())->method('pass');
+        // Primeira execução: pass() não é chamado (contato fica is_scheduled=1)
+        $event->expects($this->never())->method('pass');
 
         $this->subscriber->onCampaignTriggerAction($event);
 
         $this->assertNotNull($capturedBatch);
         $this->assertSame('+5544999067833', $capturedBatch->items[0]->phone);
+    }
+
+    // -------------------------------------------------------------------------
+    // Testes: re-execução — resolveFromWebhookLog() com log existente
+    // -------------------------------------------------------------------------
+
+    /**
+     * Cria um subscriber fresh com o repositório configurado para retornar $log.
+     * Necessário porque o setUp configura um stub padrão (willReturn null) que tem
+     * precedência sobre expects() adicionados depois — PHPUnit usa o primeiro matcher
+     * que satisfaz a chamada.
+     */
+    private function makeReExecutionSubscriber(MessageLog $log): CampaignSubscriber
+    {
+        $this->mockMessageLogRepository = $this->createMock(MessageLogRepository::class);
+        $this->mockMessageLogRepository
+            ->expects($this->once())
+            ->method('findByCampaignEventAndLead')
+            ->willReturn($log);
+
+        return $this->makeSubscriber();
+    }
+
+    /**
+     * Re-execução: log existente com status 'sent' → pass() é chamado.
+     */
+    public function testReExecutionWithSentStatusCallsPass(): void
+    {
+        $this->enableIntegration();
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
+
+        $log = new MessageLog();
+        $log->setStatus(MessageLog::STATUS_SENT);
+        $log->setDateSent(new \DateTime());
+
+        $subscriber = $this->makeReExecutionSubscriber($log);
+
+        $contact = $this->buildContact('+5511999999999', 1);
+        $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
+
+        $event->expects($this->once())->method('pass');
+        $event->expects($this->never())->method('fail');
+        $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
+
+        $subscriber->onCampaignTriggerAction($event);
+    }
+
+    /**
+     * Re-execução: log existente com status 'delivered' → pass() é chamado.
+     */
+    public function testReExecutionWithDeliveredStatusCallsPass(): void
+    {
+        $this->enableIntegration();
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
+
+        $log = new MessageLog();
+        $log->setStatus(MessageLog::STATUS_DELIVERED);
+        $log->setDateSent(new \DateTime());
+
+        $subscriber = $this->makeReExecutionSubscriber($log);
+
+        $contact = $this->buildContact('+5511999999999', 1);
+        $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
+
+        $event->expects($this->once())->method('pass');
+        $event->expects($this->never())->method('fail');
+        $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
+
+        $subscriber->onCampaignTriggerAction($event);
+    }
+
+    /**
+     * Re-execução: log existente com status 'read' → pass() é chamado.
+     */
+    public function testReExecutionWithReadStatusCallsPass(): void
+    {
+        $this->enableIntegration();
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
+
+        $log = new MessageLog();
+        $log->setStatus(MessageLog::STATUS_READ);
+        $log->setDateSent(new \DateTime());
+
+        $subscriber = $this->makeReExecutionSubscriber($log);
+
+        $contact = $this->buildContact('+5511999999999', 1);
+        $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
+
+        $event->expects($this->once())->method('pass');
+        $event->expects($this->never())->method('fail');
+        $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
+
+        $subscriber->onCampaignTriggerAction($event);
+    }
+
+    /**
+     * Re-execução: log existente com status 'failed' → fail() é chamado.
+     */
+    public function testReExecutionWithFailedStatusCallsFail(): void
+    {
+        $this->enableIntegration();
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
+
+        $log = new MessageLog();
+        $log->setStatus(MessageLog::STATUS_FAILED);
+        $log->setDateSent(new \DateTime());
+
+        $subscriber = $this->makeReExecutionSubscriber($log);
+
+        $contact = $this->buildContact('+5511999999999', 1);
+        $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
+
+        $event->expects($this->never())->method('pass');
+        $event->expects($this->once())->method('fail');
+        $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
+
+        $subscriber->onCampaignTriggerAction($event);
+    }
+
+    /**
+     * Re-execução: log existente com status 'dlq' → fail() é chamado.
+     */
+    public function testReExecutionWithDlqStatusCallsFail(): void
+    {
+        $this->enableIntegration();
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
+
+        $log = new MessageLog();
+        $log->setStatus(MessageLog::STATUS_DLQ);
+        $log->setDateSent(new \DateTime());
+
+        $subscriber = $this->makeReExecutionSubscriber($log);
+
+        $contact = $this->buildContact('+5511999999999', 1);
+        $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
+
+        $event->expects($this->never())->method('pass');
+        $event->expects($this->once())->method('fail');
+        $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
+
+        $subscriber->onCampaignTriggerAction($event);
+    }
+
+    /**
+     * Re-execução: log com status 'pending_webhook' dentro do timeout → nenhum pass/fail,
+     * contato permanece agendado aguardando webhook.
+     */
+    public function testReExecutionWithPendingWebhookWithinTimeoutWaits(): void
+    {
+        $this->enableIntegration();
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
+
+        $log = new MessageLog();
+        $log->setStatus(MessageLog::STATUS_PENDING_WEBHOOK);
+        $log->setDateSent(new \DateTime('-1 minute'));
+
+        $subscriber = $this->makeReExecutionSubscriber($log);
+
+        $contact = $this->buildContact('+5511999999999', 1);
+        $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
+
+        $event->expects($this->never())->method('pass');
+        $event->expects($this->never())->method('fail');
+        $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
+
+        $subscriber->onCampaignTriggerAction($event);
+    }
+
+    /**
+     * Re-execução: log com status 'pending_webhook' além do timeout → fail() é chamado.
+     */
+    public function testReExecutionWithPendingWebhookTimedOutCallsFail(): void
+    {
+        $this->enableIntegration();
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
+
+        $log = new MessageLog();
+        $log->setStatus(MessageLog::STATUS_PENDING_WEBHOOK);
+        $log->setDateSent(new \DateTime('-2 hours'));
+
+        $subscriber = $this->makeReExecutionSubscriber($log);
+
+        $contact = $this->buildContact('+5511999999999', 1);
+        $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
+
+        $event->expects($this->never())->method('pass');
+        $event->expects($this->once())->method('fail');
+        $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
+
+        $subscriber->onCampaignTriggerAction($event);
     }
 }

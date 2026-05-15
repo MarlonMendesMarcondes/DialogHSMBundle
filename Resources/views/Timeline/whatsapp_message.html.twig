@@ -32,7 +32,12 @@
     {% endif %}
     {% if item.error_message is defined and item.error_message %}
         <dt>{{ 'dialoghsm.log.error'|trans }}</dt>
-        <dd class="text-danger small">{{ item.error_message }}</dd>
+        <dd class="text-danger small">
+            {% if item.webhook_error_code is defined and item.webhook_error_code %}
+                <strong>[{{ item.webhook_error_code }}]</strong>
+            {% endif %}
+            {{ item.error_message }}
+        </dd>
     {% endif %}
 </dl>
 {% endif %}

@@ -21,6 +21,7 @@ use MauticPlugin\DialogHSMBundle\Migrations\Version_1_1_0;
 use MauticPlugin\DialogHSMBundle\Migrations\Version_1_1_1;
 use MauticPlugin\DialogHSMBundle\Migrations\Version_1_2_0;
 use MauticPlugin\DialogHSMBundle\Migrations\Version_1_4_1;
+use MauticPlugin\DialogHSMBundle\Migrations\Version_1_4_2;
 use Mautic\IntegrationsBundle\Migration\AbstractMigration;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
@@ -575,6 +576,35 @@ class MigrationIdempotencyTest extends TestCase
     }
 
     // =========================================================================
+    // Version_1_4_2 — adiciona webhook_error_code
+    // =========================================================================
+
+    public function testV142ApplicableWhenColumnAbsent(): void
+    {
+        $migration = $this->migration(Version_1_4_2::class);
+        $this->assertTrue($this->callProtected($migration, 'isApplicable', $this->schemaWithTable([])));
+    }
+
+    public function testV142NotApplicableWhenColumnPresent(): void
+    {
+        $migration = $this->migration(Version_1_4_2::class);
+        $this->assertFalse($this->callProtected($migration, 'isApplicable', $this->schemaWithTable(['webhook_error_code'])));
+    }
+
+    public function testV142NotApplicableWhenTableAbsent(): void
+    {
+        $migration = $this->migration(Version_1_4_2::class);
+        $this->assertFalse($this->callProtected($migration, 'isApplicable', $this->schemaWithoutTable()));
+    }
+
+    public function testV142SqlAddsWebhookErrorCodeColumn(): void
+    {
+        $sql = implode(' ', $this->collectSql($this->migration(Version_1_4_2::class)));
+        $this->assertStringContainsStringIgnoringCase('ADD COLUMN IF NOT EXISTS', $sql);
+        $this->assertStringContainsString('webhook_error_code', $sql);
+    }
+
+    // =========================================================================
     // Contrato geral: nenhuma migration gera SQL vazio
     // =========================================================================
 
@@ -605,6 +635,7 @@ class MigrationIdempotencyTest extends TestCase
             [Version_1_1_1::class],
             [Version_1_2_0::class],
             [Version_1_4_1::class],
+            [Version_1_4_2::class],
         ];
     }
 }

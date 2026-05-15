@@ -288,6 +288,33 @@ class MessageLogTest extends TestCase
     }
 
     // =========================================================================
+    // webhookErrorCode
+    // =========================================================================
+
+    public function testGetWebhookErrorCodeReturnsNullByDefault(): void
+    {
+        $this->assertNull($this->makeLog()->getWebhookErrorCode());
+    }
+
+    public function testSetWebhookErrorCodeStoresValue(): void
+    {
+        $log = $this->makeLog()->setWebhookErrorCode(131047);
+        $this->assertSame(131047, $log->getWebhookErrorCode());
+    }
+
+    public function testSetWebhookErrorCodeAcceptsNull(): void
+    {
+        $log = $this->makeLog()->setWebhookErrorCode(131047)->setWebhookErrorCode(null);
+        $this->assertNull($log->getWebhookErrorCode());
+    }
+
+    public function testSetWebhookErrorCodeReturnsSelf(): void
+    {
+        $log = $this->makeLog();
+        $this->assertSame($log, $log->setWebhookErrorCode(131047));
+    }
+
+    // =========================================================================
     // loadMetadata — verifica que é chamado sem exceções
     // =========================================================================
 

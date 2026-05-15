@@ -10,12 +10,13 @@ use Mautic\CoreBundle\Doctrine\Mapping\ClassMetadataBuilder;
 
 class MessageLog
 {
-    public const STATUS_QUEUED    = 'queued';
-    public const STATUS_SENT      = 'sent';
-    public const STATUS_DELIVERED = 'delivered';
-    public const STATUS_READ      = 'read';
-    public const STATUS_FAILED    = 'failed';
-    public const STATUS_DLQ       = 'dlq';
+    public const STATUS_QUEUED           = 'queued';
+    public const STATUS_PENDING_WEBHOOK  = 'pending_webhook';
+    public const STATUS_SENT             = 'sent';
+    public const STATUS_DELIVERED        = 'delivered';
+    public const STATUS_READ             = 'read';
+    public const STATUS_FAILED           = 'failed';
+    public const STATUS_DLQ              = 'dlq';
 
     private ?int $id = null;
     private ?string $wamid = null;
@@ -29,6 +30,7 @@ class MessageLog
     private ?int $httpStatusCode = null;
     private ?string $apiResponse = null;
     private ?string $errorMessage = null;
+    private ?int $webhookErrorCode = null;
     private ?\DateTimeInterface $dateSent = null;
     private ?\DateTimeInterface $dateDelivered = null;
     private ?\DateTimeInterface $dateRead = null;
@@ -130,6 +132,12 @@ class MessageLog
         $builder
             ->createField('dateRead', Types::DATETIME_MUTABLE)
             ->columnName('date_read')
+            ->nullable()
+            ->build();
+
+        $builder
+            ->createField('webhookErrorCode', Types::INTEGER)
+            ->columnName('webhook_error_code')
             ->nullable()
             ->build();
     }
@@ -267,6 +275,18 @@ class MessageLog
     public function setErrorMessage(?string $errorMessage): self
     {
         $this->errorMessage = $errorMessage;
+
+        return $this;
+    }
+
+    public function getWebhookErrorCode(): ?int
+    {
+        return $this->webhookErrorCode;
+    }
+
+    public function setWebhookErrorCode(?int $webhookErrorCode): self
+    {
+        $this->webhookErrorCode = $webhookErrorCode;
 
         return $this;
     }

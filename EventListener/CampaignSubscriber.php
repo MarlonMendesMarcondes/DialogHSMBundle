@@ -20,6 +20,7 @@ use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppDirectBatchMessage;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppDirectBatchMessageHandler;
 use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppMessageHandler;
+use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Model\WhatsAppNumberModel;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
@@ -28,6 +29,8 @@ use Symfony\Component\Messenger\MessageBusInterface;
 
 class CampaignSubscriber implements EventSubscriberInterface
 {
+    private const WEBHOOK_TIMEOUT_SECONDS = 120;
+
     public function __construct(
         private IntegrationsHelper $integrationsHelper,
         private MessageBusInterface $bus,
@@ -36,6 +39,7 @@ class CampaignSubscriber implements EventSubscriberInterface
         private SendWhatsAppMessageHandler $handler,
         private EntityManagerInterface $entityManager,
         private SendWhatsAppDirectBatchMessageHandler $directBatchHandler,
+        private MessageLogRepository $messageLogRepository,
         private string $directTransportDsn = 'null://null',
     ) {
     }
@@ -236,6 +240,18 @@ class CampaignSubscriber implements EventSubscriberInterface
         $sentCount      = 0;
 
         foreach ($contacts as $logId => $contact) {
+            // Re-execução: webhook já chegou — decide com base no status real
+            $existingLog = $this->messageLogRepository->findByCampaignEventAndLead(
+                (int) $campaignEventId,
+                (int) $contact->getId()
+            );
+
+            if ($existingLog !== null) {
+                $this->resolveFromWebhookLog($event, $logId, $existingLog);
+                continue;
+            }
+
+            // Primeira execução: valida e envia
             $phone = $this->normalizePhone($contact->getLeadPhoneNumber() ?? '');
 
             // Payload construído aqui (antes da validação) para ter templateName disponível nos logs de erro.
@@ -286,23 +302,55 @@ class CampaignSubscriber implements EventSubscriberInterface
                     $campaignId,
                     $campaignEventId,
                 );
-                $success = false;
-            }
-
-            if ($success) {
-                $event->pass($event->getPending()->get($logId));
-            } else {
-                $event->passWithError(
+                $event->fail(
                     $event->getPending()->get($logId),
                     'dialoghsm.campaign.error.send_failed'
                 );
+                continue;
             }
+
+            if (!$success) {
+                $event->fail(
+                    $event->getPending()->get($logId),
+                    'dialoghsm.campaign.error.send_failed'
+                );
+                continue;
+            }
+
+            // Mensagem enviada: aguarda webhook da Meta antes de avançar na campanha.
+            // O contato permanece is_scheduled=1 e será reavaliado no próximo batch.
 
             ++$sentCount;
 
             if ($applyBatchSleep && $sendDelay > 0 && $sentCount % $effectiveBatch === 0) {
                 usleep($sendDelay * 1_000_000);
             }
+        }
+    }
+
+    private function resolveFromWebhookLog(PendingEvent $event, mixed $logId, MessageLog $log): void
+    {
+        $status = $log->getStatus();
+
+        $successStatuses = [MessageLog::STATUS_SENT, MessageLog::STATUS_DELIVERED, MessageLog::STATUS_READ];
+        if (in_array($status, $successStatuses, true)) {
+            $event->pass($event->getPending()->get($logId));
+
+            return;
+        }
+
+        if (MessageLog::STATUS_FAILED === $status || MessageLog::STATUS_DLQ === $status) {
+            $event->fail($event->getPending()->get($logId), 'dialoghsm.campaign.error.webhook_failed');
+
+            return;
+        }
+
+        if (MessageLog::STATUS_PENDING_WEBHOOK === $status) {
+            $elapsed = (new \DateTime())->getTimestamp() - ($log->getDateSent()?->getTimestamp() ?? 0);
+            if ($elapsed > self::WEBHOOK_TIMEOUT_SECONDS) {
+                $event->fail($event->getPending()->get($logId), 'dialoghsm.campaign.error.webhook_timeout');
+            }
+            // Dentro do timeout: permanece is_scheduled=1, reavaliado no próximo batch
         }
     }
 

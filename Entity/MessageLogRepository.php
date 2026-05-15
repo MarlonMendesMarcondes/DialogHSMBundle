@@ -240,6 +240,21 @@ class MessageLogRepository extends CommonRepository
         return $results[0] ?? null;
     }
 
+    public function findByCampaignEventAndLead(int $campaignEventId, int $leadId): ?MessageLog
+    {
+        $results = $this->createQueryBuilder('dhml')
+            ->andWhere('dhml.campaignEventId = :eventId')
+            ->andWhere('dhml.leadId = :leadId')
+            ->setParameter('eventId', $campaignEventId)
+            ->setParameter('leadId', $leadId)
+            ->orderBy('dhml.id', 'DESC')
+            ->setMaxResults(1)
+            ->getQuery()
+            ->getResult();
+
+        return $results[0] ?? null;
+    }
+
     /**
      * Tamanho de cada lote no prune() e deleteQueued(). Limita o lock por statement a ~1k linhas,
      * evitando travamento prolongado em tabelas grandes.
@@ -369,7 +384,7 @@ class MessageLogRepository extends CommonRepository
         $tableName = $this->getEntityManager()->getClassMetadata(MessageLog::class)->getTableName();
 
         $qb = $conn->createQueryBuilder()
-            ->select('ml.id, ml.template_name, ml.phone_number, ml.status, ml.error_message, ml.campaign_id, ml.sender_name, ml.date_sent, ml.date_delivered, ml.date_read, ml.lead_id')
+            ->select('ml.id, ml.template_name, ml.phone_number, ml.status, ml.error_message, ml.webhook_error_code, ml.campaign_id, ml.sender_name, ml.date_sent, ml.date_delivered, ml.date_read, ml.lead_id')
             ->from($tableName, 'ml')
             ->where('ml.lead_id = :leadId')
             ->setParameter('leadId', $leadId);

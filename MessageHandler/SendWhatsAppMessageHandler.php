@@ -118,7 +118,7 @@ class SendWhatsAppMessageHandler implements MessageHandlerInterface
         }
 
         $log->setWamid($result['wamid'] ?? null);
-        $log->setStatus($result['success'] ? MessageLog::STATUS_SENT : MessageLog::STATUS_FAILED);
+        $log->setStatus($result['success'] ? MessageLog::STATUS_PENDING_WEBHOOK : MessageLog::STATUS_FAILED);
         $log->setHttpStatusCode($result['http_status'] ?? null);
         $log->setApiResponse(!empty($result['response']) ? json_encode($result['response']) : null);
         $log->setErrorMessage($result['error'] ?? null);
