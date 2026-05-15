@@ -27,7 +27,7 @@
                     <label class="sr-only" for="filter-status">{{ 'dialoghsm.log.filter.status'|trans }}</label>
                     <select name="dialoghsm_log_filter[status]" id="filter-status" class="form-control input-sm">
                         <option value="">{{ 'dialoghsm.log.filter.status.all'|trans }}</option>
-                        {% for s in ['queued', 'sent', 'delivered', 'read', 'failed', 'dlq'] %}
+                        {% for s in ['queued', 'pending_webhook', 'sent', 'delivered', 'read', 'failed', 'dlq'] %}
                             <option value="{{ s }}" {% if (filters.status ?? '') == s %}selected{% endif %}>{{ ('dialoghsm.log.status.' ~ s)|trans }}</option>
                         {% endfor %}
                     </select>
@@ -141,6 +141,8 @@
                     <td>
                         {% if item.getStatus() == 'queued' %}
                             <span class="label label-default">{{ 'dialoghsm.log.status.queued'|trans }}</span>
+                        {% elseif item.getStatus() == 'pending_webhook' %}
+                            <span class="label" style="background-color:#b08020;color:#fff;">{{ 'dialoghsm.log.status.pending_webhook'|trans }}</span>
                         {% elseif item.getStatus() == 'sent' %}
                             <span class="label label-success">{{ 'dialoghsm.log.status.sent'|trans }}</span>
                         {% elseif item.getStatus() == 'delivered' %}

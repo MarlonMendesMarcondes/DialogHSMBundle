@@ -45,9 +45,10 @@
     {# ── Últimas 24h ── #}
     <h4 class="text-muted" style="margin: 0 0 12px;">{{ 'dialoghsm.dashboard.period.24h'|trans }}</h4>
     <div class="dialoghsm-stat-row">
-        {{ _self.statCard('dialoghsm.dashboard.total',     stats24h.total,     'ri-send-plane-line',      '#555') }}
-        {{ _self.statCard('dialoghsm.dashboard.queued',    stats24h.queued,    'ri-time-line',             '#888') }}
-        {{ _self.statCard('dialoghsm.dashboard.sent',      stats24h.sent,      'ri-checkbox-circle-line',  '#5cb85c') }}
+        {{ _self.statCard('dialoghsm.dashboard.total',           stats24h.total,           'ri-send-plane-line',      '#555') }}
+        {{ _self.statCard('dialoghsm.dashboard.queued',          stats24h.queued,          'ri-time-line',            '#888') }}
+        {{ _self.statCard('dialoghsm.dashboard.pending_webhook', stats24h.pending_webhook, 'ri-loader-line',          '#b08020') }}
+        {{ _self.statCard('dialoghsm.dashboard.sent',            stats24h.sent,            'ri-checkbox-circle-line', '#5cb85c') }}
         {{ _self.statCard('dialoghsm.dashboard.delivered', stats24h.delivered, 'ri-check-double-line',     '#17a2b8') }}
         {{ _self.statCard('dialoghsm.dashboard.read',      stats24h.read,      'ri-eye-line',              '#0275d8') }}
         {{ _self.statCard('dialoghsm.dashboard.failed',    stats24h.failed,    'ri-close-circle-line',     '#d9534f') }}
@@ -60,9 +61,10 @@
     {# ── Últimos 7 dias ── #}
     <h4 class="text-muted" style="margin: 0 0 12px;">{{ 'dialoghsm.dashboard.period.7d'|trans }}</h4>
     <div class="dialoghsm-stat-row" style="margin-bottom: 32px;">
-        {{ _self.statCard('dialoghsm.dashboard.total',     stats7d.total,     'ri-send-plane-line',      '#555') }}
-        {{ _self.statCard('dialoghsm.dashboard.queued',    stats7d.queued,    'ri-time-line',             '#888') }}
-        {{ _self.statCard('dialoghsm.dashboard.sent',      stats7d.sent,      'ri-checkbox-circle-line',  '#5cb85c') }}
+        {{ _self.statCard('dialoghsm.dashboard.total',           stats7d.total,           'ri-send-plane-line',      '#555') }}
+        {{ _self.statCard('dialoghsm.dashboard.queued',          stats7d.queued,          'ri-time-line',            '#888') }}
+        {{ _self.statCard('dialoghsm.dashboard.pending_webhook', stats7d.pending_webhook, 'ri-loader-line',          '#b08020') }}
+        {{ _self.statCard('dialoghsm.dashboard.sent',            stats7d.sent,            'ri-checkbox-circle-line', '#5cb85c') }}
         {{ _self.statCard('dialoghsm.dashboard.delivered', stats7d.delivered, 'ri-check-double-line',     '#17a2b8') }}
         {{ _self.statCard('dialoghsm.dashboard.read',      stats7d.read,      'ri-eye-line',              '#0275d8') }}
         {{ _self.statCard('dialoghsm.dashboard.failed',    stats7d.failed,    'ri-close-circle-line',     '#d9534f') }}
