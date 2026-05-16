@@ -118,10 +118,12 @@ class SendWhatsAppMessageHandler implements MessageHandlerInterface
         }
 
         $log->setWamid($result['wamid'] ?? null);
+        // pending_webhook = 360dialog aceitou (HTTP 200); a Meta ainda não confirmou.
+        // failed aqui = erro de API (HTTP 4xx/5xx); rejeição da Meta vem via webhook.
         $log->setStatus($result['success'] ? MessageLog::STATUS_PENDING_WEBHOOK : MessageLog::STATUS_FAILED);
         $log->setHttpStatusCode($result['http_status'] ?? null);
         $log->setApiResponse(!empty($result['response']) ? json_encode($result['response']) : null);
-        $log->setErrorMessage($result['error'] ?? null);
+        $log->setErrorMessage(!empty($result['error']) ? '[API 360dialog] '.$result['error'] : null);
         $log->setDateSent(new \DateTime());
 
         $this->entityManager->persist($log);

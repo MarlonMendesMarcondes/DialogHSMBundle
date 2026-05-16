@@ -74,6 +74,8 @@ class WebhookProcessor
         } elseif (MessageLog::STATUS_READ === $status) {
             $log->setDateRead($now);
         } elseif (MessageLog::STATUS_FAILED === $status) {
+            // failed via webhook = rejeição da Meta (ex: janela 24h, número inválido).
+            // Distinto de failed por erro de API (que não tem webhookErrorCode).
             $errors = $statusData['errors'] ?? [];
             if (!empty($errors)) {
                 $first = $errors[0];

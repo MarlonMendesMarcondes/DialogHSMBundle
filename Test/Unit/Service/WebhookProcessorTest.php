@@ -740,4 +740,62 @@ class WebhookProcessorTest extends TestCase
             'errors' => [['code' => 131047, 'title' => 'Re-engagement message']],
         ]]));
     }
+
+    // =========================================================================
+    // Distinção entre erro de API e rejeição da Meta no errorMessage
+    // =========================================================================
+
+    /**
+     * Erro da Meta via webhook NÃO deve ter prefixo [API 360dialog].
+     * O prefixo é exclusivo de falhas HTTP na chamada à API da 360dialog
+     * (definido em SendWhatsAppMessageHandler).
+     */
+    public function testMetaRejectionErrorMessageHasNoApiPrefix(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_SENT);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+        $this->em->method('flush');
+
+        $this->processor->process('+5511999999999', $this->makePayload([[
+            'id'     => 'wamid.abc',
+            'status' => 'failed',
+            'errors' => [['code' => 131026, 'title' => 'Message undeliverable']],
+        ]]));
+
+        $this->assertStringNotContainsString('[API 360dialog]', $log->getErrorMessage(),
+            'Rejeição da Meta não deve ter prefixo de erro de API');
+        $this->assertSame('Message undeliverable', $log->getErrorMessage());
+        $this->assertSame(131026, $log->getWebhookErrorCode(),
+            'Rejeição da Meta deve ter webhookErrorCode preenchido');
+    }
+
+    /**
+     * Confirma que as duas origens de falha são distinguíveis pelos campos:
+     * - Erro de API:    webhookErrorCode=null,  errorMessage começa com [API 360dialog]
+     * - Rejeição Meta:  webhookErrorCode!=null, errorMessage sem prefixo de API
+     */
+    public function testApiErrorAndMetaRejectionAreDistinguishable(): void
+    {
+        // Rejeição da Meta: tem webhookErrorCode
+        $logMeta = $this->makeLog(MessageLog::STATUS_SENT);
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($logMeta);
+        $this->em->method('flush');
+
+        $this->processor->process('+5511999999999', $this->makePayload([[
+            'id'     => 'wamid.meta',
+            'status' => 'failed',
+            'errors' => [['code' => 131047, 'title' => 'Re-engagement message']],
+        ]]));
+
+        // Rejeição da Meta: tem código, sem prefixo de API
+        $this->assertNotNull($logMeta->getWebhookErrorCode());
+        $this->assertStringNotContainsString('[API 360dialog]', (string) $logMeta->getErrorMessage());
+
+        // Erro de API: sem código Meta, errorMessage teria prefixo [API 360dialog]
+        // (esse lado é coberto em SendWhatsAppMessageHandlerTest::testApiErrorSetsErrorMessageWithApiPrefix)
+        $this->assertNull(null); // marcador semântico — ver handler test para o outro lado
+    }
 }

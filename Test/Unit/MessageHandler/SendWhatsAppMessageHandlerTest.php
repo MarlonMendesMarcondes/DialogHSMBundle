@@ -459,4 +459,55 @@ class SendWhatsAppMessageHandlerTest extends TestCase
         // Não deve lançar exceção
         ($this->handler)($this->makeMessage(), skipRetry: true);
     }
+
+    // -------------------------------------------------------------------------
+    // Testes: distinção entre erro de API e rejeição da Meta no errorMessage
+    // -------------------------------------------------------------------------
+
+    public function testApiErrorSetsErrorMessageWithApiPrefix(): void
+    {
+        $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
+        $this->mockApi
+            ->method('sendMessage')
+            ->willReturn(['success' => false, 'response' => null, 'error' => 'HTTP 400: Bad Request', 'http_status' => 400, 'retryable' => false]);
+
+        $capturedLog = null;
+        $this->mockEntityManager
+            ->method('persist')
+            ->willReturnCallback(function (object $entity) use (&$capturedLog): void {
+                if ($entity instanceof \MauticPlugin\DialogHSMBundle\Entity\MessageLog) {
+                    $capturedLog = $entity;
+                }
+            });
+
+        ($this->handler)($this->makeMessage());
+
+        $this->assertNotNull($capturedLog);
+        $this->assertStringStartsWith('[API 360dialog] ', $capturedLog->getErrorMessage(),
+            'Erros de API devem ter prefixo [API 360dialog] para distinguir de rejeições da Meta');
+        $this->assertStringContainsString('HTTP 400: Bad Request', $capturedLog->getErrorMessage());
+    }
+
+    public function testApiSuccessLeavesErrorMessageNull(): void
+    {
+        $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
+        $this->mockApi
+            ->method('sendMessage')
+            ->willReturn(['success' => true, 'response' => ['id' => 'wamid.abc'], 'error' => null, 'http_status' => 200, 'retryable' => false]);
+
+        $capturedLog = null;
+        $this->mockEntityManager
+            ->method('persist')
+            ->willReturnCallback(function (object $entity) use (&$capturedLog): void {
+                if ($entity instanceof \MauticPlugin\DialogHSMBundle\Entity\MessageLog) {
+                    $capturedLog = $entity;
+                }
+            });
+
+        ($this->handler)($this->makeMessage());
+
+        $this->assertNotNull($capturedLog);
+        $this->assertNull($capturedLog->getErrorMessage(),
+            'Envio com sucesso não deve ter errorMessage');
+    }
 }
