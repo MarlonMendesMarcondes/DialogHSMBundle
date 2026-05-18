@@ -89,14 +89,9 @@ class Version_1_4_3 extends AbstractMigration
             return;
         }
 
-        $colExists = (int) $conn->fetchOne(
-            'SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?',
-            [$leadsTable, 'dialoghsm_meta_error_code']
+        $this->addSql(
+            "ALTER TABLE `{$leadsTable}` ADD COLUMN IF NOT EXISTS `dialoghsm_meta_error_code` INT NULL DEFAULT NULL"
         );
-
-        if ($colExists === 0) {
-            $this->addSql("ALTER TABLE `{$leadsTable}` ADD COLUMN `dialoghsm_meta_error_code` INT NULL DEFAULT NULL");
-        }
 
         $maxOrder = (int) $conn->fetchOne(
             "SELECT COALESCE(MAX(field_order), 0) FROM `{$fieldsTable}` WHERE object = 'lead'"
