@@ -9,6 +9,7 @@ use Mautic\CampaignBundle\Entity\LeadEventLog;
 use Mautic\CampaignBundle\Event\PendingEvent;
 use Mautic\IntegrationsBundle\Helper\IntegrationsHelper;
 use Mautic\LeadBundle\Entity\Lead;
+use Mautic\LeadBundle\Model\LeadModel;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
@@ -143,7 +144,9 @@ class WebhookSentFlowTest extends TestCase
         $em         = $this->createMock(EntityManagerInterface::class);
         $dispatcher = $this->createMock(EventDispatcherInterface::class);
 
-        return new WebhookProcessor($numberRepo, $logRepo, $em, $dispatcher);
+        $leadModel = $this->createMock(LeadModel::class);
+
+        return new WebhookProcessor($numberRepo, $logRepo, $em, $dispatcher, $leadModel);
     }
 
     private function makeWebhookPayload(string $wamid, string $status, array $errors = []): array
@@ -278,7 +281,8 @@ class WebhookSentFlowTest extends TestCase
         $dispatcher = $this->createMock(EventDispatcherInterface::class);
         $dispatcher->expects($this->once())->method('dispatch'); // evento de falha é despachado
 
-        $processor = new WebhookProcessor($numberRepo, $logRepo, $em, $dispatcher);
+        $leadModel = $this->createMock(LeadModel::class);
+        $processor = new WebhookProcessor($numberRepo, $logRepo, $em, $dispatcher, $leadModel);
         $processor->process('+5511999999999', $this->makeWebhookPayload($wamid, 'failed', $errors));
 
         $this->assertSame(MessageLog::STATUS_FAILED, $sharedLog->getStatus(),

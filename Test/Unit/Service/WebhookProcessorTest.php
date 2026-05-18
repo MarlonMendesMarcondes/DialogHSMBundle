@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use Doctrine\ORM\EntityManagerInterface;
+use Mautic\LeadBundle\Entity\Lead;
+use Mautic\LeadBundle\Model\LeadModel;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
@@ -20,6 +22,7 @@ class WebhookProcessorTest extends TestCase
     private MessageLogRepository&MockObject $logRepository;
     private EntityManagerInterface&MockObject $em;
     private EventDispatcherInterface&MockObject $dispatcher;
+    private LeadModel&MockObject $leadModel;
     private WebhookProcessor $processor;
 
     protected function setUp(): void
@@ -32,7 +35,14 @@ class WebhookProcessorTest extends TestCase
         $this->logRepository = $this->createMock(MessageLogRepository::class);
         $this->em            = $this->createMock(EntityManagerInterface::class);
         $this->dispatcher    = $this->createMock(EventDispatcherInterface::class);
-        $this->processor     = new WebhookProcessor($this->numberRepository, $this->logRepository, $this->em, $this->dispatcher);
+        $this->leadModel     = $this->createMock(LeadModel::class);
+        $this->processor     = new WebhookProcessor(
+            $this->numberRepository,
+            $this->logRepository,
+            $this->em,
+            $this->dispatcher,
+            $this->leadModel,
+        );
     }
 
     private function makeLog(string $status): MessageLog
@@ -797,5 +807,105 @@ class WebhookProcessorTest extends TestCase
         // Erro de API: sem código Meta, errorMessage teria prefixo [API 360dialog]
         // (esse lado é coberto em SendWhatsAppMessageHandlerTest::testApiErrorSetsErrorMessageWithApiPrefix)
         $this->assertNull(null); // marcador semântico — ver handler test para o outro lado
+    }
+
+    /**
+     * Quando o webhook reporta failed com código de erro da Meta,
+     * o campo dialoghsm_meta_error_code deve ser populado no lead.
+     */
+    public function testMetaFailurePopulatesMetaErrorCodeField(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_SENT);
+        $log->setLeadId(99);
+
+        $lead = $this->createMock(\Mautic\LeadBundle\Entity\Lead::class);
+        $this->leadModel->method('getEntity')->with(99)->willReturn($lead);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+        $this->em->method('flush');
+
+        $capturedFields = null;
+        $this->leadModel
+            ->method('setFieldValues')
+            ->willReturnCallback(function ($l, array $fields) use (&$capturedFields): void {
+                $capturedFields = $fields;
+            });
+
+        $this->processor->process('+5511999999999', $this->makePayload([[
+            'id'     => 'wamid.code',
+            'status' => 'failed',
+            'errors' => [['code' => 131026, 'title' => 'Message undeliverable']],
+        ]]));
+
+        $this->assertSame('failed_meta', $capturedFields['dialoghsm_status']);
+        $this->assertSame(131026, $capturedFields['dialoghsm_meta_error_code'],
+            'Código de erro da Meta deve ser populado no campo indexável do lead');
+        $this->assertStringContainsString('[Meta 131026]', $capturedFields['dialoghsm_last_response']);
+    }
+
+    /**
+     * Quando o webhook failed não traz erros (raro), meta_error_code deve ser null.
+     */
+    public function testMetaFailureWithoutErrorCodeSetsNullMetaErrorCode(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_SENT);
+        $log->setLeadId(99);
+
+        $lead = $this->createMock(\Mautic\LeadBundle\Entity\Lead::class);
+        $this->leadModel->method('getEntity')->with(99)->willReturn($lead);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+        $this->em->method('flush');
+
+        $capturedFields = null;
+        $this->leadModel
+            ->method('setFieldValues')
+            ->willReturnCallback(function ($l, array $fields) use (&$capturedFields): void {
+                $capturedFields = $fields;
+            });
+
+        $this->processor->process('+5511999999999', $this->makePayload([[
+            'id'     => 'wamid.noerr',
+            'status' => 'failed',
+            // sem campo errors
+        ]]));
+
+        $this->assertSame('failed_meta', $capturedFields['dialoghsm_status']);
+        $this->assertNull($capturedFields['dialoghsm_meta_error_code'],
+            'Sem código de erro da Meta, campo deve ser null');
+    }
+
+    /**
+     * Webhook sent atualiza dialoghsm_status do lead mas não toca em meta_error_code.
+     */
+    public function testWebhookSentUpdatesLeadStatusField(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_PENDING_WEBHOOK);
+        $log->setLeadId(99);
+
+        $lead = $this->createMock(\Mautic\LeadBundle\Entity\Lead::class);
+        $this->leadModel->method('getEntity')->with(99)->willReturn($lead);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+        $this->em->method('flush');
+
+        $capturedFields = null;
+        $this->leadModel
+            ->method('setFieldValues')
+            ->willReturnCallback(function ($l, array $fields) use (&$capturedFields): void {
+                $capturedFields = $fields;
+            });
+
+        $this->processor->process('+5511999999999', $this->makePayload([[
+            'id'     => 'wamid.sent',
+            'status' => 'sent',
+        ]]));
+
+        $this->assertSame('sent', $capturedFields['dialoghsm_status']);
+        $this->assertArrayNotHasKey('dialoghsm_meta_error_code', $capturedFields,
+            'Status sent não deve alterar o campo de código de erro');
     }
 }

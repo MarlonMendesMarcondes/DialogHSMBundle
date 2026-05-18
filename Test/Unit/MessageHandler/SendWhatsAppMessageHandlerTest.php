@@ -139,8 +139,8 @@ class SendWhatsAppMessageHandlerTest extends TestCase
 
         ($this->handler)($this->makeMessage(leadId: 42));
 
-        $this->assertEquals('sent (HTTP 200)', $capturedFields['dialoghsm_status']);
-        $this->assertEquals('OK', $capturedFields['dialoghsm_last_response']);
+        $this->assertEquals('pending_webhook', $capturedFields['dialoghsm_status']);
+        $this->assertEquals('HTTP 200: OK', $capturedFields['dialoghsm_last_response']);
         $this->assertMatchesRegularExpression(
             '/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/',
             $capturedFields['dialoghsm_last_sent'],
@@ -164,7 +164,7 @@ class SendWhatsAppMessageHandlerTest extends TestCase
 
         ($this->handler)($this->makeMessage(leadId: 7));
 
-        $this->assertEquals('failed (HTTP 400)', $capturedFields['dialoghsm_status']);
+        $this->assertEquals('failed_api', $capturedFields['dialoghsm_status']);
         $this->assertEquals('HTTP 400: Bad Request', $capturedFields['dialoghsm_last_response']);
         $this->assertMatchesRegularExpression(
             '/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/',
@@ -189,7 +189,8 @@ class SendWhatsAppMessageHandlerTest extends TestCase
 
         ($this->handler)($this->makeMessage());
 
-        $this->assertEquals('sent (HTTP N/A)', $capturedFields['dialoghsm_status']);
+        $this->assertEquals('pending_webhook', $capturedFields['dialoghsm_status']);
+        $this->assertEquals('HTTP N/A: OK', $capturedFields['dialoghsm_last_response']);
     }
 
     public function testSetFieldValuesReceivesLeadReturnedByGetEntity(): void

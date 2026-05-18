@@ -177,8 +177,10 @@ class SendWhatsAppMessageHandler implements MessageHandlerInterface
             }
 
             $httpStatus   = $result['http_status'] ?? 'N/A';
-            $statusText   = $result['success'] ? "sent (HTTP {$httpStatus})" : "failed (HTTP {$httpStatus})";
-            $lastResponse = $result['success'] ? 'OK' : mb_substr($result['error'] ?? '', 0, 255);
+            $statusText   = $result['success'] ? 'pending_webhook' : 'failed_api';
+            $lastResponse = $result['success']
+                ? "HTTP {$httpStatus}: OK"
+                : mb_substr($result['error'] ?? '', 0, 255);
 
             $this->leadModel->setFieldValues($lead, [
                 'dialoghsm_status'        => $statusText,

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MauticPlugin\DialogHSMBundle\Service;
 
 use Doctrine\ORM\EntityManagerInterface;
+use Mautic\LeadBundle\Model\LeadModel;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumberRepository;
@@ -18,6 +19,7 @@ class WebhookProcessor
         private readonly MessageLogRepository $logRepository,
         private readonly EntityManagerInterface $em,
         private readonly EventDispatcherInterface $dispatcher,
+        private readonly LeadModel $leadModel,
     ) {}
 
     /**
@@ -87,8 +89,46 @@ class WebhookProcessor
         $this->em->persist($log);
         $this->em->flush();
 
+        $this->updateLeadStatus($log, $status);
+
         if (MessageLog::STATUS_FAILED === $status) {
             $this->dispatcher->dispatch(new WebhookMessageFailedEvent($log));
+        }
+    }
+
+    private function updateLeadStatus(MessageLog $log, string $status): void
+    {
+        $leadId = $log->getLeadId();
+        if (!$leadId) {
+            return;
+        }
+
+        try {
+            $lead = $this->leadModel->getEntity($leadId);
+            if (null === $lead) {
+                return;
+            }
+
+            if (MessageLog::STATUS_FAILED === $status) {
+                $code         = $log->getWebhookErrorCode();
+                $message      = $log->getErrorMessage() ?? '';
+                $lastResponse = $code ? "[Meta {$code}] {$message}" : $message;
+
+                $this->leadModel->setFieldValues($lead, [
+                    'dialoghsm_status'          => 'failed_meta',
+                    'dialoghsm_last_response'   => mb_substr($lastResponse, 0, 255),
+                    'dialoghsm_meta_error_code' => $code,
+                ]);
+            } else {
+                // sent, delivered, read — valor do select coincide com o status do webhook
+                $this->leadModel->setFieldValues($lead, [
+                    'dialoghsm_status' => $status,
+                ]);
+            }
+
+            $this->leadModel->saveEntity($lead);
+        } catch (\Throwable) {
+            // falha silenciosa — não interrompe o fluxo do webhook
         }
     }
 
