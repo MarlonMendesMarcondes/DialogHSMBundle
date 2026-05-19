@@ -94,29 +94,11 @@ return [
                         ],
                     ],
                 ],
-                'dialoghsm.menu.messages' => [
-                    'route'    => 'mautic_dialoghsm_message_index',
-                    'parent'   => 'mautic.core.channels',
-                    'priority' => -3,
-                    'checks'   => [
-                        'integration' => [
-                            'DialogHSM' => ['enabled' => true],
-                        ],
-                    ],
-                ],
             ],
         ],
     ],
     'services' => [
-        'models' => [
-            'dialoghsm.whatsappmessage' => [
-                'class'     => \MauticPlugin\DialogHSMBundle\Model\WhatsAppBroadcastModel::class,
-                'arguments' => [
-                    'mautic.lead.model.lead',
-                    'messenger.default_bus',
-                ],
-            ],
-        ],
+        'models' => [],
         'events' => [
             'dialoghsm.subscriber.channel' => [
                 'class'     => \MauticPlugin\DialogHSMBundle\EventListener\ChannelSubscriber::class,
@@ -128,7 +110,7 @@ return [
             'dialoghsm.subscriber.broadcast' => [
                 'class'     => \MauticPlugin\DialogHSMBundle\EventListener\BroadcastSubscriber::class,
                 'arguments' => [
-                    'dialoghsm.whatsappmessage',
+                    'mautic.dialoghsm.model.whatsappmessage',
                 ],
                 'tags' => ['kernel.event_subscriber'],
             ],

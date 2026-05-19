@@ -18,12 +18,12 @@ class WhatsAppMessageListType extends AbstractType
             'model'               => 'dialoghsm.whatsappmessage',
             'model_lookup_method' => 'getLookupResults',
             'lookup_arguments'    => [
-                'type'   => WhatsAppMessageType::class,
+                'type'   => 'dialoghsm.whatsappmessage',
                 'filter' => '$data',
                 'limit'  => 0,
                 'start'  => 0,
             ],
-            'ajax_lookup_action' => 'dialoghsm:getMessageLookupChoiceList',
+            'ajax_lookup_action' => 'dialoghsm:getLookupChoiceList',
             'multiple'           => false,
             'required'           => false,
         ]);

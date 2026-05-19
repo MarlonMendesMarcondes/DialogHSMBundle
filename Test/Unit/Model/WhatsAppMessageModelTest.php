@@ -13,20 +13,20 @@ use MauticPlugin\DialogHSMBundle\Entity\WhatsAppMessage;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppMessageRepository;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
-use MauticPlugin\DialogHSMBundle\Model\WhatsAppBroadcastModel;
+use MauticPlugin\DialogHSMBundle\Model\WhatsAppMessageModel;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\MessageBusInterface;
 
-class WhatsAppBroadcastModelTest extends TestCase
+class WhatsAppMessageModelTest extends TestCase
 {
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 
     /**
-     * Builds a fully-wired WhatsAppBroadcastModel with the supplied mocks.
-     * Because WhatsAppBroadcastModel overrides __construct without calling
+     * Builds a fully-wired WhatsAppMessageModel with the supplied mocks.
+     * Because WhatsAppMessageModel overrides __construct without calling
      * parent::__construct(), the protected $em property defined on
      * AbstractCommonModel is never set — we inject it via reflection.
      */
@@ -34,8 +34,8 @@ class WhatsAppBroadcastModelTest extends TestCase
         LeadModel $leadModel,
         MessageBusInterface $bus,
         EntityManagerInterface $em,
-    ): WhatsAppBroadcastModel {
-        $model = new WhatsAppBroadcastModel($leadModel, $bus);
+    ): WhatsAppMessageModel {
+        $model = new WhatsAppMessageModel($leadModel, $bus);
 
         $ref = new \ReflectionProperty(\Mautic\CoreBundle\Model\AbstractCommonModel::class, 'em');
         $ref->setAccessible(true);

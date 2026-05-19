@@ -13,25 +13,35 @@ use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppMessage;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppMessageRepository;
 use MauticPlugin\DialogHSMBundle\Form\Type\WhatsAppMessageType;
+use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use Symfony\Component\Form\FormFactoryInterface;
 use Symfony\Component\Form\FormInterface;
 use Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException;
 use Symfony\Component\Messenger\MessageBusInterface;
-use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
+use Symfony\Contracts\Service\Attribute\Required;
 
 /**
  * @extends FormModel<WhatsAppMessage>
  *
  * @implements AjaxLookupModelInterface<WhatsAppMessage>
  */
-class WhatsAppBroadcastModel extends FormModel implements AjaxLookupModelInterface
+class WhatsAppMessageModel extends FormModel implements AjaxLookupModelInterface
 {
     private const BATCH_SIZE = 100;
 
-    public function __construct(
-        private readonly LeadModel $leadModel,
-        private readonly MessageBusInterface $bus,
-    ) {
+    private LeadModel $leadModel;
+    private MessageBusInterface $bus;
+
+    #[Required]
+    public function setLeadModel(LeadModel $leadModel): void
+    {
+        $this->leadModel = $leadModel;
+    }
+
+    #[Required]
+    public function setBus(MessageBusInterface $bus): void
+    {
+        $this->bus = $bus;
     }
 
     public function getRepository(): WhatsAppMessageRepository

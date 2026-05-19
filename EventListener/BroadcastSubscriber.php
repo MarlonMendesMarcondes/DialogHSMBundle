@@ -6,13 +6,13 @@ namespace MauticPlugin\DialogHSMBundle\EventListener;
 
 use Mautic\ChannelBundle\ChannelEvents;
 use Mautic\ChannelBundle\Event\ChannelBroadcastEvent;
-use MauticPlugin\DialogHSMBundle\Model\WhatsAppBroadcastModel;
+use MauticPlugin\DialogHSMBundle\Model\WhatsAppMessageModel;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
 class BroadcastSubscriber implements EventSubscriberInterface
 {
     public function __construct(
-        private readonly WhatsAppBroadcastModel $broadcastModel,
+        private readonly WhatsAppMessageModel $broadcastModel,
     ) {
     }
 

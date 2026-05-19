@@ -6,7 +6,7 @@ namespace MauticPlugin\DialogHSMBundle\Controller;
 
 use Mautic\CoreBundle\Controller\FormController;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppMessage;
-use MauticPlugin\DialogHSMBundle\Model\WhatsAppBroadcastModel;
+use MauticPlugin\DialogHSMBundle\Model\WhatsAppMessageModel;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -18,7 +18,7 @@ class WhatsAppMessageController extends FormController
     public function indexAction(Request $request, int $page = 1)
     {
         $model = $this->getModel('dialoghsm.whatsappmessage');
-        \assert($model instanceof WhatsAppBroadcastModel);
+        \assert($model instanceof WhatsAppMessageModel);
 
         $session = $request->getSession();
 
@@ -84,7 +84,7 @@ class WhatsAppMessageController extends FormController
     public function newAction(Request $request)
     {
         $model  = $this->getModel('dialoghsm.whatsappmessage');
-        \assert($model instanceof WhatsAppBroadcastModel);
+        \assert($model instanceof WhatsAppMessageModel);
         $entity = $model->getEntity();
 
         $action = $this->generateUrl('mautic_dialoghsm_message_action', ['objectAction' => 'new']);
@@ -149,7 +149,7 @@ class WhatsAppMessageController extends FormController
     public function editAction(Request $request, int $objectId, bool $ignorePost = false)
     {
         $model  = $this->getModel('dialoghsm.whatsappmessage');
-        \assert($model instanceof WhatsAppBroadcastModel);
+        \assert($model instanceof WhatsAppMessageModel);
         $entity = $model->getEntity($objectId);
 
         $postActionVars = [
@@ -238,7 +238,7 @@ class WhatsAppMessageController extends FormController
 
         if (Request::METHOD_POST === $request->getMethod()) {
             $model  = $this->getModel('dialoghsm.whatsappmessage');
-            \assert($model instanceof WhatsAppBroadcastModel);
+            \assert($model instanceof WhatsAppMessageModel);
             $entity = $model->getEntity($objectId);
 
             if (null === $entity) {

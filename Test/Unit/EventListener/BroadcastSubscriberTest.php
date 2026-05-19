@@ -7,12 +7,12 @@ use Mautic\ChannelBundle\Event\ChannelBroadcastEvent;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppMessage;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppMessageRepository;
 use MauticPlugin\DialogHSMBundle\EventListener\BroadcastSubscriber;
-use MauticPlugin\DialogHSMBundle\Model\WhatsAppBroadcastModel;
+use MauticPlugin\DialogHSMBundle\Model\WhatsAppMessageModel;
 use PHPUnit\Framework\TestCase;
 
 class BroadcastSubscriberTest extends TestCase
 {
-    private function makeSubscriber(WhatsAppBroadcastModel $model): BroadcastSubscriber
+    private function makeSubscriber(WhatsAppMessageModel $model): BroadcastSubscriber
     {
         return new BroadcastSubscriber($model);
     }
@@ -38,18 +38,18 @@ class BroadcastSubscriberTest extends TestCase
     }
 
     /**
-     * Build a WhatsAppBroadcastModel mock with a repository that returns the given iterable.
+     * Build a WhatsAppMessageModel mock with a repository that returns the given iterable.
      *
      * @param iterable<WhatsAppMessage> $messages
      */
-    private function makeModel(iterable $messages, int $expectedSendCalls = 0): WhatsAppBroadcastModel
+    private function makeModel(iterable $messages, int $expectedSendCalls = 0): WhatsAppMessageModel
     {
         $repo = $this->createMock(WhatsAppMessageRepository::class);
         $repo
             ->method('getPublishedBroadcastsIterable')
             ->willReturn($messages);
 
-        $model = $this->createMock(WhatsAppBroadcastModel::class);
+        $model = $this->createMock(WhatsAppMessageModel::class);
         $model
             ->method('getRepository')
             ->willReturn($repo);

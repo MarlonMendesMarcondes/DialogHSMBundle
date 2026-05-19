@@ -19,6 +19,7 @@ return function (ContainerConfigurator $configurator): void {
     $services->load('MauticPlugin\\DialogHSMBundle\\Entity\\', '../Entity/*Repository.php');
 
     $services->alias('mautic.dialoghsm.model.whatsappnumber', \MauticPlugin\DialogHSMBundle\Model\WhatsAppNumberModel::class);
+    $services->alias('mautic.dialoghsm.model.whatsappmessage', \MauticPlugin\DialogHSMBundle\Model\WhatsAppMessageModel::class);
 
     $services->set(\MauticPlugin\DialogHSMBundle\Security\Permissions\DialogHSMPermissions::class)
         ->autowire()

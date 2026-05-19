@@ -4,9 +4,14 @@ declare(strict_types=1);
 
 namespace MauticPlugin\DialogHSMBundle\Form\Type;
 
+use Doctrine\ORM\EntityManagerInterface;
+use Mautic\CoreBundle\Form\DataTransformer\IdToEntityModelTransformer;
 use Mautic\CoreBundle\Form\Type\FormButtonsType;
-use Mautic\CoreBundle\Form\Type\PublishUpDownType;
+use Mautic\CoreBundle\Form\Type\PublishDownDateType;
+use Mautic\CoreBundle\Form\Type\PublishUpDateType;
 use Mautic\CoreBundle\Form\Type\SortableListType;
+use Mautic\CoreBundle\Form\Type\YesNoButtonGroupType;
+use Mautic\LeadBundle\Entity\LeadList;
 use Mautic\LeadBundle\Form\Type\LeadListType;
 use Symfony\Component\Form\AbstractType;
 use Symfony\Component\Form\Extension\Core\Type\TextType;
@@ -17,6 +22,10 @@ use MauticPlugin\DialogHSMBundle\Entity\WhatsAppMessage;
 
 class WhatsAppMessageType extends AbstractType
 {
+    public function __construct(private readonly EntityManagerInterface $em)
+    {
+    }
+
     public function buildForm(FormBuilderInterface $builder, array $options): void
     {
         $builder->add('name', TextType::class, [
@@ -51,20 +60,22 @@ class WhatsAppMessageType extends AbstractType
             'with_labels'     => true,
         ]);
 
-        $builder->add('lists', LeadListType::class, [
-            'label'      => 'mautic.lead.list.form.lists',
-            'label_attr' => ['class' => 'control-label'],
-            'multiple'   => true,
-            'required'   => false,
-        ]);
+        $transformer = new IdToEntityModelTransformer($this->em, LeadList::class, 'id', true);
+        $builder->add(
+            $builder->create('lists', LeadListType::class, [
+                'label'      => 'mautic.lead.list.form.lists',
+                'label_attr' => ['class' => 'control-label'],
+                'multiple'   => true,
+                'expanded'   => false,
+                'required'   => false,
+            ])->addModelTransformer($transformer)
+        );
 
-        $builder->add('publishUp', PublishUpDownType::class, [
-            'widget' => 'single_text',
-        ]);
+        $builder->add('isPublished', YesNoButtonGroupType::class);
 
-        $builder->add('publishDown', PublishUpDownType::class, [
-            'widget' => 'single_text',
-        ]);
+        $builder->add('publishUp', PublishUpDateType::class);
+
+        $builder->add('publishDown', PublishDownDateType::class);
 
         $builder->add('buttons', FormButtonsType::class);
     }
