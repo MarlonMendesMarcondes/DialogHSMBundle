@@ -1,0 +1,48 @@
+{% extends '@MauticCore/FormTheme/form_simple.html.twig' %}
+
+{% block mauticContent %}dialoghsm_message{% endblock %}
+{% set isExisting      = entity.getId() %}
+{% set translationBase = 'dialoghsm.whatsapp_message' %}
+{% set mauticContent   = 'dialoghsm_message' %}
+
+{% block primaryFormContent %}
+<div class="row">
+    <div class="col-md-8">
+        {{ form_row(form.name) }}
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-8">
+        {{ form_row(form.whatsAppNumber) }}
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-8">
+        {{ form_row(form.templateName) }}
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-12">
+        {{ form_row(form.payloadData) }}
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-12">
+        {{ form_row(form.lists) }}
+    </div>
+</div>
+{% endblock %}
+
+{% block rightFormContent %}
+{{ form_row(form.isPublished) }}
+{{ form_row(form.publishUp) }}
+{{ form_row(form.publishDown) }}
+
+<div class="hide">
+    {{ form_rest(form) }}
+</div>
+{% endblock %}

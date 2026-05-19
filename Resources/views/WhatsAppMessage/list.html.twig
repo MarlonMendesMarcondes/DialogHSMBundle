@@ -1,0 +1,121 @@
+{% set isIndex = tmpl == 'index' ? true : false %}
+{% set tmpl = 'list' %}
+{% extends isIndex ? '@MauticCore/Default/content.html.twig' : '@MauticCore/Default/raw_output.html.twig' %}
+{% block mauticContent %}dialoghsm_message{% endblock %}
+{% block headerTitle %}{{ 'dialoghsm.whatsapp_message.list.title'|trans }}{% endblock %}
+{% block content %}
+    {% if isIndex %}
+    <div id="page-list-wrapper" class="panel panel-default">
+        {{- include('@MauticCore/Helper/list_toolbar.html.twig', {
+            'searchValue': searchValue,
+            'searchId': 'dialoghsm-message-search',
+            'action': currentRoute,
+            'list_actions': include('@MauticCore/Helper/toolbar_page_actions.html.twig', {
+                'templateButtons': {
+                    'new': true
+                },
+                'routeBase': 'dialoghsm_message'
+            }),
+        }) -}}
+
+        <div class="page-list">
+            {{ block('listResults') }}
+        </div>
+    </div>
+    {% else %}
+        {{ block('listResults') }}
+    {% endif %}
+{% endblock %}
+
+{% block listResults %}
+{% if items|length %}
+    <div class="table-responsive">
+        <table class="table table-hover dialoghsm-message-list">
+            <thead>
+            <tr>
+                {{- include(
+                    '@MauticCore/Helper/tableheader.html.twig',
+                    {
+                        'checkall'        : 'true',
+                        'routeBase'       : 'dialoghsm_message',
+                        'templateButtons' : {
+                            'delete' : true,
+                        }
+                    }
+                ) -}}
+
+                {{- include(
+                    '@MauticCore/Helper/tableheader.html.twig',
+                    {
+                        'sessionVar' : 'dialoghsm.message',
+                        'orderBy'    : 'wm.name',
+                        'text'       : 'mautic.core.name',
+                        'class'      : 'col-dialoghsm-name',
+                        'default'    : true,
+                    }
+                ) -}}
+
+                <th class="col-dialoghsm-template">{{ 'dialoghsm.whatsapp_message.template_name'|trans }}</th>
+                <th class="col-dialoghsm-sent">{{ 'dialoghsm.whatsapp_message.sent_count'|trans }}</th>
+
+                {{- include(
+                    '@MauticCore/Helper/tableheader.html.twig',
+                    {
+                        'sessionVar' : 'dialoghsm.message',
+                        'orderBy'    : 'wm.id',
+                        'text'       : 'mautic.core.id',
+                        'class'      : 'visible-md visible-lg col-dialoghsm-id',
+                    }
+                ) -}}
+            </tr>
+            </thead>
+            <tbody>
+            {% for item in items %}
+                <tr>
+                    <td>
+                        {{- include(
+                            '@MauticCore/Helper/list_actions.html.twig',
+                            {
+                                'item'            : item,
+                                'templateButtons' : {
+                                    'edit'   : true,
+                                    'delete' : true,
+                                },
+                                'routeBase' : 'dialoghsm_message',
+                            }
+                        ) -}}
+                    </td>
+                    <td>
+                        <div>
+                            {{- include('@MauticCore/Helper/publishstatus_icon.html.twig',
+                                {
+                                    'item'  : item,
+                                    'model' : 'dialoghsm.whatsappmessage',
+                                }
+                            ) -}}
+                            <a href="{{ path('mautic_dialoghsm_message_action', {'objectAction' : 'edit', 'objectId' : item.getId()}) }}">
+                                {{ item.getName() }}
+                            </a>
+                        </div>
+                    </td>
+                    <td>{{ item.getTemplateName() }}</td>
+                    <td>{{ item.getSentCount() }}</td>
+                    <td class="visible-md visible-lg">{{ item.getId() }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div class="panel-footer">
+        {{- include('@MauticCore/Helper/pagination.html.twig', {
+            'totalItems' : totalItems,
+            'page'       : page,
+            'limit'      : limit,
+            'baseUrl'    : path('mautic_dialoghsm_message_index'),
+            'sessionVar' : 'dialoghsm.message',
+        }) -}}
+    </div>
+{% else %}
+    {{- include('@MauticCore/Helper/noresults.html.twig', {'message' : 'dialoghsm.whatsapp_message.noresults'}) -}}
+{% endif %}
+{% endblock %}

@@ -5,7 +5,7 @@ declare(strict_types=1);
 return [
     'name'        => '360dialog WhatsApp',
     'description' => 'Envia mensagens WhatsApp HSM via API 360dialog',
-    'version'     => '1.4.3',
+    'version'     => '1.4.4',
     'author'      => 'DialogHSM',
     'routes'      => [
         'main' => [
@@ -40,6 +40,16 @@ return [
             'mautic_dialoghsm_dashboard' => [
                 'path'       => '/dialoghsm/dashboard',
                 'controller' => 'MauticPlugin\DialogHSMBundle\Controller\MessageLogController::dashboardAction',
+            ],
+            'mautic_dialoghsm_message_index' => [
+                'path'       => '/dialoghsm/messages/{page}',
+                'controller' => 'MauticPlugin\DialogHSMBundle\Controller\WhatsAppMessageController::indexAction',
+                'defaults'   => ['page' => 1],
+            ],
+            'mautic_dialoghsm_message_action' => [
+                'path'       => '/dialoghsm/messages/{objectAction}/{objectId}',
+                'controller' => 'MauticPlugin\DialogHSMBundle\Controller\WhatsAppMessageController::executeAction',
+                'defaults'   => ['objectId' => 0],
             ],
         ],
         'public' => [
@@ -84,10 +94,45 @@ return [
                         ],
                     ],
                 ],
+                'dialoghsm.menu.messages' => [
+                    'route'    => 'mautic_dialoghsm_message_index',
+                    'parent'   => 'mautic.core.channels',
+                    'priority' => -3,
+                    'checks'   => [
+                        'integration' => [
+                            'DialogHSM' => ['enabled' => true],
+                        ],
+                    ],
+                ],
             ],
         ],
     ],
     'services' => [
+        'models' => [
+            'dialoghsm.whatsappmessage' => [
+                'class'     => \MauticPlugin\DialogHSMBundle\Model\WhatsAppBroadcastModel::class,
+                'arguments' => [
+                    'mautic.lead.model.lead',
+                    'messenger.default_bus',
+                ],
+            ],
+        ],
+        'events' => [
+            'dialoghsm.subscriber.channel' => [
+                'class'     => \MauticPlugin\DialogHSMBundle\EventListener\ChannelSubscriber::class,
+                'arguments' => [
+                    'mautic.helper.integration',
+                ],
+                'tags' => ['kernel.event_subscriber'],
+            ],
+            'dialoghsm.subscriber.broadcast' => [
+                'class'     => \MauticPlugin\DialogHSMBundle\EventListener\BroadcastSubscriber::class,
+                'arguments' => [
+                    'dialoghsm.whatsappmessage',
+                ],
+                'tags' => ['kernel.event_subscriber'],
+            ],
+        ],
         'integrations' => [
             'mautic.integration.dialoghsm' => [
                 'class' => \MauticPlugin\DialogHSMBundle\Integration\DialogHSMIntegration::class,

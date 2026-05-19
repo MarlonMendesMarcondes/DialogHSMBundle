@@ -34,6 +34,7 @@ class MessageLog
     private ?\DateTimeInterface $dateSent = null;
     private ?\DateTimeInterface $dateDelivered = null;
     private ?\DateTimeInterface $dateRead = null;
+    private ?int $whatsappMessageId = null;
 
     /**
      * @param ClassMetadata<self> $metadata
@@ -138,6 +139,12 @@ class MessageLog
         $builder
             ->createField('webhookErrorCode', Types::INTEGER)
             ->columnName('webhook_error_code')
+            ->nullable()
+            ->build();
+
+        $builder
+            ->createField('whatsappMessageId', Types::INTEGER)
+            ->columnName('whatsapp_message_id')
             ->nullable()
             ->build();
     }
@@ -323,6 +330,18 @@ class MessageLog
     public function setDateRead(\DateTimeInterface $dateRead): self
     {
         $this->dateRead = $dateRead;
+
+        return $this;
+    }
+
+    public function getWhatsappMessageId(): ?int
+    {
+        return $this->whatsappMessageId;
+    }
+
+    public function setWhatsappMessageId(?int $whatsappMessageId): self
+    {
+        $this->whatsappMessageId = $whatsappMessageId;
 
         return $this;
     }

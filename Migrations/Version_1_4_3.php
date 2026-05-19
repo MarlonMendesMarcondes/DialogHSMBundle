@@ -97,15 +97,18 @@ class Version_1_4_3 extends AbstractMigration
             "SELECT COALESCE(MAX(field_order), 0) FROM `{$fieldsTable}` WHERE object = 'lead'"
         );
 
-        $now = date('Y-m-d H:i:s');
+        $now        = date('Y-m-d H:i:s');
+        $properties = serialize([]);
         $conn->executeStatement("
             INSERT INTO `{$fieldsTable}`
                 (is_published, date_added, label, alias, type, field_group, object,
                  is_required, is_fixed, is_visible, is_short_visible, is_listable,
                  is_publicly_updatable, is_unique_identifer, is_index,
-                 field_order, column_is_not_created, original_is_published_value)
+                 field_order, column_is_not_created, original_is_published_value,
+                 properties)
             VALUES (1, '{$now}', 'WhatsApp Meta Error Code', 'dialoghsm_meta_error_code', 'number', 'core', 'lead',
-                    0, 0, 1, 0, 1, 0, 0, 1, " . ($maxOrder + 1) . ", 0, 1)
+                    0, 0, 1, 0, 1, 0, 0, 1, " . ($maxOrder + 1) . ", 0, 1,
+                    '{$properties}')
         ");
     }
 }
