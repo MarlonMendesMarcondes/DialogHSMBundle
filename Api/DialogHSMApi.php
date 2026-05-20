@@ -392,38 +392,4 @@ class DialogHSMApi
         return $ip;
     }
 
-    /**
-     * Substitui o hostname da URL pelo IP já resolvido, preservando porta, path e query.
-     * Exemplo: https://cdn.example.com/img.jpg + 1.2.3.4 → https://1.2.3.4/img.jpg
-     *
-     * O TLS continua funcional pois o SNI (Server Name Indication) ainda usa o hostname
-     * original quando o cliente suporta — mas como 360dialog é quem faz o request, e a
-     * intenção é apenas eliminar a re-resolução DNS, a substituição é suficiente.
-     */
-    private function pinHostToIp(string $url, string $ip): string
-    {
-        $parsed = parse_url($url);
-        if (!$parsed || !isset($parsed['host'])) {
-            return $url;
-        }
-
-        $rebuilt = $parsed['scheme'].'://'.$ip;
-
-        if (isset($parsed['port'])) {
-            $rebuilt .= ':'.$parsed['port'];
-        }
-
-        $rebuilt .= $parsed['path'] ?? '';
-
-        if (!empty($parsed['query'])) {
-            $rebuilt .= '?'.$parsed['query'];
-        }
-
-        if (!empty($parsed['fragment'])) {
-            $rebuilt .= '#'.$parsed['fragment'];
-        }
-
-        return $rebuilt;
-    }
-
 }
