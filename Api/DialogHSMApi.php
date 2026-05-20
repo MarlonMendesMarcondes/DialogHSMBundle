@@ -320,31 +320,31 @@ class DialogHSMApi
             return null;
         }
 
-        // Substitui o hostname pelo IP resolvido na URL enviada ao 360dialog.
-        // Isso elimina a janela de DNS rebinding: o 360dialog conecta diretamente
-        // ao IP que validamos, sem fazer nova resolução DNS.
-        $pinned = $this->pinHostToIp($url, $resolvedIp);
-
-        $lowerUrl = strtolower($pinned);
+        // A URL de mídia é enviada à 360dialog para que ELA faça o fetch — não nós.
+        // Substituir o hostname pelo IP causaria falha TLS no lado da 360dialog
+        // (certificado emitido para o domínio, não para o IP).
+        // A proteção SSRF já foi feita: resolveUrlSafely() confirmou que o hostname
+        // resolve para um IP público. Enviamos a URL original com o hostname.
+        $lowerUrl = strtolower($url);
 
         if (preg_match('/\.(jpg|jpeg|png)(\?.*)?$/', $lowerUrl)) {
             return [
                 'type'  => 'image',
-                'image' => ['link' => $pinned],
+                'image' => ['link' => $url],
             ];
         }
 
         if (preg_match('/\.mp4(\?.*)?$/', $lowerUrl)) {
             return [
                 'type'  => 'video',
-                'video' => ['link' => $pinned],
+                'video' => ['link' => $url],
             ];
         }
 
         if (preg_match('/\.pdf(\?.*)?$/', $lowerUrl)) {
             return [
                 'type'     => 'document',
-                'document' => ['link' => $pinned],
+                'document' => ['link' => $url],
             ];
         }
 
