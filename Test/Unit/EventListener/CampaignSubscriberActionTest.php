@@ -259,7 +259,7 @@ class CampaignSubscriberActionTest extends TestCase
 
         $this->assertNotNull($capturedBatch);
         $this->assertSame(5, $capturedBatch->batchLimit);
-        $this->assertSame(0, $capturedBatch->sendDelay, 'Guard: send_delay deve ser zerado no modo inline');
+        $this->assertSame(0.0, $capturedBatch->sendDelay, 'Guard: send_delay deve ser zerado no modo inline');
         $this->assertCount(2, $capturedBatch->items);
     }
 
@@ -485,7 +485,7 @@ class CampaignSubscriberActionTest extends TestCase
 
         $this->subscriber->onCampaignTriggerAction($event);
 
-        $this->assertSame(0, $capturedBatch->sendDelay, 'Guard deve zerar sendDelay no modo inline');
+        $this->assertSame(0.0, $capturedBatch->sendDelay, 'Guard deve zerar sendDelay no modo inline');
         $this->assertSame(5, $capturedBatch->batchLimit, 'batchLimit não deve ser alterado pelo guard');
     }
 
@@ -552,7 +552,7 @@ class CampaignSubscriberActionTest extends TestCase
         $subscriber->onCampaignTriggerAction($event);
 
         $this->assertInstanceOf(SendWhatsAppDirectBatchMessage::class, $capturedMsg);
-        $this->assertSame(3, $capturedMsg->sendDelay, 'Redis: sendDelay deve chegar intacto ao worker');
+        $this->assertSame(3.0, $capturedMsg->sendDelay, 'Redis: sendDelay deve chegar intacto ao worker');
         $this->assertSame(5, $capturedMsg->batchLimit);
     }
 
@@ -587,7 +587,7 @@ class CampaignSubscriberActionTest extends TestCase
 
         $this->subscriber->onCampaignTriggerAction($event);
 
-        $this->assertSame(0, $capturedBatch->sendDelay);
+        $this->assertSame(0.0, $capturedBatch->sendDelay);
     }
 
     // -------------------------------------------------------------------------
@@ -1207,7 +1207,7 @@ class CampaignSubscriberActionTest extends TestCase
                 return $msg instanceof SendWhatsAppDirectBatchMessage
                     && count($msg->items) === 3
                     && $msg->batchLimit === 1
-                    && $msg->sendDelay === 5;
+                    && $msg->sendDelay === 5.0;
             }))
             ->willReturn(new Envelope(new \stdClass()));
 

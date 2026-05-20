@@ -17,7 +17,8 @@ use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use Symfony\Component\Form\FormFactoryInterface;
 use Symfony\Component\Form\FormInterface;
 use Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException;
-use Symfony\Component\Messenger\Bridge\Amqp\Transport\AmqpStamp;
+use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppDirectBatchMessage;
+use MauticPlugin\DialogHSMBundle\Service\BulkRateLimiter;
 use Symfony\Component\Messenger\MessageBusInterface;
 use Symfony\Contracts\Service\Attribute\Required;
 
@@ -32,6 +33,7 @@ class WhatsAppMessageModel extends FormModel implements AjaxLookupModelInterface
 
     private LeadModel $leadModel;
     private MessageBusInterface $bus;
+    private BulkRateLimiter $rateLimiter;
 
     #[Required]
     public function setLeadModel(LeadModel $leadModel): void
@@ -43,6 +45,12 @@ class WhatsAppMessageModel extends FormModel implements AjaxLookupModelInterface
     public function setBus(MessageBusInterface $bus): void
     {
         $this->bus = $bus;
+    }
+
+    #[Required]
+    public function setRateLimiter(BulkRateLimiter $rateLimiter): void
+    {
+        $this->rateLimiter = $rateLimiter;
     }
 
     public function getRepository(): WhatsAppMessageRepository
@@ -120,15 +128,15 @@ class WhatsAppMessageModel extends FormModel implements AjaxLookupModelInterface
 
         $apiKey    = $number->getApiKey();
         $baseUrl   = $number->getBaseUrl() ?? 'https://waba.360dialog.io';
-        $queueName = $number->getQueueName() ?? $number->getBatchQueueName();
-        $stamps    = $queueName ? [new AmqpStamp($queueName)] : [];
         $sent      = 0;
         $failed    = 0;
-        $batchMin = 0;
-        $repo     = $this->getRepository();
+        $batchMin  = 0;
+        $repo      = $this->getRepository();
+        $sendDelay = $this->rateLimiter->getBulkSendDelay();
 
         do {
             $contacts = $repo->getPendingContacts($message->getId(), $batchMin, self::BATCH_SIZE);
+            $items    = [];
 
             foreach ($contacts as $contact) {
                 $leadId = (int) $contact['id'];
@@ -136,12 +144,14 @@ class WhatsAppMessageModel extends FormModel implements AjaxLookupModelInterface
 
                 if ('' === $phone) {
                     ++$failed;
+                    $batchMin = $leadId + 1;
                     continue;
                 }
 
                 $lead = $this->leadModel->getEntity($leadId);
                 if (!$lead) {
                     ++$failed;
+                    $batchMin = $leadId + 1;
                     continue;
                 }
 
@@ -160,33 +170,38 @@ class WhatsAppMessageModel extends FormModel implements AjaxLookupModelInterface
                 $this->em->persist($log);
                 $this->em->flush();
 
-                try {
-                    $this->bus->dispatch(new SendWhatsAppMessage(
-                        leadId:             $leadId,
-                        phone:              $phone,
-                        apiKey:             $apiKey,
-                        baseUrl:            $baseUrl,
-                        payloadData:        $payloadData,
-                        templateName:       $templateName,
-                        whatsAppNumberName: $number->getName() ?? '',
-                        queueLogId:         (string) $log->getId(),
-                        isBatch:            true,
-                    ), $stamps);
-                    ++$sent;
-                } catch (\Throwable) {
-                    $log->setStatus(MessageLog::STATUS_FAILED);
-                    $this->em->persist($log);
-                    $this->em->flush();
-                    ++$failed;
-                }
+                $items[] = new SendWhatsAppMessage(
+                    leadId:             $leadId,
+                    phone:              $phone,
+                    apiKey:             $apiKey,
+                    baseUrl:            $baseUrl,
+                    payloadData:        $payloadData,
+                    templateName:       $templateName,
+                    whatsAppNumberName: $number->getName() ?? '',
+                    queueLogId:         (string) $log->getId(),
+                    isBatch:            true,
+                );
 
+                ++$sent;
                 $batchMin = $leadId + 1;
+            }
+
+            if (!empty($items)) {
+                try {
+                    $this->bus->dispatch(new SendWhatsAppDirectBatchMessage(
+                        items:      $items,
+                        batchLimit: 1,
+                        sendDelay:  $sendDelay,
+                    ));
+                } catch (\Throwable) {
+                    $sent -= count($items);
+                    $failed += count($items);
+                }
             }
 
             $this->em->clear(MessageLog::class);
         } while (count($contacts) === self::BATCH_SIZE);
 
-        // Update counters on the message entity
         $this->em->createQueryBuilder()
             ->update(WhatsAppMessage::class, 'wm')
             ->set('wm.sentCount', 'wm.sentCount + :sent')

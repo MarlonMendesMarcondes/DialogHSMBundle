@@ -66,6 +66,17 @@ class BulkRateLimiter
         $this->applyThrottle('batch', $this->getBatchRatePerMinute(), $numberKey);
     }
 
+    /**
+     * Retorna o delay em segundos entre cada mensagem para respeitar bulk_rate_per_minute.
+     * Retorna 0.0 quando rate não está configurado (sem throttle).
+     */
+    public function getBulkSendDelay(): float
+    {
+        $rate = $this->getRatePerMinute();
+
+        return $rate > 0 ? round(60.0 / $rate, 3) : 0.0;
+    }
+
     private function applyThrottle(string $namespace, int $ratePerMinute, string $numberKey): void
     {
         if ($ratePerMinute <= 0) {

@@ -66,11 +66,16 @@ class SendWhatsAppMessageHandler implements MessageHandlerInterface
             }
         }
 
+        $payloadData = $message->payloadData;
+        if (empty($payloadData['content']) && !empty($message->templateName)) {
+            $payloadData['content'] = $message->templateName;
+        }
+
         $result = $this->api->sendMessage(
             $message->apiKey,
             $message->baseUrl,
             $message->phone,
-            $message->payloadData
+            $payloadData
         );
 
         // Erro transitório (rede, 429, 5xx): lança exceção para acionar retry do Messenger.

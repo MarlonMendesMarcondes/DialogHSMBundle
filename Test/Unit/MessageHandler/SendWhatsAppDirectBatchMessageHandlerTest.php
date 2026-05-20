@@ -44,7 +44,7 @@ class SendWhatsAppDirectBatchMessageHandlerTest extends TestCase
         );
     }
 
-    private function makeBatch(int $count, int $batchLimit = 0, int $sendDelay = 0): SendWhatsAppDirectBatchMessage
+    private function makeBatch(int $count, int $batchLimit = 0, float $sendDelay = 0.0): SendWhatsAppDirectBatchMessage
     {
         $items = [];
         for ($i = 1; $i <= $count; ++$i) {
@@ -253,6 +253,6 @@ class SendWhatsAppDirectBatchMessageHandlerTest extends TestCase
 
         $this->assertCount(1, $batch->items);
         $this->assertSame(10, $batch->batchLimit);
-        $this->assertSame(2, $batch->sendDelay);
+        $this->assertSame(2.0, $batch->sendDelay);
     }
 }

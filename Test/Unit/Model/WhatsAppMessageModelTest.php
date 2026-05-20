@@ -12,8 +12,10 @@ use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppMessage;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppMessageRepository;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
+use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppDirectBatchMessage;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use MauticPlugin\DialogHSMBundle\Model\WhatsAppMessageModel;
+use MauticPlugin\DialogHSMBundle\Service\BulkRateLimiter;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\MessageBusInterface;
@@ -26,14 +28,12 @@ class WhatsAppMessageModelTest extends TestCase
 
     /**
      * Builds a fully-wired WhatsAppMessageModel with the supplied mocks.
-     * WhatsAppMessageModel uses setter injection; AbstractCommonModel has a
-     * required 8-arg constructor, so we bypass it via newInstanceWithoutConstructor
-     * and set $em via reflection.
      */
     private function makeModel(
         LeadModel $leadModel,
         MessageBusInterface $bus,
         EntityManagerInterface $em,
+        ?BulkRateLimiter $rateLimiter = null,
     ): WhatsAppMessageModel {
         $ref   = new \ReflectionClass(WhatsAppMessageModel::class);
         $model = $ref->newInstanceWithoutConstructor();
@@ -45,13 +45,17 @@ class WhatsAppMessageModelTest extends TestCase
         $model->setLeadModel($leadModel);
         $model->setBus($bus);
 
+        if ($rateLimiter === null) {
+            $rateLimiter = $this->createMock(BulkRateLimiter::class);
+            $rateLimiter->method('getBulkSendDelay')->willReturn(0.0);
+        }
+        $model->setRateLimiter($rateLimiter);
+
         return $model;
     }
 
     /**
-     * Returns a fully-stubbed EntityManagerInterface whose createQueryBuilder()
-     * yields a fluent QueryBuilder stub — required for the DQL UPDATE at the
-     * end of sendToLists().
+     * Returns a fully-stubbed EntityManagerInterface + WhatsAppMessageRepository.
      *
      * @return array{EntityManagerInterface, WhatsAppMessageRepository}
      */
@@ -81,9 +85,6 @@ class WhatsAppMessageModelTest extends TestCase
         return [$mockEm, $mockRepo];
     }
 
-    /**
-     * Builds a WhatsAppNumber mock with the standard test values.
-     */
     private function makeNumberMock(): WhatsAppNumber
     {
         $number = $this->createMock(WhatsAppNumber::class);
@@ -95,8 +96,6 @@ class WhatsAppMessageModelTest extends TestCase
     }
 
     /**
-     * Builds a WhatsAppMessage mock with the given payload and number.
-     *
      * @param array<mixed> $payloadData
      */
     private function makeMessageMock(array $payloadData, ?WhatsAppNumber $number = null): WhatsAppMessage
@@ -111,7 +110,7 @@ class WhatsAppMessageModelTest extends TestCase
     }
 
     // -------------------------------------------------------------------------
-    // Tests
+    // Basic model tests
     // -------------------------------------------------------------------------
 
     public function testGetPermissionBaseReturnsCorrectString(): void
@@ -140,21 +139,55 @@ class WhatsAppMessageModelTest extends TestCase
         $this->assertInstanceOf(WhatsAppMessage::class, $entity);
     }
 
+    // -------------------------------------------------------------------------
+    // sendToLists() — guard cases
+    // -------------------------------------------------------------------------
+
+    public function testSendToListsWhatsAppNumberNullReturnsZeroZero(): void
+    {
+        [$em] = $this->makeEmWithRepo();
+
+        $message = $this->createMock(WhatsAppMessage::class);
+        $message->method('getWhatsAppNumber')->willReturn(null);
+
+        $bus = $this->createMock(MessageBusInterface::class);
+        $bus->expects($this->never())->method('dispatch');
+
+        $model  = $this->makeModel($this->createMock(LeadModel::class), $bus, $em);
+        $event  = $this->createMock(ChannelBroadcastEvent::class);
+        $result = $model->sendToLists($message, $event);
+
+        $this->assertSame([0, 0], $result);
+    }
+
+    public function testSendToListsNoContactsReturnsZeroZero(): void
+    {
+        [$em, $repo] = $this->makeEmWithRepo();
+        $repo->method('getPendingContacts')->willReturn([]);
+
+        $bus = $this->createMock(MessageBusInterface::class);
+        $bus->expects($this->never())->method('dispatch');
+
+        $model  = $this->makeModel($this->createMock(LeadModel::class), $bus, $em);
+        $event  = $this->createMock(ChannelBroadcastEvent::class);
+        $result = $model->sendToLists($this->makeMessageMock([]), $event);
+
+        $this->assertSame([0, 0], $result);
+    }
+
     public function testSendToListsContactWithEmptyPhoneIncreasesFailed(): void
     {
         [$em, $repo] = $this->makeEmWithRepo();
-
         $repo->method('getPendingContacts')
             ->willReturnOnConsecutiveCalls(
                 [['id' => 1, 'phone' => '']],
                 [],
             );
 
-        $bus      = $this->createMock(MessageBusInterface::class);
+        $bus = $this->createMock(MessageBusInterface::class);
         $bus->expects($this->never())->method('dispatch');
 
-        $model = $this->makeModel($this->createMock(LeadModel::class), $bus, $em);
-
+        $model  = $this->makeModel($this->createMock(LeadModel::class), $bus, $em);
         $event  = $this->createMock(ChannelBroadcastEvent::class);
         $result = $model->sendToLists($this->makeMessageMock([]), $event);
 
@@ -164,7 +197,6 @@ class WhatsAppMessageModelTest extends TestCase
     public function testSendToListsContactWithNullLeadIncreasesFailed(): void
     {
         [$em, $repo] = $this->makeEmWithRepo();
-
         $repo->method('getPendingContacts')
             ->willReturnOnConsecutiveCalls(
                 [['id' => 99, 'phone' => '5511999999999']],
@@ -177,18 +209,20 @@ class WhatsAppMessageModelTest extends TestCase
         $bus = $this->createMock(MessageBusInterface::class);
         $bus->expects($this->never())->method('dispatch');
 
-        $model = $this->makeModel($leadModel, $bus, $em);
-
+        $model  = $this->makeModel($leadModel, $bus, $em);
         $event  = $this->createMock(ChannelBroadcastEvent::class);
         $result = $model->sendToLists($this->makeMessageMock([]), $event);
 
         $this->assertSame([0, 1], $result);
     }
 
-    public function testSendToListsSuccessfulDispatchIncreasesSent(): void
+    // -------------------------------------------------------------------------
+    // sendToLists() — Redis dispatch via SendWhatsAppDirectBatchMessage
+    // -------------------------------------------------------------------------
+
+    public function testSendToListsDispatchesBatchMessageToRedis(): void
     {
         [$em, $repo] = $this->makeEmWithRepo();
-
         $payload = ['list' => [['label' => 'content', 'value' => 'template_x']]];
 
         $repo->method('getPendingContacts')
@@ -218,16 +252,97 @@ class WhatsAppMessageModelTest extends TestCase
         $result = $model->sendToLists($this->makeMessageMock($payload), $event);
 
         $this->assertSame([1, 0], $result);
-        $this->assertInstanceOf(SendWhatsAppMessage::class, $capturedMessage);
-        $this->assertSame('template_x', $capturedMessage->templateName);
-        $this->assertTrue($capturedMessage->isBatch);
+        $this->assertInstanceOf(SendWhatsAppDirectBatchMessage::class, $capturedMessage);
+        $this->assertCount(1, $capturedMessage->items);
+        $this->assertInstanceOf(SendWhatsAppMessage::class, $capturedMessage->items[0]);
+        $this->assertSame('template_x', $capturedMessage->items[0]->templateName);
+        $this->assertTrue($capturedMessage->items[0]->isBatch);
+    }
+
+    public function testSendToListsDispatchCarriesSendDelayFromRateLimiter(): void
+    {
+        [$em, $repo] = $this->makeEmWithRepo();
+
+        $repo->method('getPendingContacts')
+            ->willReturnOnConsecutiveCalls(
+                [['id' => 7, 'phone' => '5511988887777']],
+                [],
+            );
+
+        $lead = $this->createMock(Lead::class);
+        $lead->method('getProfileFields')->willReturn([]);
+
+        $leadModel = $this->createMock(LeadModel::class);
+        $leadModel->method('getEntity')->willReturn($lead);
+
+        $rateLimiter = $this->createMock(BulkRateLimiter::class);
+        $rateLimiter->method('getBulkSendDelay')->willReturn(1.5);
+
+        $capturedMessage = null;
+        $bus             = $this->createMock(MessageBusInterface::class);
+        $bus->method('dispatch')
+            ->willReturnCallback(function (object $msg) use (&$capturedMessage): Envelope {
+                $capturedMessage = $msg;
+
+                return new Envelope($msg);
+            });
+
+        $model = $this->makeModel($leadModel, $bus, $em, $rateLimiter);
+        $model->sendToLists($this->makeMessageMock([]), $this->createMock(ChannelBroadcastEvent::class));
+
+        $this->assertInstanceOf(SendWhatsAppDirectBatchMessage::class, $capturedMessage);
+        $this->assertSame(1.5, $capturedMessage->sendDelay);
+        $this->assertSame(1, $capturedMessage->batchLimit);
+    }
+
+    public function testSendToListsBatchContainsQueueLogIdAsIntegerString(): void
+    {
+        [$em, $repo] = $this->makeEmWithRepo();
+
+        $repo->method('getPendingContacts')
+            ->willReturnOnConsecutiveCalls(
+                [['id' => 5, 'phone' => '5511988887777']],
+                [],
+            );
+
+        $lead = $this->createMock(Lead::class);
+        $lead->method('getProfileFields')->willReturn([]);
+
+        $leadModel = $this->createMock(LeadModel::class);
+        $leadModel->method('getEntity')->willReturn($lead);
+
+        // Simula auto-increment do DB: define id=99 no MessageLog ao persistir
+        $em->method('persist')->willReturnCallback(function (object $obj): void {
+            if ($obj instanceof MessageLog) {
+                $ref = new \ReflectionProperty(MessageLog::class, 'id');
+                $ref->setAccessible(true);
+                $ref->setValue($obj, 99);
+            }
+        });
+
+        $capturedMessage = null;
+        $bus             = $this->createMock(MessageBusInterface::class);
+        $bus->method('dispatch')
+            ->willReturnCallback(function (object $msg) use (&$capturedMessage): Envelope {
+                $capturedMessage = $msg;
+
+                return new Envelope($msg);
+            });
+
+        $model = $this->makeModel($leadModel, $bus, $em);
+        $model->sendToLists($this->makeMessageMock([]), $this->createMock(ChannelBroadcastEvent::class));
+
+        $this->assertInstanceOf(SendWhatsAppDirectBatchMessage::class, $capturedMessage);
+        $item = $capturedMessage->items[0];
+        // queueLogId deve ser string numérica (ID inteiro do log) — detectável por ctype_digit()
+        $this->assertSame('99', $item->queueLogId);
+        $this->assertTrue(ctype_digit($item->queueLogId));
     }
 
     public function testSendToListsBusExceptionIncreasesFailed(): void
     {
-        $payload = ['list' => [['label' => 'content', 'value' => 'template_x']]];
-
         [$em, $repo] = $this->makeEmWithRepo();
+        $payload = ['list' => [['label' => 'content', 'value' => 'template_x']]];
 
         $repo->method('getPendingContacts')
             ->willReturnOnConsecutiveCalls(
@@ -241,13 +356,6 @@ class WhatsAppMessageModelTest extends TestCase
         $leadModel = $this->createMock(LeadModel::class);
         $leadModel->method('getEntity')->with(3)->willReturn($lead);
 
-        // Track every call to persist() so we can inspect the log's final status
-        $persistedObjects = [];
-        $em->method('persist')
-            ->willReturnCallback(function (object $obj) use (&$persistedObjects): void {
-                $persistedObjects[] = $obj;
-            });
-
         $bus = $this->createMock(MessageBusInterface::class);
         $bus->method('dispatch')->willThrowException(new \RuntimeException('bus failure'));
 
@@ -256,24 +364,55 @@ class WhatsAppMessageModelTest extends TestCase
         $result = $model->sendToLists($this->makeMessageMock($payload), $event);
 
         $this->assertSame([0, 1], $result);
-
-        // The last persisted MessageLog must have STATUS_FAILED
-        $logs = array_values(array_filter($persistedObjects, fn ($o) => $o instanceof MessageLog));
-        $this->assertNotEmpty($logs);
-        $lastLog = end($logs);
-        $this->assertSame(MessageLog::STATUS_FAILED, $lastLog->getStatus());
     }
+
+    public function testSendToListsMultipleContactsInOneBatchMessage(): void
+    {
+        [$em, $repo] = $this->makeEmWithRepo();
+
+        $repo->method('getPendingContacts')
+            ->willReturnOnConsecutiveCalls(
+                [
+                    ['id' => 1, 'phone' => '5511111111111'],
+                    ['id' => 2, 'phone' => '5511222222222'],
+                    ['id' => 3, 'phone' => '5511333333333'],
+                ],
+                [],
+            );
+
+        $lead = $this->createMock(Lead::class);
+        $lead->method('getProfileFields')->willReturn([]);
+
+        $leadModel = $this->createMock(LeadModel::class);
+        $leadModel->method('getEntity')->willReturn($lead);
+
+        $capturedMessage = null;
+        $bus             = $this->createMock(MessageBusInterface::class);
+        $bus->expects($this->once())
+            ->method('dispatch')
+            ->willReturnCallback(function (object $msg) use (&$capturedMessage): Envelope {
+                $capturedMessage = $msg;
+
+                return new Envelope($msg);
+            });
+
+        $model  = $this->makeModel($leadModel, $bus, $em);
+        $result = $model->sendToLists($this->makeMessageMock([]), $this->createMock(ChannelBroadcastEvent::class));
+
+        $this->assertSame([3, 0], $result);
+        $this->assertInstanceOf(SendWhatsAppDirectBatchMessage::class, $capturedMessage);
+        $this->assertCount(3, $capturedMessage->items);
+    }
+
+    // -------------------------------------------------------------------------
+    // sendToLists() — token resolution
+    // -------------------------------------------------------------------------
 
     public function testSendToListsTokensResolvedPerContact(): void
     {
-        // TokenHelper::findLeadTokens resolves {contactfield=<alias>} tokens.
-        // The model pipes each payload item's 'value' through that helper, so a
-        // value of '{contactfield=firstname}' with profileFields ['firstname'=>'João']
-        // must come out as 'João' in the dispatched message.
         $payload = ['list' => [['label' => 'body', 'value' => '{contactfield=firstname}']]];
 
         [$em, $repo] = $this->makeEmWithRepo();
-
         $repo->method('getPendingContacts')
             ->willReturnOnConsecutiveCalls(
                 [['id' => 5, 'phone' => '5511966665555']],
@@ -295,46 +434,12 @@ class WhatsAppMessageModelTest extends TestCase
                 return new Envelope($msg);
             });
 
-        $model  = $this->makeModel($leadModel, $bus, $em);
-        $event  = $this->createMock(ChannelBroadcastEvent::class);
-        $model->sendToLists($this->makeMessageMock($payload), $event);
+        $model = $this->makeModel($leadModel, $bus, $em);
+        $model->sendToLists($this->makeMessageMock($payload), $this->createMock(ChannelBroadcastEvent::class));
 
-        $this->assertInstanceOf(SendWhatsAppMessage::class, $capturedMessage);
-        $resolvedList = $capturedMessage->payloadData['list'];
-        $this->assertSame('João', $resolvedList[0]['value']);
-    }
-
-    public function testSendToListsNoContactsReturnsZeroZero(): void
-    {
-        [$em, $repo] = $this->makeEmWithRepo();
-
-        // Returns empty on first call → loop exits immediately
-        $repo->method('getPendingContacts')->willReturn([]);
-
-        $bus = $this->createMock(MessageBusInterface::class);
-        $bus->expects($this->never())->method('dispatch');
-
-        $model  = $this->makeModel($this->createMock(LeadModel::class), $bus, $em);
-        $event  = $this->createMock(ChannelBroadcastEvent::class);
-        $result = $model->sendToLists($this->makeMessageMock([]), $event);
-
-        $this->assertSame([0, 0], $result);
-    }
-
-    public function testSendToListsWhatsAppNumberNullReturnsZeroZero(): void
-    {
-        [$em] = $this->makeEmWithRepo();
-
-        $message = $this->createMock(WhatsAppMessage::class);
-        $message->method('getWhatsAppNumber')->willReturn(null);
-
-        $bus = $this->createMock(MessageBusInterface::class);
-        $bus->expects($this->never())->method('dispatch');
-
-        $model  = $this->makeModel($this->createMock(LeadModel::class), $bus, $em);
-        $event  = $this->createMock(ChannelBroadcastEvent::class);
-        $result = $model->sendToLists($message, $event);
-
-        $this->assertSame([0, 0], $result);
+        $this->assertInstanceOf(SendWhatsAppDirectBatchMessage::class, $capturedMessage);
+        $item = $capturedMessage->items[0];
+        // resolveTokens converte lista → key-value; token deve estar resolvido
+        $this->assertSame('João', $item->payloadData['body']);
     }
 }

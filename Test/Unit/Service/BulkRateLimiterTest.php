@@ -367,6 +367,49 @@ class BulkRateLimiterTest extends TestCase
     }
 
     // =========================================================================
+    // getBulkSendDelay() — conversão bulk_rate_per_minute → segundos
+    // =========================================================================
+
+    public function testGetBulkSendDelayReturnsZeroWhenRateIsZero(): void
+    {
+        $limiter = $this->makeLimiter(0);
+
+        $this->assertSame(0.0, $limiter->getBulkSendDelay());
+    }
+
+    public function testGetBulkSendDelayReturns1SecondFor60PerMinute(): void
+    {
+        $limiter = $this->makeLimiter(60);
+
+        $this->assertSame(1.0, $limiter->getBulkSendDelay());
+    }
+
+    public function testGetBulkSendDelayReturns0Point5SecondFor120PerMinute(): void
+    {
+        $limiter = $this->makeLimiter(120);
+
+        $this->assertSame(0.5, $limiter->getBulkSendDelay());
+    }
+
+    public function testGetBulkSendDelayReturnsCorrectValueFor30PerMinute(): void
+    {
+        $limiter = $this->makeLimiter(30);
+
+        $this->assertSame(2.0, $limiter->getBulkSendDelay());
+    }
+
+    public function testGetBulkSendDelayReturnsZeroWhenIntegrationsHelperThrows(): void
+    {
+        $this->integrationsHelper
+            ->method('getIntegration')
+            ->willThrowException(new \RuntimeException('not found'));
+
+        $limiter = new BulkRateLimiter($this->integrationsHelper, '', $this->redis);
+
+        $this->assertSame(0.0, $limiter->getBulkSendDelay());
+    }
+
+    // =========================================================================
     // throttle() bulk — Redis key namespace
     // =========================================================================
 

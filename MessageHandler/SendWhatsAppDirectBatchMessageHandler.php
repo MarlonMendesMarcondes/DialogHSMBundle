@@ -60,7 +60,7 @@ class SendWhatsAppDirectBatchMessageHandler implements MessageHandlerInterface
             ++$sentCount;
 
             if ($batch->sendDelay > 0 && $sentCount % $effectiveBatch === 0) {
-                usleep($batch->sendDelay * 1_000_000);
+                usleep((int) ($batch->sendDelay * 1_000_000));
             }
         }
 

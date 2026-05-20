@@ -29,7 +29,7 @@ class SendWhatsAppDirectBatchMessage
     public function __construct(
         public readonly array $items,
         public readonly int $batchLimit,
-        public readonly int $sendDelay,
+        public readonly float $sendDelay,
     ) {
     }
 }

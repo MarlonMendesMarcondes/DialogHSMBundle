@@ -351,7 +351,7 @@ class CampaignSubscriberPerformanceTest extends TestCase
         $this->assertSame(10, $capturedBatch->batchLimit, 'batchLimit deve ser 10');
         // Guard: no modo inline (null://null) send_delay é zerado para não bloquear
         // o mautic:campaigns:trigger. O throttle real só funciona via Redis ou queue.
-        $this->assertSame(0, $capturedBatch->sendDelay, 'Guard: sendDelay zerado no modo inline');
+        $this->assertSame(0.0, $capturedBatch->sendDelay, 'Guard: sendDelay zerado no modo inline'); // float após mudança de int→float no sendDelay
         $this->assertCount(20, $capturedBatch->items, 'Todos os 20 contatos devem estar no lote');
     }
 

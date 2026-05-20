@@ -9,6 +9,7 @@ use Doctrine\ORM\Mapping\ClassMetadata;
 use Doctrine\ORM\QueryBuilder;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
+use MauticPlugin\DialogHSMBundle\Entity\WhatsAppMessage;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 
@@ -28,9 +29,15 @@ class MessageLogRepositoryTest extends TestCase
         $this->mockClassMetadata = $this->createMock(ClassMetadata::class);
 
         $this->mockEntityManager->method('getConnection')->willReturn($this->mockConnection);
+
+        $waMsgMeta = $this->createMock(ClassMetadata::class);
+        $waMsgMeta->method('getTableName')->willReturn('dialog_hsm_whatsapp_messages');
+
         $this->mockEntityManager->method('getClassMetadata')
-            ->with(MessageLog::class)
-            ->willReturn($this->mockClassMetadata);
+            ->willReturnMap([
+                [MessageLog::class,    $this->mockClassMetadata],
+                [WhatsAppMessage::class, $waMsgMeta],
+            ]);
         $this->mockClassMetadata->method('getTableName')->willReturn('dialog_hsm_message_log');
 
         $this->mockQuery = $this->createMock(AbstractQuery::class);
