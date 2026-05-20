@@ -225,22 +225,20 @@ class MarketingMessageSubscriber implements EventSubscriberInterface
      */
     private function resolveTokens(array $payloadData, array $profileFields): array
     {
-        $list = $payloadData['list'] ?? $payloadData;
+        $list   = $payloadData['list'] ?? $payloadData;
+        $result = [];
 
-        foreach ($list as &$item) {
-            if (!is_array($item) || !isset($item['value'])) {
+        foreach ($list as $item) {
+            if (!is_array($item) || !isset($item['label'], $item['value'])) {
                 continue;
             }
-            $item['value'] = TokenHelper::findLeadTokens((string) $item['value'], $profileFields, true);
-        }
-        unset($item);
-
-        if (isset($payloadData['list'])) {
-            $payloadData['list'] = $list;
-        } else {
-            $payloadData = $list;
+            $key = trim((string) $item['label']);
+            if ('' === $key) {
+                continue;
+            }
+            $result[$key] = TokenHelper::findLeadTokens((string) $item['value'], $profileFields, true);
         }
 
-        return $payloadData;
+        return $result;
     }
 }
