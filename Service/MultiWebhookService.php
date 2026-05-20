@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MauticPlugin\DialogHSMBundle\Service;
 
 use GuzzleHttp\Client;
+use GuzzleHttp\Exception\ClientException;
 use GuzzleHttp\Exception\GuzzleException;
 use Psr\Log\LoggerInterface;
 
@@ -26,6 +27,15 @@ class MultiWebhookService
             $resp = $this->makeClient($apiKey)->get('/multi_webhook');
 
             return json_decode((string) $resp->getBody(), true) ?? [];
+        } catch (ClientException $e) {
+            if (409 === $e->getResponse()->getStatusCode()) {
+                // 360dialog returns 409 when multi_webhook is not yet enabled — not an error
+                return ['enabled' => false, 'destinations' => []];
+            }
+
+            $this->logger->error('MultiWebhook check failed', ['error' => $e->getMessage()]);
+
+            return ['error' => $e->getMessage()];
         } catch (GuzzleException $e) {
             $this->logger->error('MultiWebhook check failed', ['error' => $e->getMessage()]);
 
@@ -42,9 +52,15 @@ class MultiWebhookService
     {
         $client = $this->makeClient($apiKey);
 
-        // 1. Get current state
+        // 1. Get current state (409 = not yet enabled, treat as disabled)
         try {
             $state = json_decode((string) $client->get('/multi_webhook')->getBody(), true) ?? [];
+        } catch (ClientException $e) {
+            if (409 === $e->getResponse()->getStatusCode()) {
+                $state = ['enabled' => false, 'destinations' => []];
+            } else {
+                return ['success' => false, 'action' => 'check', 'message' => $e->getMessage()];
+            }
         } catch (GuzzleException $e) {
             return ['success' => false, 'action' => 'check', 'message' => $e->getMessage()];
         }
