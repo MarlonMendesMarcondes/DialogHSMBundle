@@ -39,7 +39,7 @@ class WhatsAppMessageRepository extends CommonRepository
     private function getPublishedBroadcastsQuery(?int $id = null): Query
     {
         $qb   = $this->createQueryBuilder($this->getTableAlias());
-        $expr = $this->getPublishedByDateExpression($qb, null, true, true, false);
+        $expr = $this->getPublishedByDateExpression($qb, null, true, true, true);
 
         if (null !== $id && 0 !== $id) {
             $expr->add(
@@ -70,7 +70,7 @@ class WhatsAppMessageRepository extends CommonRepository
                 $q->expr()->eq('wml.whatsapp_message_id', ':messageId')
             )
             ->setParameter('messageId', $messageId)
-            ->orderBy('lll.lead_id');
+            ->orderBy('l.id');
 
         return $q;
     }
@@ -100,7 +100,7 @@ class WhatsAppMessageRepository extends CommonRepository
         $q->andWhere(sprintf('NOT EXISTS (%s)', $sentQb->getSQL()));
 
         if ($batchMinId > 0) {
-            $q->andWhere($q->expr()->gte('lll.lead_id', ':batchMinId'))
+            $q->andWhere($q->expr()->gte('l.id', ':batchMinId'))
               ->setParameter('batchMinId', $batchMinId);
         }
 

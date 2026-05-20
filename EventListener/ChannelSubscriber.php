@@ -40,7 +40,7 @@ class ChannelSubscriber implements EventSubscriberInterface
             'whatsapp',
             [
                 MessageModel::CHANNEL_FEATURE => [
-                    'campaignAction'  => 'dialoghsm.send_whatsapp',
+                    'campaignAction'  => 'dialoghsm.send_whatsapp_message',
                     'lookupFormType'  => WhatsAppMessageListType::class,
                     'repository'      => WhatsAppMessage::class,
                 ],

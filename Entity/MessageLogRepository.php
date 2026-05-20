@@ -136,6 +136,35 @@ class MessageLogRepository extends CommonRepository
      *
      * @return array{total:int, sent:int, delivered:int, read:int, failed:int, dlq:int}
      */
+    /**
+     * @return array<string, int>
+     */
+    public function getStatsByMessageId(int $whatsappMessageId): array
+    {
+        $conn      = $this->getEntityManager()->getConnection();
+        $tableName = $this->getEntityManager()->getClassMetadata(MessageLog::class)->getTableName();
+
+        $rows = $conn->fetchAllAssociative(
+            "SELECT status, COUNT(*) AS cnt FROM `{$tableName}` WHERE whatsapp_message_id = ? GROUP BY status",
+            [$whatsappMessageId]
+        );
+
+        $stats = ['total' => 0, 'queued' => 0, 'pending_webhook' => 0, 'sent' => 0, 'delivered' => 0, 'read' => 0, 'failed' => 0, 'dlq' => 0];
+        foreach ($rows as $row) {
+            $status        = (string) $row['status'];
+            $count         = (int) $row['cnt'];
+            $stats['total'] += $count;
+            if (array_key_exists($status, $stats)) {
+                $stats[$status] = $count;
+            }
+        }
+
+        $stats['sent']      += $stats['delivered'] + $stats['read'];
+        $stats['delivered'] += $stats['read'];
+
+        return $stats;
+    }
+
     public function getStatsByPeriod(\DateTimeInterface $from): array
     {
         $conn      = $this->getEntityManager()->getConnection();
@@ -498,21 +527,25 @@ class MessageLogRepository extends CommonRepository
     {
         $conn      = $this->getEntityManager()->getConnection();
         $tableName = $this->getEntityManager()->getClassMetadata(MessageLog::class)->getTableName();
+        $msgTable  = $this->getEntityManager()->getClassMetadata(WhatsAppMessage::class)->getTableName();
 
         return $conn->fetchAllAssociative(
             "SELECT
-                template_name,
-                campaign_id,
-                DATE(date_sent)                                                AS date,
+                ml.template_name,
+                ml.campaign_id,
+                ml.whatsapp_message_id,
+                wm.name                                                        AS whatsapp_message_name,
+                DATE(ml.date_sent)                                             AS date,
                 COUNT(*)                                                       AS total,
-                SUM(status IN ('sent', 'delivered', 'read'))                   AS sent_plus,
-                SUM(status IN ('delivered', 'read'))                           AS delivered_plus,
-                SUM(status = 'read')                                           AS read_count,
-                SUM(status = 'failed')                                         AS failed,
-                SUM(status = 'dlq')                                            AS dlq
-             FROM `{$tableName}`
-             GROUP BY template_name, campaign_id, DATE(date_sent)
-             ORDER BY MAX(date_sent) DESC
+                SUM(ml.status IN ('sent', 'delivered', 'read'))                AS sent_plus,
+                SUM(ml.status IN ('delivered', 'read'))                        AS delivered_plus,
+                SUM(ml.status = 'read')                                        AS read_count,
+                SUM(ml.status = 'failed')                                      AS failed,
+                SUM(ml.status = 'dlq')                                         AS dlq
+             FROM `{$tableName}` ml
+             LEFT JOIN `{$msgTable}` wm ON wm.id = ml.whatsapp_message_id
+             GROUP BY ml.template_name, ml.campaign_id, ml.whatsapp_message_id, DATE(ml.date_sent)
+             ORDER BY MAX(ml.date_sent) DESC
              LIMIT {$limit}"
         );
     }

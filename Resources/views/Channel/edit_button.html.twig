@@ -1,0 +1,41 @@
+<script>
+(function () {
+    var editUrlTpl = '{{ editBaseUrl }}';
+    var listUrl    = '{{ listUrl }}';
+
+    function dialoghsmAddEditBtn() {
+        mQuery('[data-model="dialoghsm.whatsappmessage"]').each(function () {
+            var $sel = mQuery(this);
+            if ($sel.data('dialoghsm-btn')) return;
+            $sel.data('dialoghsm-btn', true);
+
+            var $group = $sel.closest('.form-group');
+            var $btns  = mQuery(
+                '<div style="margin-top:6px">' +
+                '<a class="btn btn-sm btn-secondary dialoghsm-msg-edit-btn disabled" href="#" target="_blank">' +
+                '<i class="ri-edit-line"></i> Editar selecionada</a> ' +
+                '<a class="btn btn-sm btn-secondary" href="' + listUrl + '" target="_blank">' +
+                '<i class="ri-list-check"></i> Ver todas</a>' +
+                '</div>'
+            );
+            $group.append($btns);
+
+            function sync() {
+                var val = $sel.val();
+                var $btn = $group.find('.dialoghsm-msg-edit-btn');
+                if (val && val !== 'new') {
+                    $btn.attr('href', editUrlTpl.replace('__ID__', val)).removeClass('disabled');
+                } else {
+                    $btn.attr('href', '#').addClass('disabled');
+                }
+            }
+
+            $sel.on('change', sync);
+            sync();
+        });
+    }
+
+    mQuery(document).ready(function () { setTimeout(dialoghsmAddEditBtn, 600); });
+    mQuery(document).on('ajaxComplete dialogShown', function () { setTimeout(dialoghsmAddEditBtn, 400); });
+})();
+</script>

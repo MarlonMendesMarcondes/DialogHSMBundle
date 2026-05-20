@@ -15,6 +15,7 @@ class DialogHSMPermissions extends AbstractPermissions
         parent::__construct($coreParametersHelper->all());
 
         $this->addStandardPermissions('numbers');
+        $this->addStandardPermissions('whatsappmessages');
     }
 
     public function getName(): string
@@ -25,5 +26,6 @@ class DialogHSMPermissions extends AbstractPermissions
     public function buildForm(FormBuilderInterface &$builder, array $options, array $data): void
     {
         $this->addStandardFormFields('dialoghsm', 'numbers', $builder, $data);
+        $this->addStandardFormFields('dialoghsm', 'whatsappmessages', $builder, $data);
     }
 }

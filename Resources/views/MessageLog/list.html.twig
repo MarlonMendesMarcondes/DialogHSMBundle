@@ -134,6 +134,10 @@
                             <a href="{{ path('mautic_campaign_action', {'objectAction': 'view', 'objectId': item.getCampaignId()}) }}" target="_blank">
                                 #{{ item.getCampaignId() }}
                             </a>
+                        {% elseif item.getWhatsappMessageId() is not null %}
+                            <a href="{{ path('mautic_dialoghsm_message_action', {'objectAction': 'edit', 'objectId': item.getWhatsappMessageId()}) }}" target="_blank" title="Marketing Message">
+                                <span class="label label-info">MM</span> #{{ item.getWhatsappMessageId() }}
+                            </a>
                         {% else %}
                             <span class="text-muted">—</span>
                         {% endif %}

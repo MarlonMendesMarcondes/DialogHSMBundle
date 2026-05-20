@@ -27,6 +27,11 @@ return [
                 'controller' => 'MauticPlugin\DialogHSMBundle\Controller\WhatsAppNumberController::webhookRegisterAction',
                 'methods'    => ['POST'],
             ],
+            'mautic_dialoghsm_log_simulate_status' => [
+                'path'       => '/dialoghsm/logs/{logId}/simulate-status',
+                'controller' => 'MauticPlugin\DialogHSMBundle\Controller\MessageLogController::simulateStatusAction',
+                'methods'    => ['POST'],
+            ],
             'mautic_dialoghsm_log_purge_queued' => [
                 'path'       => '/dialoghsm/logs/purge-queued',
                 'controller' => 'MauticPlugin\DialogHSMBundle\Controller\MessageLogController::purgeQueuedAction',
@@ -99,22 +104,7 @@ return [
     ],
     'services' => [
         'models' => [],
-        'events' => [
-            'dialoghsm.subscriber.channel' => [
-                'class'     => \MauticPlugin\DialogHSMBundle\EventListener\ChannelSubscriber::class,
-                'arguments' => [
-                    'mautic.helper.integration',
-                ],
-                'tags' => ['kernel.event_subscriber'],
-            ],
-            'dialoghsm.subscriber.broadcast' => [
-                'class'     => \MauticPlugin\DialogHSMBundle\EventListener\BroadcastSubscriber::class,
-                'arguments' => [
-                    'mautic.dialoghsm.model.whatsappmessage',
-                ],
-                'tags' => ['kernel.event_subscriber'],
-            ],
-        ],
+        'events' => [],
         'integrations' => [
             'mautic.integration.dialoghsm' => [
                 'class' => \MauticPlugin\DialogHSMBundle\Integration\DialogHSMIntegration::class,

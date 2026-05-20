@@ -104,8 +104,14 @@ class SendWhatsAppMessageHandler implements MessageHandlerInterface
 
     private function logMessage(int $leadId, string $templateName, string $phone, string $senderName, array $result, ?int $campaignId = null, ?int $campaignEventId = null, ?string $queueLogId = null, bool $skipHousekeeping = false): void
     {
-        // Se existe log queued criado no dispatch, atualiza-o em vez de criar novo
-        $log = $queueLogId !== null ? $this->messageLogRepository->findByWamid($queueLogId) : null;
+        // Se existe log queued criado no dispatch, atualiza-o em vez de criar novo.
+        // CampaignSubscriber usa UUID (armazenado em wamid); MM path usa integer ID.
+        $log = null;
+        if ($queueLogId !== null) {
+            $log = ctype_digit($queueLogId)
+                ? $this->messageLogRepository->find((int) $queueLogId)
+                : $this->messageLogRepository->findByWamid($queueLogId);
+        }
 
         if ($log === null) {
             $log = new MessageLog();

@@ -142,6 +142,10 @@
                                     <a class="dialoghsm-campaign-link" href="{{ path('mautic_campaign_action', {'objectAction': 'view', 'objectId': row.campaign_id}) }}" target="_blank">
                                         <i class="ri-share-box-line"></i> #{{ row.campaign_id }}
                                     </a>
+                                {% elseif row.whatsapp_message_id %}
+                                    <a class="dialoghsm-campaign-link" href="{{ path('mautic_dialoghsm_message_action', {'objectAction': 'view', 'objectId': row.whatsapp_message_id}) }}" target="_blank">
+                                        <i class="ri-broadcast-line"></i> {{ row.whatsapp_message_name ?: '#' ~ row.whatsapp_message_id }}
+                                    </a>
                                 {% else %}
                                     <span class="text-muted">—</span>
                                 {% endif %}

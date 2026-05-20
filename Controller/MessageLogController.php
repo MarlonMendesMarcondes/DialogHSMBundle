@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace MauticPlugin\DialogHSMBundle\Controller;
 
+use Doctrine\ORM\EntityManagerInterface;
 use Mautic\CoreBundle\Controller\FormController;
 use Mautic\IntegrationsBundle\Helper\IntegrationsHelper;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Integration\DialogHSMIntegration;
+use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Contracts\Cache\CacheInterface;
@@ -248,6 +250,65 @@ class MessageLogController extends FormController
                 'mauticContent' => 'dialoghsm_purge_queued',
                 'route'         => $this->generateUrl('mautic_dialoghsm_log_purge_queued'),
             ],
+        ]);
+    }
+
+    public function simulateStatusAction(Request $request, int $logId): JsonResponse
+    {
+        $status = trim($request->request->get('status', ''));
+
+        $allowed = [
+            MessageLog::STATUS_SENT,
+            MessageLog::STATUS_DELIVERED,
+            MessageLog::STATUS_READ,
+            MessageLog::STATUS_FAILED,
+        ];
+
+        if (!in_array($status, $allowed, true)) {
+            return new JsonResponse(['error' => 'Invalid status. Allowed: ' . implode(', ', $allowed)], 400);
+        }
+
+        /** @var MessageLogRepository $repo */
+        $repo = $this->getDoctrine()->getRepository(MessageLog::class);
+        $log  = $repo->find($logId);
+
+        if (!$log) {
+            return new JsonResponse(['error' => "MessageLog #{$logId} not found"], 404);
+        }
+
+        $transitions = [
+            MessageLog::STATUS_SENT      => [MessageLog::STATUS_QUEUED, MessageLog::STATUS_PENDING_WEBHOOK],
+            MessageLog::STATUS_DELIVERED => [MessageLog::STATUS_PENDING_WEBHOOK, MessageLog::STATUS_SENT],
+            MessageLog::STATUS_READ      => [MessageLog::STATUS_PENDING_WEBHOOK, MessageLog::STATUS_SENT, MessageLog::STATUS_DELIVERED],
+            MessageLog::STATUS_FAILED    => [MessageLog::STATUS_QUEUED, MessageLog::STATUS_PENDING_WEBHOOK, MessageLog::STATUS_SENT],
+        ];
+
+        $current = $log->getStatus();
+        if (!in_array($current, $transitions[$status], true)) {
+            return new JsonResponse(['error' => "Invalid transition: {$current} → {$status}"], 422);
+        }
+
+        if (null === $log->getWamid()) {
+            $log->setWamid('wamid.sim_' . bin2hex(random_bytes(8)));
+        }
+
+        $log->setStatus($status);
+        if (MessageLog::STATUS_DELIVERED === $status) {
+            $log->setDateDelivered(new \DateTime());
+        } elseif (MessageLog::STATUS_READ === $status) {
+            $log->setDateRead(new \DateTime());
+        }
+
+        /** @var EntityManagerInterface $em */
+        $em = $this->getDoctrine()->getManager();
+        $em->persist($log);
+        $em->flush();
+
+        return new JsonResponse([
+            'ok'     => true,
+            'log_id' => $logId,
+            'wamid'  => $log->getWamid(),
+            'status' => $status,
         ]);
     }
 

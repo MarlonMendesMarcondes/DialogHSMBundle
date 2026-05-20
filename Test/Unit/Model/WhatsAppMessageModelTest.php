@@ -26,20 +26,24 @@ class WhatsAppMessageModelTest extends TestCase
 
     /**
      * Builds a fully-wired WhatsAppMessageModel with the supplied mocks.
-     * Because WhatsAppMessageModel overrides __construct without calling
-     * parent::__construct(), the protected $em property defined on
-     * AbstractCommonModel is never set — we inject it via reflection.
+     * WhatsAppMessageModel uses setter injection; AbstractCommonModel has a
+     * required 8-arg constructor, so we bypass it via newInstanceWithoutConstructor
+     * and set $em via reflection.
      */
     private function makeModel(
         LeadModel $leadModel,
         MessageBusInterface $bus,
         EntityManagerInterface $em,
     ): WhatsAppMessageModel {
-        $model = new WhatsAppMessageModel($leadModel, $bus);
+        $ref   = new \ReflectionClass(WhatsAppMessageModel::class);
+        $model = $ref->newInstanceWithoutConstructor();
 
-        $ref = new \ReflectionProperty(\Mautic\CoreBundle\Model\AbstractCommonModel::class, 'em');
-        $ref->setAccessible(true);
-        $ref->setValue($model, $em);
+        $emProp = new \ReflectionProperty(\Mautic\CoreBundle\Model\AbstractCommonModel::class, 'em');
+        $emProp->setAccessible(true);
+        $emProp->setValue($model, $em);
+
+        $model->setLeadModel($leadModel);
+        $model->setBus($bus);
 
         return $model;
     }

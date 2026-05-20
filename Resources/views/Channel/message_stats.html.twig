@@ -1,0 +1,60 @@
+{% if stats.total > 0 %}
+<div class="pa-md">
+    <div class="panel panel-default">
+        <div class="panel-heading">
+            <h5 class="panel-title">
+                <i class="ri-whatsapp-line"></i>
+                WhatsApp — Estatísticas de envio
+                <a href="{{ dashboardUrl }}" target="_blank" class="btn btn-xs btn-default pull-right" style="margin-top:-4px">
+                    <i class="ri-external-link-line"></i> Ver dashboard completo
+                </a>
+            </h5>
+        </div>
+        <div class="panel-body">
+            <div class="row text-center">
+                <div class="col-xs-2">
+                    <div class="text-muted small">Total</div>
+                    <div class="h4 mb-0">{{ stats.total }}</div>
+                </div>
+                <div class="col-xs-2">
+                    <div class="text-muted small">Enviado</div>
+                    <div class="h4 mb-0 text-success">{{ stats.sent }}</div>
+                </div>
+                <div class="col-xs-2">
+                    <div class="text-muted small">Entregue</div>
+                    <div class="h4 mb-0" style="color:#17a2b8">{{ stats.delivered }}</div>
+                </div>
+                <div class="col-xs-2">
+                    <div class="text-muted small">Lido</div>
+                    <div class="h4 mb-0" style="color:#0275d8">{{ stats.read }}</div>
+                </div>
+                <div class="col-xs-2">
+                    <div class="text-muted small">Falha</div>
+                    <div class="h4 mb-0 text-danger">{{ stats.failed + stats.dlq }}</div>
+                </div>
+                <div class="col-xs-2">
+                    <div class="text-muted small">Na fila</div>
+                    <div class="h4 mb-0 text-muted">{{ stats.queued + stats.pending_webhook }}</div>
+                </div>
+            </div>
+            {% if stats.sent > 0 %}
+            <div class="mt-md">
+                <div class="progress mb-xs" style="height:8px;border-radius:4px">
+                    {% set pctRead      = (stats.read / stats.total * 100)|round %}
+                    {% set pctDelivered = ((stats.delivered - stats.read) / stats.total * 100)|round %}
+                    {% set pctSent      = ((stats.sent - stats.delivered) / stats.total * 100)|round %}
+                    {% set pctFailed    = ((stats.failed + stats.dlq) / stats.total * 100)|round %}
+                    <div class="progress-bar" style="width:{{ pctSent }}%;background:#5cb85c" title="Enviado {{ pctSent }}%"></div>
+                    <div class="progress-bar" style="width:{{ pctDelivered }}%;background:#17a2b8" title="Entregue {{ pctDelivered }}%"></div>
+                    <div class="progress-bar" style="width:{{ pctRead }}%;background:#0275d8" title="Lido {{ pctRead }}%"></div>
+                    <div class="progress-bar" style="width:{{ pctFailed }}%;background:#d9534f" title="Falha {{ pctFailed }}%"></div>
+                </div>
+                <div class="text-muted text-right small">
+                    Taxa de leitura: {{ (stats.read / stats.total * 100)|round(1) }}%
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endif %}

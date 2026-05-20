@@ -16,9 +16,12 @@ use Mautic\LeadBundle\Form\Type\LeadListType;
 use Symfony\Component\Form\AbstractType;
 use Symfony\Component\Form\Extension\Core\Type\TextType;
 use Symfony\Component\Form\FormBuilderInterface;
+use Symfony\Component\Form\FormEvent;
+use Symfony\Component\Form\FormEvents;
 use Symfony\Component\OptionsResolver\OptionsResolver;
 use Symfony\Component\Validator\Constraints\NotBlank;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppMessage;
+use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
 
 class WhatsAppMessageType extends AbstractType
 {
@@ -36,11 +39,28 @@ class WhatsAppMessageType extends AbstractType
             'constraints' => [new NotBlank(['message' => 'mautic.core.name.required'])],
         ]);
 
-        $builder->add('whatsAppNumber', WhatsAppNumberListType::class, [
+        $numberTransformer = new IdToEntityModelTransformer($this->em, WhatsAppNumber::class, 'id', false);
+        $childBuilder      = $builder->create('whatsAppNumber', WhatsAppNumberListType::class, [
             'label'      => 'dialoghsm.number.menu_item',
             'label_attr' => ['class' => 'control-label'],
             'required'   => true,
         ]);
+        // EntityLookupChoiceLoader::onFormPostSetData expects integer IDs, not entities.
+        // POST_SET_DATA fires with raw model data (entity/proxy), so we convert it to ID first.
+        $childBuilder->addEventListener(
+            FormEvents::POST_SET_DATA,
+            static function (FormEvent $event): void {
+                $data = $event->getData();
+                if ($data instanceof WhatsAppNumber) {
+                    $event->setData($data->getId());
+                } elseif (null === $data) {
+                    $event->setData(null);
+                }
+            },
+            100
+        );
+        $childBuilder->addModelTransformer($numberTransformer);
+        $builder->add($childBuilder);
 
         $builder->add('templateName', TextType::class, [
             'label'       => 'dialoghsm.whatsapp_message.template_name',

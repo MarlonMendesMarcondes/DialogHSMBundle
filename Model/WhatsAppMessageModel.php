@@ -17,6 +17,7 @@ use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use Symfony\Component\Form\FormFactoryInterface;
 use Symfony\Component\Form\FormInterface;
 use Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException;
+use Symfony\Component\Messenger\Bridge\Amqp\Transport\AmqpStamp;
 use Symfony\Component\Messenger\MessageBusInterface;
 use Symfony\Contracts\Service\Attribute\Required;
 
@@ -84,14 +85,21 @@ class WhatsAppMessageModel extends FormModel implements AjaxLookupModelInterface
      */
     public function getLookupResults($type, $filter = '', $limit = 10, $start = 0, $options = []): array
     {
-        $results  = [];
-        $entities = $this->getRepository()->getEntities([
-            'filter'     => ['string' => $filter],
+        $results     = [];
+        $queryParams = [
             'limit'      => $limit,
             'start'      => $start,
             'orderBy'    => 'wm.name',
             'orderByDir' => 'ASC',
-        ]);
+        ];
+
+        if (is_array($filter) && !empty($filter)) {
+            $queryParams['filter'] = ['force' => [['column' => 'wm.id', 'expr' => 'in', 'value' => $filter]]];
+        } elseif (is_string($filter) && '' !== $filter) {
+            $queryParams['filter'] = ['string' => $filter];
+        }
+
+        $entities = $this->getRepository()->getEntities($queryParams);
 
         foreach ($entities as $entity) {
             $results[$entity->getId()] = $entity->getName();
@@ -110,10 +118,12 @@ class WhatsAppMessageModel extends FormModel implements AjaxLookupModelInterface
             return [0, 0];
         }
 
-        $apiKey   = $number->getApiKey();
-        $baseUrl  = $number->getBaseUrl() ?? 'https://waba.360dialog.io';
-        $sent     = 0;
-        $failed   = 0;
+        $apiKey    = $number->getApiKey();
+        $baseUrl   = $number->getBaseUrl() ?? 'https://waba.360dialog.io';
+        $queueName = $number->getQueueName() ?? $number->getBatchQueueName();
+        $stamps    = $queueName ? [new AmqpStamp($queueName)] : [];
+        $sent      = 0;
+        $failed    = 0;
         $batchMin = 0;
         $repo     = $this->getRepository();
 
@@ -161,7 +171,7 @@ class WhatsAppMessageModel extends FormModel implements AjaxLookupModelInterface
                         whatsAppNumberName: $number->getName() ?? '',
                         queueLogId:         (string) $log->getId(),
                         isBatch:            true,
-                    ));
+                    ), $stamps);
                     ++$sent;
                 } catch (\Throwable) {
                     $log->setStatus(MessageLog::STATUS_FAILED);
