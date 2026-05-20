@@ -300,31 +300,27 @@ class DialogHSMApi
 
     /**
      * Monta o parâmetro de header baseado na extensão do arquivo.
-     * Retorna null se a URL for inválida ou aponte para endereços internos (SSRF).
+     * Retorna null se a URL não usar HTTPS ou não tiver extensão reconhecida.
      *
-     * Nota sobre DNS rebinding: a URL de mídia é enviada para o 360dialog, que a busca
-     * em seus próprios servidores. Não é possível fixar o IP via CURLOPT_RESOLVE para
-     * requests feitos por terceiros. Como mitigação, substituímos o hostname pelo IP já
-     * resolvido e validado na URL enviada ao payload — o 360dialog receberá o IP diretamente,
-     * eliminando a janela de rebinding.
+     * Não fazemos validação SSRF aqui: a URL vai no payload JSON e quem
+     * a busca é a 360dialog, não este servidor. Validar DNS a partir do
+     * servidor de produção causaria rejeição indevida quando o hostname
+     * resolve para loopback localmente (ex: próprio domínio do servidor).
      */
     private function buildHeaderParameter(string $url): ?array
     {
-        $resolvedIp = $this->resolveUrlSafely($url);
+        $parsed = parse_url($url);
 
-        if (null === $resolvedIp) {
-            $this->logger->warning('DialogHSM: URL de mídia rejeitada (SSRF ou esquema inválido)', [
-                'url' => $url,
-            ]);
+        if (!$parsed || !isset($parsed['scheme'], $parsed['host'])) {
+            return null;
+        }
+
+        if ('https' !== strtolower($parsed['scheme'])) {
+            $this->logger->warning('DialogHSM: URL de mídia ignorada (não é HTTPS)', ['url' => $url]);
 
             return null;
         }
 
-        // A URL de mídia é enviada à 360dialog para que ELA faça o fetch — não nós.
-        // Substituir o hostname pelo IP causaria falha TLS no lado da 360dialog
-        // (certificado emitido para o domínio, não para o IP).
-        // A proteção SSRF já foi feita: resolveUrlSafely() confirmou que o hostname
-        // resolve para um IP público. Enviamos a URL original com o hostname.
         $lowerUrl = strtolower($url);
 
         if (preg_match('/\.(jpg|jpeg|png)(\?.*)?$/', $lowerUrl)) {
