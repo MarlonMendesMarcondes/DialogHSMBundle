@@ -91,6 +91,7 @@ class WhatsAppMessageController extends FormController
         $form   = $model->createForm($entity, $this->formFactory, $action);
 
         if ('POST' === $request->getMethod()) {
+            $valid = false;
             if (!$cancelled = $this->isFormCancelled($form)) {
                 if ($valid = $this->isFormValid($form)) {
                     $model->saveEntity($entity);
