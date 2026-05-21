@@ -129,14 +129,6 @@ class MessageLogRepository extends CommonRepository
     }
 
     /**
-     * Retorna contagens por status para o período a partir de $from.
-     *
-     * Nota: 'delivered' e 'read' nunca são produzidos desde v1.3.1 (webhook removido),
-     * mas são incluídos no array de retorno para exibir registros históricos corretamente.
-     *
-     * @return array{total:int, sent:int, delivered:int, read:int, failed:int, dlq:int}
-     */
-    /**
      * @return array<string, int>
      */
     public function getStatsByMessageId(int $whatsappMessageId): array
@@ -194,9 +186,6 @@ class MessageLogRepository extends CommonRepository
 
     /**
      * Retorna envios agrupados por dia e status para os últimos N dias.
-     *
-     * Nota: 'delivered' e 'read' nunca são produzidos desde v1.3.1 (webhook removido),
-     * mas são incluídos no array para renderizar corretamente dados históricos no gráfico.
      *
      * @return array<string, array{sent:int, delivered:int, read:int, failed:int, dlq:int}>
      */

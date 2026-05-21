@@ -81,12 +81,10 @@ class ConsumeWhatsAppCommand extends Command
         // O time-limit do cron serve como safety cap; o --limit para o worker antes.
         if ($input->getOption('mode') === 'batch' && $input->getOption('limit') === null) {
             $batchLimit = $this->getBatchConsumerLimit();
-            $batchRate  = $this->getBatchRatePerMinute();
             $limit      = $batchLimit;
             $output->writeln(sprintf(
-                '<comment>DialogHSM: batch limit=%d mensagens (batch_consumer_limit), rate=%d/min</comment>',
-                $limit,
-                $batchRate
+                '<comment>DialogHSM: batch limit=%d mensagens (batch_consumer_limit)</comment>',
+                $limit
             ));
         }
 
@@ -285,15 +283,4 @@ class ConsumeWhatsAppCommand extends Command
         }
     }
 
-    private function getBatchRatePerMinute(): int
-    {
-        try {
-            $integration = $this->integrationsHelper->getIntegration(DialogHSMIntegration::NAME);
-            $apiKeys     = $integration->getIntegrationConfiguration()->getApiKeys() ?? [];
-
-            return max(1, (int) ($apiKeys['batch_rate_per_minute'] ?? 60));
-        } catch (\Exception) {
-            return 60;
-        }
-    }
 }

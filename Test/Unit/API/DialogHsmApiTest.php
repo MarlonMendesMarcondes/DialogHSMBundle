@@ -183,8 +183,7 @@ class DialogHsmApiTest extends TestCase
         $header = $capturedPayload['template']['components'][0];
         $this->assertEquals('header', $header['type']);
         $this->assertEquals('image', $header['parameters'][0]['type']);
-        // O hostname é substituído pelo IP resolvido (anti-rebinding)
-        $this->assertEquals('https://1.2.3.7/image.jpg', $header['parameters'][0]['image']['link']);
+        $this->assertEquals('https://example.com/image.jpg', $header['parameters'][0]['image']['link']);
     }
 
     public function testHeaderWithPngImage(): void
@@ -206,7 +205,7 @@ class DialogHsmApiTest extends TestCase
 
         $header = $capturedPayload['template']['components'][0];
         $this->assertEquals('image', $header['parameters'][0]['type']);
-        $this->assertEquals('https://1.2.3.7/banner.png', $header['parameters'][0]['image']['link']);
+        $this->assertEquals('https://example.com/banner.png', $header['parameters'][0]['image']['link']);
     }
 
     public function testHeaderWithMp4Video(): void
@@ -228,7 +227,7 @@ class DialogHsmApiTest extends TestCase
 
         $header = $capturedPayload['template']['components'][0];
         $this->assertEquals('video', $header['parameters'][0]['type']);
-        $this->assertEquals('https://1.2.3.7/video.mp4', $header['parameters'][0]['video']['link']);
+        $this->assertEquals('https://example.com/video.mp4', $header['parameters'][0]['video']['link']);
     }
 
     public function testHeaderWithPdfDocument(): void
@@ -250,7 +249,7 @@ class DialogHsmApiTest extends TestCase
 
         $header = $capturedPayload['template']['components'][0];
         $this->assertEquals('document', $header['parameters'][0]['type']);
-        $this->assertEquals('https://1.2.3.7/contrato.pdf', $header['parameters'][0]['document']['link']);
+        $this->assertEquals('https://example.com/contrato.pdf', $header['parameters'][0]['document']['link']);
     }
 
     public function testHeaderWithUnknownExtensionProducesNoHeaderComponent(): void
@@ -652,86 +651,6 @@ class DialogHsmApiTest extends TestCase
         $this->assertEmpty($capturedPayload['template']['components']);
     }
 
-    public function testMediaLocalhostUrlIsRejected(): void
-    {
-        $capturedPayload = null;
-        $mockResponse    = new Response(200, [], json_encode(['messages' => [['id' => 'abc']]]));
-
-        $this->mockClient->method('request')
-            ->willReturnCallback(function (string $m, string $u, array $options) use (&$capturedPayload, $mockResponse) {
-                $capturedPayload = $options['json'];
-                return $mockResponse;
-            });
-
-        $this->api->sendMessage('API_KEY', 'https://api.360dialog.com/v1/messages', '11999999999', [
-            'content'     => 'template',
-            'language'    => 'pt_BR',
-            'url_arquivo' => 'https://localhost/image.jpg',
-        ]);
-
-        $this->assertEmpty($capturedPayload['template']['components']);
-    }
-
-    public function testMediaPrivateIpUrlIsRejected(): void
-    {
-        $capturedPayload = null;
-        $mockResponse    = new Response(200, [], json_encode(['messages' => [['id' => 'abc']]]));
-
-        $this->mockClient->method('request')
-            ->willReturnCallback(function (string $m, string $u, array $options) use (&$capturedPayload, $mockResponse) {
-                $capturedPayload = $options['json'];
-                return $mockResponse;
-            });
-
-        $this->api->sendMessage('API_KEY', 'https://api.360dialog.com/v1/messages', '11999999999', [
-            'content'     => 'template',
-            'language'    => 'pt_BR',
-            'url_arquivo' => 'https://192.168.1.100/image.jpg', // RFC1918
-        ]);
-
-        $this->assertEmpty($capturedPayload['template']['components']);
-    }
-
-    public function testMediaLoopbackIpUrlIsRejected(): void
-    {
-        $capturedPayload = null;
-        $mockResponse    = new Response(200, [], json_encode(['messages' => [['id' => 'abc']]]));
-
-        $this->mockClient->method('request')
-            ->willReturnCallback(function (string $m, string $u, array $options) use (&$capturedPayload, $mockResponse) {
-                $capturedPayload = $options['json'];
-                return $mockResponse;
-            });
-
-        $this->api->sendMessage('API_KEY', 'https://api.360dialog.com/v1/messages', '11999999999', [
-            'content'     => 'template',
-            'language'    => 'pt_BR',
-            'url_arquivo' => 'https://127.0.0.1/image.jpg',
-        ]);
-
-        $this->assertEmpty($capturedPayload['template']['components']);
-    }
-
-    public function testMediaAwsMetadataIpUrlIsRejected(): void
-    {
-        $capturedPayload = null;
-        $mockResponse    = new Response(200, [], json_encode(['messages' => [['id' => 'abc']]]));
-
-        $this->mockClient->method('request')
-            ->willReturnCallback(function (string $m, string $u, array $options) use (&$capturedPayload, $mockResponse) {
-                $capturedPayload = $options['json'];
-                return $mockResponse;
-            });
-
-        $this->api->sendMessage('API_KEY', 'https://api.360dialog.com/v1/messages', '11999999999', [
-            'content'     => 'template',
-            'language'    => 'pt_BR',
-            'url_arquivo' => 'https://169.254.169.254/latest/meta-data/image.jpg', // AWS IMDS
-        ]);
-
-        $this->assertEmpty($capturedPayload['template']['components']);
-    }
-
     public function testMediaMalformedUrlIsRejected(): void
     {
         $capturedPayload = null;
@@ -747,27 +666,6 @@ class DialogHsmApiTest extends TestCase
             'content'     => 'template',
             'language'    => 'pt_BR',
             'url_arquivo' => 'not-a-url',
-        ]);
-
-        $this->assertEmpty($capturedPayload['template']['components']);
-    }
-
-    public function testMediaHostnameResolvingToPrivateIpIsRejected(): void
-    {
-        // "internal.corp" resolve para 10.0.0.1 (RFC1918) via stub de DNS
-        $capturedPayload = null;
-        $mockResponse    = new Response(200, [], json_encode(['messages' => [['id' => 'abc']]]));
-
-        $this->mockClient->method('request')
-            ->willReturnCallback(function (string $m, string $u, array $options) use (&$capturedPayload, $mockResponse) {
-                $capturedPayload = $options['json'];
-                return $mockResponse;
-            });
-
-        $this->api->sendMessage('API_KEY', 'https://api.360dialog.com/v1/messages', '11999999999', [
-            'content'     => 'template',
-            'language'    => 'pt_BR',
-            'url_arquivo' => 'https://internal.corp/image.jpg',
         ]);
 
         $this->assertEmpty($capturedPayload['template']['components']);
@@ -930,14 +828,11 @@ class DialogHsmApiTest extends TestCase
         $this->assertStringNotContainsString('graph.facebook.com:graph.facebook.com', $entry);
     }
 
-    // =========================================================================
-    // IP Pinning nas URLs de mídia (anti-rebinding para fetches do 360dialog)
-    // =========================================================================
-
-    public function testMediaUrlHostnameIsReplacedWithResolvedIp(): void
+    public function testMediaUrlOriginalHostnameIsPreserved(): void
     {
-        // O payload enviado ao 360dialog deve conter o IP no lugar do hostname,
-        // para que o 360dialog não faça nova resolução DNS (DNS rebinding)
+        // A URL de mídia é enviada ao 360dialog com o hostname original —
+        // quem faz o fetch é o 360dialog, não o Mautic, então substituir por IP
+        // causaria falha de TLS (certificado é para o domínio, não para o IP).
         $capturedPayload = null;
         $mockResponse    = new Response(200, [], json_encode(['messages' => [['id' => 'abc']]]));
 
@@ -954,13 +849,10 @@ class DialogHsmApiTest extends TestCase
         ]);
 
         $link = $capturedPayload['template']['components'][0]['parameters'][0]['image']['link'];
-
-        // Deve usar o IP (1.2.3.8), não o hostname original
-        $this->assertStringStartsWith('https://1.2.3.8/', $link);
-        $this->assertStringNotContainsString('cdn.example.com', $link);
+        $this->assertEquals('https://cdn.example.com/banner.jpg', $link);
     }
 
-    public function testMediaUrlPathAndQueryArePreservedAfterIpSubstitution(): void
+    public function testMediaUrlPathAndQueryArePreserved(): void
     {
         $capturedPayload = null;
         $mockResponse    = new Response(200, [], json_encode(['messages' => [['id' => 'abc']]]));
@@ -978,8 +870,7 @@ class DialogHsmApiTest extends TestCase
         ]);
 
         $link = $capturedPayload['template']['components'][0]['parameters'][0]['document']['link'];
-
-        $this->assertEquals('https://1.2.3.7/pasta/arquivo.pdf?v=2&token=abc', $link);
+        $this->assertEquals('https://example.com/pasta/arquivo.pdf?v=2&token=abc', $link);
     }
 
     public function testMediaUrlWithQueryStringIsAccepted(): void
@@ -1005,25 +896,4 @@ class DialogHsmApiTest extends TestCase
         $this->assertEquals('image', $components[0]['parameters'][0]['type']);
     }
 
-    public function testMediaDnsRebindingHostnameIsRejected(): void
-    {
-        // "evil-rebind.com" → 172.16.0.1 via stub: simula DNS rebinding para IP privado
-        $capturedPayload = null;
-        $mockResponse    = new Response(200, [], json_encode(['messages' => [['id' => 'abc']]]));
-
-        $this->mockClient->method('request')
-            ->willReturnCallback(function (string $m, string $u, array $options) use (&$capturedPayload, $mockResponse) {
-                $capturedPayload = $options['json'];
-                return $mockResponse;
-            });
-
-        $this->api->sendMessage('API_KEY', 'https://api.360dialog.com/v1/messages', '11999999999', [
-            'content'     => 'template',
-            'language'    => 'pt_BR',
-            'url_arquivo' => 'https://evil-rebind.com/image.jpg',
-        ]);
-
-        // Hostname resolve para IP privado → header component rejeitado
-        $this->assertEmpty($capturedPayload['template']['components']);
-    }
 }

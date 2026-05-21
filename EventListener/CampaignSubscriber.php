@@ -108,7 +108,7 @@ class CampaignSubscriber implements EventSubscriberInterface
             $items = [];
             $this->processContacts(
                 $event,
-                function (SendWhatsAppMessage $message, WhatsAppNumber $number) use (&$items): bool {
+                function (SendWhatsAppMessage $message) use (&$items): bool {
                     $items[] = $message;
 
                     return true;
@@ -149,7 +149,7 @@ class CampaignSubscriber implements EventSubscriberInterface
         $items = [];
         $this->processContacts(
             $event,
-            function (SendWhatsAppMessage $message, WhatsAppNumber $number) use (&$items): bool {
+            function (SendWhatsAppMessage $message) use (&$items): bool {
                 $items[] = $message;
 
                 return true;
