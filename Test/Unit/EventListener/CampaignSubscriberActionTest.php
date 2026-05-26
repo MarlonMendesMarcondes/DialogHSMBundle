@@ -5,12 +5,14 @@ declare(strict_types=1);
 use Doctrine\Common\Collections\ArrayCollection;
 use Doctrine\ORM\EntityManagerInterface;
 use Mautic\CampaignBundle\Entity\Event as CampaignEvent;
+use Mautic\CampaignBundle\Executioner\Scheduler\EventScheduler;
 use Symfony\Component\Messenger\Bridge\Amqp\Transport\AmqpStamp;
 use Symfony\Component\Messenger\Envelope;
 use Mautic\CampaignBundle\Entity\LeadEventLog;
 use Mautic\CampaignBundle\Event\PendingEvent;
 use Mautic\IntegrationsBundle\Helper\IntegrationsHelper;
 use Mautic\LeadBundle\Entity\Lead;
+use Mautic\LeadBundle\Services\PeakInteractionTimer;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
@@ -35,6 +37,8 @@ class CampaignSubscriberActionTest extends TestCase
     private EntityManagerInterface&MockObject $mockEntityManager;
     private SendWhatsAppDirectBatchMessageHandler&MockObject $mockDirectBatchHandler;
     private MessageLogRepository&MockObject $mockMessageLogRepository;
+    private PeakInteractionTimer&MockObject $mockPeakInteractionTimer;
+    private EventScheduler&MockObject $mockEventScheduler;
     private CampaignSubscriber $subscriber;
 
     protected function setUp(): void
@@ -47,6 +51,8 @@ class CampaignSubscriberActionTest extends TestCase
         $this->mockEntityManager           = $this->createMock(EntityManagerInterface::class);
         $this->mockDirectBatchHandler      = $this->createMock(SendWhatsAppDirectBatchMessageHandler::class);
         $this->mockMessageLogRepository    = $this->createMock(MessageLogRepository::class);
+        $this->mockPeakInteractionTimer    = $this->createMock(PeakInteractionTimer::class);
+        $this->mockEventScheduler          = $this->createMock(EventScheduler::class);
 
         // Default: primeira execução — sem log existente
         $this->mockMessageLogRepository
@@ -67,6 +73,8 @@ class CampaignSubscriberActionTest extends TestCase
             $this->mockEntityManager,
             $this->mockDirectBatchHandler,
             $this->mockMessageLogRepository,
+            $this->mockPeakInteractionTimer,
+            $this->mockEventScheduler,
             $directTransportDsn,
         );
     }

@@ -6,6 +6,7 @@ namespace MauticPlugin\DialogHSMBundle\Form\Type;
 
 use Mautic\CoreBundle\Form\Type\SortableListType;
 use Symfony\Component\Form\AbstractType;
+use Symfony\Component\Form\Extension\Core\Type\CheckboxType;
 use Symfony\Component\Form\Extension\Core\Type\IntegerType;
 use Symfony\Component\Form\FormBuilderInterface;
 use Symfony\Component\Form\FormEvent;
@@ -37,6 +38,18 @@ class SendWhatsAppType extends AbstractType
                 'label'           => 'dialoghsm.campaign.payload_data',
                 'option_required' => false,
                 'with_labels'     => true,
+            ]
+        );
+
+        $builder->add(
+            'use_optimal_time',
+            CheckboxType::class,
+            [
+                'label'      => 'dialoghsm.campaign.use_optimal_time',
+                'label_attr' => ['class' => 'control-label'],
+                'required'   => false,
+                'data'       => false,
+                'help'       => 'dialoghsm.campaign.use_optimal_time.help',
             ]
         );
 

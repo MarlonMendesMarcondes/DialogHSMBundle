@@ -8,8 +8,11 @@ use Doctrine\ORM\EntityManagerInterface;
 use Mautic\CampaignBundle\CampaignEvents;
 use Mautic\CampaignBundle\Event\CampaignBuilderEvent;
 use Mautic\CampaignBundle\Event\PendingEvent;
+use Mautic\CampaignBundle\Executioner\Scheduler\EventScheduler;
 use Mautic\IntegrationsBundle\Helper\IntegrationsHelper;
+use Mautic\LeadBundle\Entity\Lead;
 use Mautic\LeadBundle\Helper\TokenHelper;
+use Mautic\LeadBundle\Services\PeakInteractionTimer;
 use MauticPlugin\DialogHSMBundle\DialogHSMEvents;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
@@ -41,6 +44,8 @@ class CampaignSubscriber implements EventSubscriberInterface
         private EntityManagerInterface $entityManager,
         private SendWhatsAppDirectBatchMessageHandler $directBatchHandler,
         private MessageLogRepository $messageLogRepository,
+        private PeakInteractionTimer $peakInteractionTimer,
+        private EventScheduler $eventScheduler,
         private string $directTransportDsn = 'null://null',
     ) {
     }
@@ -97,14 +102,14 @@ class CampaignSubscriber implements EventSubscriberInterface
             return;
         }
 
-        // Se Redis configurado: coleta todos os itens e publica UM único entry no stream.
-        // O worker consome o lote inteiro em sequência com batch/delay, sem interferência
-        // de outros workers (cada execução de campanha = um worker dedicado).
-        if ($this->isRedisTransport($this->directTransportDsn)) {
-            $config     = $event->getEvent()->getProperties();
-            $sendDelay  = (int) ($config['send_delay'] ?? 0);
-            $batchLimit = (int) ($config['batch_limit'] ?? 0);
+        $config     = $event->getEvent()->getProperties();
+        $sendDelay  = (int) ($config['send_delay'] ?? 0);
+        $batchLimit = (int) ($config['batch_limit'] ?? 0);
 
+        if ($this->isRedisTransport($this->directTransportDsn)) {
+            // Redis: coleta todos os itens e publica UM único entry no stream.
+            // O worker consome o lote inteiro em sequência com batch/delay, sem interferência
+            // de outros workers (cada execução de campanha = um worker dedicado).
             $items = [];
             $this->processContacts(
                 $event,
@@ -128,14 +133,10 @@ class CampaignSubscriber implements EventSubscriberInterface
         }
 
         // Direto (null://null): coleta todos os itens e processa como lote síncrono.
-        // GUARD: send_delay é ignorado no modo inline — usleep() bloquearia o processo
-        // mautic:campaigns:trigger, impedindo segmentos e outras campanhas de executar.
-        // Para throttle real configure MAUTIC_MESSENGER_DSN_WHATSAPP_DIRECT=redis://...
+        // GUARD: send_delay é ignorado no modo inline —
+        // usleep() bloquearia o processo mautic:campaigns:trigger.
+        // Para throttle configure MAUTIC_MESSENGER_DSN_WHATSAPP_DIRECT=redis://...
         // ou use a action send_whatsapp_queue (RabbitMQ) para envios em grande volume.
-        $config     = $event->getEvent()->getProperties();
-        $sendDelay  = (int) ($config['send_delay'] ?? 0);
-        $batchLimit = (int) ($config['batch_limit'] ?? 0);
-
         if ($sendDelay > 0) {
             $this->logger->warning('DialogHSM: send_delay ignorado no modo inline (null://null). '
                 .'Configure MAUTIC_MESSENGER_DSN_WHATSAPP_DIRECT=redis://... para throttle real '
@@ -175,7 +176,7 @@ class CampaignSubscriber implements EventSubscriberInterface
         $config = $event->getEvent()->getProperties();
         $mode   = trim($config['queue_override'] ?? '');
 
-        $this->processContacts($event, function (SendWhatsAppMessage $message, WhatsAppNumber $number) use ($mode): bool {
+        $this->processContacts($event, function (SendWhatsAppMessage $message, WhatsAppNumber $number, Lead $contact) use ($mode): bool {
             $uuid = bin2hex(random_bytes(16));
 
             $queueName = match ($mode) {
@@ -194,7 +195,8 @@ class CampaignSubscriber implements EventSubscriberInterface
                 return false;
             }
 
-            $stamps  = [new AmqpStamp($queueName)];
+            $stamps = [new AmqpStamp($queueName)];
+
             $payload = $message->withQueueLogId($uuid);
             if ($mode === 'batch') {
                 $payload = $payload->withBatchMode();
@@ -243,9 +245,10 @@ class CampaignSubscriber implements EventSubscriberInterface
             return;
         }
 
-        $contacts   = $event->getContacts();
-        $sendDelay  = (int) ($config['send_delay'] ?? 0);
-        $batchLimit = (int) ($config['batch_limit'] ?? 0);
+        $contacts       = $event->getContacts();
+        $sendDelay      = (int) ($config['send_delay'] ?? 0);
+        $batchLimit     = (int) ($config['batch_limit'] ?? 0);
+        $useOptimalTime = (bool) ($config['use_optimal_time'] ?? false);
 
         // batch_limit=N: envia N mensagens, pausa send_delay ms, repete para todos os contatos.
         // batch_limit=0: aplica send_delay entre cada mensagem individualmente.
@@ -264,7 +267,21 @@ class CampaignSubscriber implements EventSubscriberInterface
                 continue;
             }
 
-            // Primeira execução: valida e envia
+            // Melhor horário: primeira passagem sem MessageLog — agenda para o horário ideal
+            if ($useOptimalTime) {
+                $log = $event->getPending()->get($logId);
+                if ($log->getTriggerDate() === null) {
+                    $optimalTime = $this->peakInteractionTimer->getOptimalTimeAndDay($contact);
+                    if ($optimalTime > new \DateTime()) {
+                        $this->eventScheduler->reschedule($log, $optimalTime);
+                        continue; // Será re-executado no cron ao chegar no horário ideal
+                    }
+                    // Horário já passou ou é agora → envia imediatamente
+                }
+                // Segunda passagem (trigger_date definido) → cai no envio abaixo
+            }
+
+            // Primeira/segunda execução: normaliza telefone e constrói payload
             $phone = $this->normalizePhone($contact->getLeadPhoneNumber() ?? '');
 
             // Payload construído aqui (antes da validação) para ter templateName disponível nos logs de erro.
@@ -300,7 +317,7 @@ class CampaignSubscriber implements EventSubscriberInterface
                     whatsAppNumberName: $whatsAppNumber->getName() ?? '',
                     campaignId:         $campaignId,
                     campaignEventId:    $campaignEventId,
-                ), $whatsAppNumber);
+                ), $whatsAppNumber, $contact);
             } catch (\Throwable $e) {
                 $this->logger->error('DialogHSM: Exceção durante envio', [
                     'lead_id' => $contact->getId(),
