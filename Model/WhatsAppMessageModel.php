@@ -99,12 +99,13 @@ class WhatsAppMessageModel extends FormModel implements AjaxLookupModelInterface
             'start'      => $start,
             'orderBy'    => 'wm.name',
             'orderByDir' => 'ASC',
+            'filter'     => ['force' => [['column' => 'wm.isPublished', 'expr' => 'eq', 'value' => true]]],
         ];
 
         if (is_array($filter) && !empty($filter)) {
-            $queryParams['filter'] = ['force' => [['column' => 'wm.id', 'expr' => 'in', 'value' => $filter]]];
+            $queryParams['filter']['force'][] = ['column' => 'wm.id', 'expr' => 'in', 'value' => $filter];
         } elseif (is_string($filter) && '' !== $filter) {
-            $queryParams['filter'] = ['string' => $filter];
+            $queryParams['filter']['string'] = $filter;
         }
 
         $entities = $this->getRepository()->getEntities($queryParams);

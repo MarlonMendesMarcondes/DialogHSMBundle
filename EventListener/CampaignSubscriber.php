@@ -83,17 +83,6 @@ class CampaignSubscriber implements EventSubscriberInterface
             ]
         );
 
-        $event->addAction(
-            'dialoghsm.send_whatsapp_message',
-            [
-                'label'          => 'dialoghsm.campaign.send_whatsapp_message',
-                'description'    => 'dialoghsm.campaign.send_whatsapp_message.tooltip',
-                'batchEventName' => DialogHSMEvents::ON_MARKETING_MESSAGE_SEND,
-                'formType'       => WhatsAppMessageSendType::class,
-                'channel'        => 'whatsapp',
-                'channelIdField' => 'whatsAppMessage',
-            ]
-        );
     }
 
     public function onCampaignTriggerAction(PendingEvent $event): void
