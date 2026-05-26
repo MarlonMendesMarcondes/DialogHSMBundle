@@ -110,6 +110,126 @@ class WhatsAppMessageModelTest extends TestCase
     }
 
     // -------------------------------------------------------------------------
+    // getLookupResults() — filtro isPublished
+    // -------------------------------------------------------------------------
+
+    public function testGetLookupResultsAlwaysFiltersPublishedOnly(): void
+    {
+        [$em, $repo] = $this->makeEmWithRepo();
+
+        $capturedParams = null;
+        $repo->method('getEntities')
+            ->willReturnCallback(function (array $params) use (&$capturedParams): array {
+                $capturedParams = $params;
+
+                return [];
+            });
+
+        $model = $this->makeModel(
+            $this->createMock(LeadModel::class),
+            $this->createMock(MessageBusInterface::class),
+            $em,
+        );
+
+        $model->getLookupResults('dialoghsm.whatsappmessage');
+
+        $this->assertNotNull($capturedParams);
+        $forceFilters = $capturedParams['filter']['force'] ?? [];
+        $publishedFilter = array_filter(
+            $forceFilters,
+            fn (array $f) => ($f['column'] ?? '') === 'wm.isPublished'
+                && ($f['expr'] ?? '') === 'eq'
+                && ($f['value'] ?? null) === true
+        );
+
+        $this->assertNotEmpty(
+            $publishedFilter,
+            'getLookupResults deve sempre incluir filtro isPublished=true'
+        );
+    }
+
+    public function testGetLookupResultsWithIdArrayFilterKeepsPublishedConstraint(): void
+    {
+        [$em, $repo] = $this->makeEmWithRepo();
+
+        $capturedParams = null;
+        $repo->method('getEntities')
+            ->willReturnCallback(function (array $params) use (&$capturedParams): array {
+                $capturedParams = $params;
+
+                return [];
+            });
+
+        $model = $this->makeModel(
+            $this->createMock(LeadModel::class),
+            $this->createMock(MessageBusInterface::class),
+            $em,
+        );
+
+        $model->getLookupResults('dialoghsm.whatsappmessage', [1, 2, 3]);
+
+        $forceFilters    = $capturedParams['filter']['force'] ?? [];
+        $publishedFilter = array_filter($forceFilters, fn ($f) => ($f['column'] ?? '') === 'wm.isPublished');
+        $idFilter        = array_filter($forceFilters, fn ($f) => ($f['column'] ?? '') === 'wm.id');
+
+        $this->assertNotEmpty($publishedFilter, 'Filtro isPublished deve estar presente junto com filtro de IDs');
+        $this->assertNotEmpty($idFilter, 'Filtro de IDs deve estar presente');
+    }
+
+    public function testGetLookupResultsWithStringFilterKeepsPublishedConstraint(): void
+    {
+        [$em, $repo] = $this->makeEmWithRepo();
+
+        $capturedParams = null;
+        $repo->method('getEntities')
+            ->willReturnCallback(function (array $params) use (&$capturedParams): array {
+                $capturedParams = $params;
+
+                return [];
+            });
+
+        $model = $this->makeModel(
+            $this->createMock(LeadModel::class),
+            $this->createMock(MessageBusInterface::class),
+            $em,
+        );
+
+        $model->getLookupResults('dialoghsm.whatsappmessage', 'template');
+
+        $forceFilters    = $capturedParams['filter']['force'] ?? [];
+        $publishedFilter = array_filter($forceFilters, fn ($f) => ($f['column'] ?? '') === 'wm.isPublished');
+        $stringFilter    = $capturedParams['filter']['string'] ?? null;
+
+        $this->assertNotEmpty($publishedFilter, 'Filtro isPublished deve estar presente junto com filtro de string');
+        $this->assertSame('template', $stringFilter, 'Filtro de string deve ser passado corretamente');
+    }
+
+    public function testGetLookupResultsReturnsIdToNameMap(): void
+    {
+        [$em, $repo] = $this->makeEmWithRepo();
+
+        $msg1 = $this->createMock(WhatsAppMessage::class);
+        $msg1->method('getId')->willReturn(10);
+        $msg1->method('getName')->willReturn('Template A');
+
+        $msg2 = $this->createMock(WhatsAppMessage::class);
+        $msg2->method('getId')->willReturn(20);
+        $msg2->method('getName')->willReturn('Template B');
+
+        $repo->method('getEntities')->willReturn([$msg1, $msg2]);
+
+        $model = $this->makeModel(
+            $this->createMock(LeadModel::class),
+            $this->createMock(MessageBusInterface::class),
+            $em,
+        );
+
+        $results = $model->getLookupResults('dialoghsm.whatsappmessage');
+
+        $this->assertSame([10 => 'Template A', 20 => 'Template B'], $results);
+    }
+
+    // -------------------------------------------------------------------------
     // Basic model tests
     // -------------------------------------------------------------------------
 
