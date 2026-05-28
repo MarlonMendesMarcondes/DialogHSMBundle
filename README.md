@@ -163,6 +163,19 @@ php bin/console dialoghsm:consume --queue=nome_da_fila --time-limit=60
 
 ---
 
+## Dashboard WhatsApp
+
+**Canais → Dashboard WhatsApp**
+
+Duas abas:
+
+- **Métricas** — funil cumulativo (enviadas / entregues / lidas / falhas) nos últimos 1d / 7d com taxa de sucesso e gráfico de barras por período.
+- **Disparos** — últimos 50 disparos agrupados por `(template, campanha, data)`. A coluna **Taxa** representa `enviadas ÷ (enviadas + falhas + dlq)` — exclui mensagens ainda pendentes na fila.
+
+> A taxa só é significativa após o disparo terminar de processar. Campanhas em andamento exibirão taxa menor enquanto houver mensagens pendentes.
+
+---
+
 ## Logs de Envio
 
 **Canais → Logs de Envio**
@@ -171,6 +184,8 @@ php bin/console dialoghsm:consume --queue=nome_da_fila --time-limit=60
 |---|---|
 | `queued` | Na fila, aguardando consumer |
 | `sent` | Enviado com sucesso (HTTP 200) |
+| `delivered` | Entregue no dispositivo (callback 360dialog) |
+| `read` | Lida pelo destinatário (callback 360dialog) |
 | `failed` | Falha no envio |
 | `dlq` | Esgotou os 3 retries, movido para DLQ |
 
