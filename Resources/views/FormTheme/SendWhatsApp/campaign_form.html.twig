@@ -1,0 +1,65 @@
+{#
+    Custom form theme for DialogHSM campaign action forms.
+
+    Overrides `_campaignevent_properties_row` — the block Mautic uses to render
+    all plugin-specific properties fields inside the campaign event modal.
+
+    Implements the cascade UI:
+      - `use_optimal_time`       renders with an onchange handler
+      - `restrict_business_hours` is initially hidden unless use_optimal_time is on
+      - All other fields render with the default form_row
+
+    Applied to both actions via `formTheme` in CampaignSubscriber::onCampaignBuild.
+#}
+{% block _campaignevent_properties_row %}
+<hr />
+{% for child in form.children %}
+
+    {% if child.vars.name == 'use_optimal_time' %}
+        {# Render with onchange to toggle the restrict_business_hours row #}
+        <div class="row">
+            <div class="form-group col-xs-12">
+                <div class="checkbox">
+                    <label>
+                        {{ form_widget(child, {'attr': {'onchange': 'dialogHsmSyncRestrictBh(this)'}}) }}
+                        {{ child.vars.label|trans }}
+                    </label>
+                </div>
+                {{ form_errors(child) }}
+            </div>
+        </div>
+
+    {% elseif child.vars.name == 'restrict_business_hours' %}
+        {# Hidden unless use_optimal_time is checked — visibility set server-side #}
+        {% set isVisible = form['use_optimal_time'].vars.data ?? false %}
+        <div class="dialoghsm-restrict-bh-row"{% if not isVisible %} style="display:none"{% endif %}>
+            <div class="row">
+                <div class="form-group col-xs-12">
+                    <div class="checkbox">
+                        <label>
+                            {{ form_widget(child) }}
+                            {{ child.vars.label|trans }}
+                        </label>
+                    </div>
+                    {{ form_errors(child) }}
+                </div>
+            </div>
+        </div>
+
+    {% else %}
+        {{ form_row(child) }}
+    {% endif %}
+
+{% endfor %}
+
+<script>
+function dialogHsmSyncRestrictBh(src) {
+    var row = document.querySelector('.dialoghsm-restrict-bh-row');
+    if (row) { row.style.display = src.checked ? '' : 'none'; }
+}
+(function () {
+    var cb = document.querySelector('.dialoghsm-use-optimal-time');
+    if (cb) { dialogHsmSyncRestrictBh(cb); }
+}());
+</script>
+{% endblock %}

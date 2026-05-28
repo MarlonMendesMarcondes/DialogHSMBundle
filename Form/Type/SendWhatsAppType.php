@@ -50,6 +50,19 @@ class SendWhatsAppType extends AbstractType
                 'required'   => false,
                 'data'       => false,
                 'help'       => 'dialoghsm.campaign.use_optimal_time.help',
+                'attr'       => ['class' => 'dialoghsm-use-optimal-time'],
+            ]
+        );
+
+        $builder->add(
+            'restrict_business_hours',
+            CheckboxType::class,
+            [
+                'label'      => 'dialoghsm.campaign.restrict_business_hours',
+                'label_attr' => ['class' => 'control-label'],
+                'required'   => false,
+                'data'       => false,
+                'attr'       => ['class' => 'dialoghsm-restrict-bh'],
             ]
         );
 

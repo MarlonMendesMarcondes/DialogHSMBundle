@@ -525,6 +525,178 @@ class CampaignSubscriberOptimalTimeTest extends TestCase
     }
 
     // -------------------------------------------------------------------------
+    // restrict_business_hours: horário comercial seg–sex 8h–18h
+    // -------------------------------------------------------------------------
+
+    public function testRestrictBusinessHoursAdjustsWeekendToMonday(): void
+    {
+        $this->mockIntegrationsHelper->method('getIntegration')->willReturn($this->makeIntegration());
+        $this->mockNumberModel->method('getEntity')->willReturn($this->makeWhatsAppNumber());
+
+        // PeakInteractionTimer retorna sábado às 10h → deve virar segunda às 8h
+        $saturday = new \DateTime('next Saturday 10:00:00');
+        $this->mockPeakInteractionTimer
+            ->method('getOptimalTimeAndDay')
+            ->willReturn($saturday);
+
+        $rescheduled = null;
+        $this->mockEventScheduler
+            ->expects($this->once())
+            ->method('reschedule')
+            ->willReturnCallback(function ($log, \DateTimeInterface $date) use (&$rescheduled): void {
+                $rescheduled = $date;
+            });
+
+        $contact = $this->makeContact('+5511999999999', 1);
+        $event   = $this->buildPendingEvent(
+            'dialoghsm.send_whatsapp',
+            [1 => $contact],
+            ['use_optimal_time' => true, 'restrict_business_hours' => true],
+        );
+
+        $this->makeSubscriber()->onCampaignTriggerAction($event);
+
+        $this->assertNotNull($rescheduled);
+        $this->assertSame('8', $rescheduled->format('G'), 'Deve ser agendado para as 8h');
+        $this->assertContains(
+            (int) $rescheduled->format('N'),
+            [1, 2, 3, 4, 5],
+            'Deve cair em dia útil (seg–sex)'
+        );
+    }
+
+    public function testRestrictBusinessHoursAdjustsAfterHoursToNextDay(): void
+    {
+        $this->mockIntegrationsHelper->method('getIntegration')->willReturn($this->makeIntegration());
+        $this->mockNumberModel->method('getEntity')->willReturn($this->makeWhatsAppNumber());
+
+        // PeakInteractionTimer retorna terça às 21h → deve virar quarta às 8h
+        $tuesdayNight = new \DateTime('next Tuesday 21:00:00');
+        $this->mockPeakInteractionTimer
+            ->method('getOptimalTimeAndDay')
+            ->willReturn($tuesdayNight);
+
+        $rescheduled = null;
+        $this->mockEventScheduler
+            ->expects($this->once())
+            ->method('reschedule')
+            ->willReturnCallback(function ($log, \DateTimeInterface $date) use (&$rescheduled): void {
+                $rescheduled = $date;
+            });
+
+        $contact = $this->makeContact('+5511999999999', 1);
+        $event   = $this->buildPendingEvent(
+            'dialoghsm.send_whatsapp',
+            [1 => $contact],
+            ['use_optimal_time' => true, 'restrict_business_hours' => true],
+        );
+
+        $this->makeSubscriber()->onCampaignTriggerAction($event);
+
+        $this->assertNotNull($rescheduled);
+        $this->assertSame('8', $rescheduled->format('G'), 'Deve ser agendado para as 8h');
+        $dayAfterTuesday = (clone $tuesdayNight)->modify('+1 day')->format('N');
+        $this->assertSame($dayAfterTuesday, $rescheduled->format('N'), 'Deve ser o dia seguinte');
+    }
+
+    public function testRestrictBusinessHoursAdjutsBeforeHoursToSameDay(): void
+    {
+        $this->mockIntegrationsHelper->method('getIntegration')->willReturn($this->makeIntegration());
+        $this->mockNumberModel->method('getEntity')->willReturn($this->makeWhatsAppNumber());
+
+        // PeakInteractionTimer retorna quarta às 6h → deve virar quarta às 8h
+        $wednesdayEarly = new \DateTime('next Wednesday 06:00:00');
+        $this->mockPeakInteractionTimer
+            ->method('getOptimalTimeAndDay')
+            ->willReturn($wednesdayEarly);
+
+        $rescheduled = null;
+        $this->mockEventScheduler
+            ->expects($this->once())
+            ->method('reschedule')
+            ->willReturnCallback(function ($log, \DateTimeInterface $date) use (&$rescheduled): void {
+                $rescheduled = $date;
+            });
+
+        $contact = $this->makeContact('+5511999999999', 1);
+        $event   = $this->buildPendingEvent(
+            'dialoghsm.send_whatsapp',
+            [1 => $contact],
+            ['use_optimal_time' => true, 'restrict_business_hours' => true],
+        );
+
+        $this->makeSubscriber()->onCampaignTriggerAction($event);
+
+        $this->assertNotNull($rescheduled);
+        $this->assertSame('8', $rescheduled->format('G'), 'Deve ser ajustado para 8h no mesmo dia');
+        $this->assertSame($wednesdayEarly->format('N'), $rescheduled->format('N'), 'Deve ser o mesmo dia');
+    }
+
+    public function testRestrictBusinessHoursDoesNotChangeTimeAlreadyInWindow(): void
+    {
+        $this->mockIntegrationsHelper->method('getIntegration')->willReturn($this->makeIntegration());
+        $this->mockNumberModel->method('getEntity')->willReturn($this->makeWhatsAppNumber());
+
+        // PeakInteractionTimer retorna segunda às 10h → dentro do horário comercial, não deve mudar o dia/hora
+        $mondayMorning = new \DateTime('next Monday 10:00:00');
+        $this->mockPeakInteractionTimer
+            ->method('getOptimalTimeAndDay')
+            ->willReturn($mondayMorning);
+
+        $rescheduled = null;
+        $this->mockEventScheduler
+            ->expects($this->once())
+            ->method('reschedule')
+            ->willReturnCallback(function ($log, \DateTimeInterface $date) use (&$rescheduled): void {
+                $rescheduled = $date;
+            });
+
+        $contact = $this->makeContact('+5511999999999', 1);
+        $event   = $this->buildPendingEvent(
+            'dialoghsm.send_whatsapp',
+            [1 => $contact],
+            ['use_optimal_time' => true, 'restrict_business_hours' => true],
+        );
+
+        $this->makeSubscriber()->onCampaignTriggerAction($event);
+
+        $this->assertNotNull($rescheduled);
+        $this->assertSame($mondayMorning->format('N'), $rescheduled->format('N'), 'Dia não deve mudar');
+        $this->assertSame('10', $rescheduled->format('G'), 'Hora não deve mudar');
+    }
+
+    public function testWithoutRestrictBusinessHoursWeekendTimeIsKeptAsIs(): void
+    {
+        $this->mockIntegrationsHelper->method('getIntegration')->willReturn($this->makeIntegration());
+        $this->mockNumberModel->method('getEntity')->willReturn($this->makeWhatsAppNumber());
+
+        // Sem restrict_business_hours → sábado às 21h é mantido como veio do PeakInteractionTimer
+        $saturdayNight = new \DateTime('next Saturday 21:00:00');
+        $this->mockPeakInteractionTimer
+            ->method('getOptimalTimeAndDay')
+            ->willReturn($saturdayNight);
+
+        $rescheduled = null;
+        $this->mockEventScheduler
+            ->method('reschedule')
+            ->willReturnCallback(function ($log, \DateTimeInterface $date) use (&$rescheduled): void {
+                $rescheduled = $date;
+            });
+
+        $contact = $this->makeContact('+5511999999999', 1);
+        $event   = $this->buildPendingEvent(
+            'dialoghsm.send_whatsapp',
+            [1 => $contact],
+            ['use_optimal_time' => true, 'restrict_business_hours' => false],
+        );
+
+        $this->makeSubscriber()->onCampaignTriggerAction($event);
+
+        $this->assertNotNull($rescheduled);
+        $this->assertSame($saturdayNight->format('Y-m-d H'), $rescheduled->format('Y-m-d H'), 'Sem restrict: horário deve ser mantido');
+    }
+
+    // -------------------------------------------------------------------------
     // Regressão: existingLog presente + optimal time → resolveFromWebhookLog, sem reschedule
     // -------------------------------------------------------------------------
 

@@ -33,7 +33,10 @@ use Symfony\Component\Messenger\MessageBusInterface;
 
 class CampaignSubscriber implements EventSubscriberInterface
 {
-    private const WEBHOOK_TIMEOUT_SECONDS = 120;
+    private const WEBHOOK_TIMEOUT_SECONDS    = 120;
+    private const BUSINESS_HOUR_START        = 8;   // 08:00
+    private const BUSINESS_HOUR_END          = 18;  // 18:00
+    private const BUSINESS_DAYS             = [1, 2, 3, 4, 5]; // seg–sex (ISO 8601)
 
     public function __construct(
         private IntegrationsHelper $integrationsHelper,
@@ -68,6 +71,7 @@ class CampaignSubscriber implements EventSubscriberInterface
                 'description'    => 'dialoghsm.campaign.send_whatsapp.tooltip',
                 'batchEventName' => DialogHSMEvents::ON_CAMPAIGN_TRIGGER_ACTION,
                 'formType'       => SendWhatsAppType::class,
+                'formTheme'      => '@DialogHSM/FormTheme/SendWhatsApp/campaign_form.html.twig',
                 'channel'        => 'whatsapp',
             ]
         );
@@ -79,6 +83,7 @@ class CampaignSubscriber implements EventSubscriberInterface
                 'description'    => 'dialoghsm.campaign.send_whatsapp_queue.tooltip',
                 'batchEventName' => DialogHSMEvents::ON_CAMPAIGN_TRIGGER_ACTION_QUEUE,
                 'formType'       => SendWhatsAppQueueType::class,
+                'formTheme'      => '@DialogHSM/FormTheme/SendWhatsApp/campaign_form.html.twig',
                 'channel'        => 'whatsapp',
             ]
         );
@@ -237,7 +242,8 @@ class CampaignSubscriber implements EventSubscriberInterface
         $contacts       = $event->getContacts();
         $sendDelay      = (int) ($config['send_delay'] ?? 0);
         $batchLimit     = (int) ($config['batch_limit'] ?? 0);
-        $useOptimalTime = (bool) ($config['use_optimal_time'] ?? false);
+        $useOptimalTime        = (bool) ($config['use_optimal_time'] ?? false);
+        $restrictBusinessHours = (bool) ($config['restrict_business_hours'] ?? false);
 
         // batch_limit=N: envia N mensagens, pausa send_delay ms, repete para todos os contatos.
         // batch_limit=0: aplica send_delay entre cada mensagem individualmente.
@@ -261,7 +267,16 @@ class CampaignSubscriber implements EventSubscriberInterface
                 $log = $event->getPending()->get($logId);
                 if ($log->getTriggerDate() === null) {
                     $optimalTime = $this->peakInteractionTimer->getOptimalTimeAndDay($contact);
+                    if ($restrictBusinessHours) {
+                        $optimalTime = $this->applyBusinessHoursRestriction($optimalTime);
+                    }
                     if ($optimalTime > new \DateTime()) {
+                        // pass() deve ser chamado ANTES de reschedule():
+                        // reschedule() chama setTriggerDate() que invoca setIsScheduled(true),
+                        // sobrescrevendo o setIsScheduled(false) do pass(). A ordem garante que
+                        // o PendingEvent não lance LogNotProcessedException E que is_scheduled
+                        // fique corretamente como true para o próximo cron.
+                        $event->pass($log);
                         $this->eventScheduler->reschedule($log, $optimalTime);
                         continue; // Será re-executado no cron ao chegar no horário ideal
                     }
@@ -336,8 +351,10 @@ class CampaignSubscriber implements EventSubscriberInterface
                 continue;
             }
 
-            // Mensagem enviada: aguarda webhook da Meta antes de avançar na campanha.
-            // O contato permanece is_scheduled=1 e será reavaliado no próximo batch.
+            // Mensagem aceita para envio: avança o contato na campanha imediatamente.
+            // O status de entrega (pending_webhook → delivered → read) é rastreado
+            // separadamente via MessageLog + webhook da 360dialog.
+            $event->pass($event->getPending()->get($logId));
 
             ++$sentCount;
 
@@ -551,6 +568,36 @@ class CampaignSubscriber implements EventSubscriberInterface
         }
 
         return $number;
+    }
+
+    /**
+     * Ajusta um horário para cair dentro do horário comercial (seg–sex, 8h–18h).
+     * Se o horário calculado estiver fora dessa janela, avança para o próximo
+     * dia útil às 8h, garantindo que nenhuma mensagem seja enviada em horário impróprio.
+     */
+    private function applyBusinessHoursRestriction(\DateTime $dateTime): \DateTime
+    {
+        $dt = clone $dateTime;
+
+        // Se for fim de semana, avança para a segunda-feira
+        while (!in_array((int) $dt->format('N'), self::BUSINESS_DAYS, true)) {
+            $dt->modify('+1 day')->setTime(self::BUSINESS_HOUR_START, 0);
+        }
+
+        $hour = (int) $dt->format('G');
+
+        if ($hour < self::BUSINESS_HOUR_START) {
+            // Antes do expediente → início do expediente no mesmo dia
+            $dt->setTime(self::BUSINESS_HOUR_START, 0);
+        } elseif ($hour >= self::BUSINESS_HOUR_END) {
+            // Após o expediente → próximo dia útil às 8h
+            $dt->modify('+1 day')->setTime(self::BUSINESS_HOUR_START, 0);
+            while (!in_array((int) $dt->format('N'), self::BUSINESS_DAYS, true)) {
+                $dt->modify('+1 day');
+            }
+        }
+
+        return $dt;
     }
 
     private function isRedisTransport(string $dsn): bool
