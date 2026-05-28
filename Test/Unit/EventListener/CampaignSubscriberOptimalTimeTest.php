@@ -734,4 +734,121 @@ class CampaignSubscriberOptimalTimeTest extends TestCase
 
         $this->makeSubscriber()->onCampaignTriggerAction($event);
     }
+
+    // -------------------------------------------------------------------------
+    // Fix: pass() deve ser chamado ANTES de reschedule() no path de agendamento
+    // Garante que PendingEvent não lance LogNotProcessedException e que
+    // is_scheduled fique true (setTriggerDate() sobrescreve setIsScheduled(false))
+    // -------------------------------------------------------------------------
+
+    public function testOptimalTimeRescheduleCallsPassBeforeReschedule(): void
+    {
+        $this->mockIntegrationsHelper->method('getIntegration')->willReturn($this->makeIntegration());
+        $this->mockNumberModel->method('getEntity')->willReturn($this->makeWhatsAppNumber());
+
+        $optimalTime = new \DateTime('+1 hour');
+        $this->mockPeakInteractionTimer
+            ->method('getOptimalTimeAndDay')
+            ->willReturn($optimalTime);
+
+        $callOrder = [];
+
+        // pass() deve ser chamado
+        $mockLog = $this->createMock(LeadEventLog::class);
+        $mockLog->method('getTriggerDate')->willReturn(null);
+
+        $mockPending = $this->createMock(ArrayCollection::class);
+        $mockPending->method('get')->willReturn($mockLog);
+
+        $mockCampaign = $this->createMock(Campaign::class);
+        $mockCampaign->method('getId')->willReturn(10);
+        $mockCampaignEvent = $this->createMock(CampaignEvent::class);
+        $mockCampaignEvent->method('getProperties')->willReturn([
+            'whatsapp_number'  => 1,
+            'payload_data'     => ['list' => [['label' => 'content', 'value' => 'tpl']]],
+            'send_delay'       => 0,
+            'batch_limit'      => 0,
+            'use_optimal_time' => true,
+        ]);
+        $mockCampaignEvent->method('getId')->willReturn(20);
+        $mockCampaignEvent->method('getCampaign')->willReturn($mockCampaign);
+
+        $contact = $this->makeContact('+5511999999999', 1);
+
+        $event = $this->createMock(PendingEvent::class);
+        $event->method('checkContext')->with('dialoghsm.send_whatsapp')->willReturn(true);
+        $event->method('getEvent')->willReturn($mockCampaignEvent);
+        $event->method('getContacts')->willReturn([1 => $contact]);
+        $event->method('getPending')->willReturn($mockPending);
+        $event->expects($this->once())
+            ->method('pass')
+            ->willReturnCallback(function () use (&$callOrder): void {
+                $callOrder[] = 'pass';
+            });
+
+        $this->mockEventScheduler
+            ->expects($this->once())
+            ->method('reschedule')
+            ->willReturnCallback(function () use (&$callOrder): void {
+                $callOrder[] = 'reschedule';
+            });
+
+        $this->makeSubscriber()->onCampaignTriggerAction($event);
+
+        $this->assertSame(['pass', 'reschedule'], $callOrder,
+            'pass() deve ser chamado ANTES de reschedule() para evitar LogNotProcessedException'
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Fix: pass() deve ser chamado no path de sucesso de envio
+    // Garante que o contato avança na campanha e que is_scheduled vira false
+    // -------------------------------------------------------------------------
+
+    public function testSuccessfulSendCallsPass(): void
+    {
+        $this->mockIntegrationsHelper->method('getIntegration')->willReturn($this->makeIntegration());
+        $this->mockNumberModel->method('getEntity')->willReturn($this->makeWhatsAppNumber());
+
+        // Sem optimal time → vai direto para o envio
+        $this->mockPeakInteractionTimer->expects($this->never())->method('getOptimalTimeAndDay');
+        $this->mockEventScheduler->expects($this->never())->method('reschedule');
+
+        $this->mockDirectBatchHandler
+            ->expects($this->once())
+            ->method('__invoke');
+
+        $contact = $this->makeContact('+5511999999999', 1);
+
+        // PendingEvent com expectativa de pass()
+        $mockLog = $this->createMock(LeadEventLog::class);
+        $mockLog->method('getTriggerDate')->willReturn(null);
+
+        $mockPending = $this->createMock(ArrayCollection::class);
+        $mockPending->method('get')->willReturn($mockLog);
+
+        $mockCampaign = $this->createMock(Campaign::class);
+        $mockCampaign->method('getId')->willReturn(10);
+        $mockCampaignEvent = $this->createMock(CampaignEvent::class);
+        $mockCampaignEvent->method('getProperties')->willReturn([
+            'whatsapp_number'  => 1,
+            'payload_data'     => ['list' => [['label' => 'content', 'value' => 'tpl']]],
+            'send_delay'       => 0,
+            'batch_limit'      => 0,
+            'use_optimal_time' => false,
+        ]);
+        $mockCampaignEvent->method('getId')->willReturn(20);
+        $mockCampaignEvent->method('getCampaign')->willReturn($mockCampaign);
+
+        $event = $this->createMock(PendingEvent::class);
+        $event->method('checkContext')->with('dialoghsm.send_whatsapp')->willReturn(true);
+        $event->method('getEvent')->willReturn($mockCampaignEvent);
+        $event->method('getContacts')->willReturn([1 => $contact]);
+        $event->method('getPending')->willReturn($mockPending);
+
+        // pass() deve ser chamado exatamente uma vez após o envio bem-sucedido
+        $event->expects($this->once())->method('pass')->with($mockLog);
+
+        $this->makeSubscriber()->onCampaignTriggerAction($event);
+    }
 }
