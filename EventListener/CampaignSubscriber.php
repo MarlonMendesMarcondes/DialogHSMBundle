@@ -351,10 +351,9 @@ class CampaignSubscriber implements EventSubscriberInterface
                 continue;
             }
 
-            // Mensagem aceita para envio: avança o contato na campanha imediatamente.
-            // O status de entrega (pending_webhook → delivered → read) é rastreado
-            // separadamente via MessageLog + webhook da 360dialog.
-            $event->pass($event->getPending()->get($logId));
+            // Mensagem enviada: aguarda webhook da 360dialog antes de avançar na campanha.
+            // O handler cria o log com pending_webhook → sent → delivered → read via webhook.
+            // O contato permanece is_scheduled=1 e será reavaliado no próximo batch.
 
             ++$sentCount;
 

@@ -846,8 +846,8 @@ class CampaignSubscriberOptimalTimeTest extends TestCase
         $event->method('getContacts')->willReturn([1 => $contact]);
         $event->method('getPending')->willReturn($mockPending);
 
-        // pass() deve ser chamado exatamente uma vez após o envio bem-sucedido
-        $event->expects($this->once())->method('pass')->with($mockLog);
+        // pass() não é chamado na primeira execução — contato aguarda webhook (is_scheduled=1)
+        $event->expects($this->never())->method('pass');
 
         $this->makeSubscriber()->onCampaignTriggerAction($event);
     }
