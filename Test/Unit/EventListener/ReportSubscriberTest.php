@@ -97,8 +97,8 @@ class ReportSubscriberTest extends TestCase
         $this->assertArrayHasKey('ml.date_delivered', $columns);
         $this->assertArrayHasKey('ml.date_read', $columns);
         $this->assertArrayHasKey('ml.lead_id', $columns);
-        $this->assertArrayHasKey('ml.wamid', $columns);
         $this->assertArrayHasKey('ml.error_message', $columns);
+        $this->assertArrayNotHasKey('ml.wamid', $columns, 'wamid é dado sensível e não deve aparecer nos relatórios');
     }
 
     public function testOnReportBuilderColumnsContainsCampaignAndMessageFields(): void
@@ -363,5 +363,285 @@ class ReportSubscriberTest extends TestCase
         $qb->method('leftJoin')->willReturnSelf();
 
         return $qb;
+    }
+
+    // =========================================================================
+    // onReportGraphGenerate helpers
+    // =========================================================================
+
+    private function makeGraphQb(array $fetchRows = []): QueryBuilder&MockObject
+    {
+        $connection = $this->getMockBuilder(\Doctrine\DBAL\Connection::class)
+            ->disableOriginalConstructor()
+            ->onlyMethods(['fetchAllAssociative'])
+            ->getMock();
+
+        $connection->method('fetchAllAssociative')->willReturn($fetchRows);
+
+        $expr = $this->getMockBuilder(\Doctrine\DBAL\Query\Expression\ExpressionBuilder::class)
+            ->disableOriginalConstructor()
+            ->onlyMethods(['in'])
+            ->getMock();
+        $expr->method('in')->willReturn('1=1');
+
+        $qb = $this->getMockBuilder(QueryBuilder::class)
+            ->disableOriginalConstructor()
+            ->onlyMethods(['from', 'leftJoin', 'andWhere', 'setParameter', 'select',
+                           'groupBy', 'orderBy', 'having', 'setMaxResults',
+                           'getSQL', 'getParameters', 'getConnection', 'expr'])
+            ->getMock();
+
+        $qb->method('from')->willReturnSelf();
+        $qb->method('leftJoin')->willReturnSelf();
+        $qb->method('andWhere')->willReturnSelf();
+        $qb->method('setParameter')->willReturnSelf();
+        $qb->method('select')->willReturnSelf();
+        $qb->method('groupBy')->willReturnSelf();
+        $qb->method('orderBy')->willReturnSelf();
+        $qb->method('having')->willReturnSelf();
+        $qb->method('setMaxResults')->willReturnSelf();
+        $qb->method('getSQL')->willReturn('SELECT 1');
+        $qb->method('getParameters')->willReturn([]);
+        $qb->method('getConnection')->willReturn($connection);
+        $qb->method('expr')->willReturn($expr);
+
+        return $qb;
+    }
+
+    private function makeChartQuery(): \Mautic\CoreBundle\Helper\Chart\ChartQuery&MockObject
+    {
+        $cq = $this->getMockBuilder(\Mautic\CoreBundle\Helper\Chart\ChartQuery::class)
+            ->disableOriginalConstructor()
+            ->onlyMethods(['modifyTimeDataQuery', 'loadAndBuildTimeData', 'applyDateFilters'])
+            ->getMock();
+
+        $cq->method('modifyTimeDataQuery')->willReturnSelf();
+        $cq->method('loadAndBuildTimeData')->willReturn(array_fill(0, 30, 0));
+        $cq->method('applyDateFilters')->willReturnSelf();
+
+        return $cq;
+    }
+
+    private function makeGraphEvent(bool $contextMatches, string $graph, array $fetchRows = []): \Mautic\ReportBundle\Event\ReportGraphEvent&MockObject
+    {
+        $translator = $this->createMock(\Symfony\Contracts\Translation\TranslatorInterface::class);
+        $translator->method('trans')->willReturnArgument(0);
+
+        $event = $this->getMockBuilder(\Mautic\ReportBundle\Event\ReportGraphEvent::class)
+            ->disableOriginalConstructor()
+            ->onlyMethods(['checkContext', 'getRequestedGraphs', 'getQueryBuilder', 'getOptions', 'setGraph'])
+            ->getMock();
+
+        $event->method('checkContext')->willReturn($contextMatches);
+
+        if ($contextMatches) {
+            $event->method('getRequestedGraphs')->willReturn([$graph]);
+            $event->method('getQueryBuilder')->willReturn($this->makeGraphQb($fetchRows));
+            $event->method('getOptions')->willReturn([
+                'chartQuery' => $this->makeChartQuery(),
+                'dateFrom'   => new \DateTime('-30 days'),
+                'dateTo'     => new \DateTime(),
+                'translator' => $translator,
+            ]);
+        }
+
+        return $event;
+    }
+
+    // =========================================================================
+    // onReportGraphGenerate — context guard
+    // =========================================================================
+
+    public function testOnReportGraphGenerateDoesNothingForOtherContexts(): void
+    {
+        $event = $this->makeGraphEvent(false, ReportSubscriber::GRAPH_PIE_STATUS);
+        $event->expects($this->never())->method('setGraph');
+
+        $this->subscriber->onReportGraphGenerate($event);
+    }
+
+    // =========================================================================
+    // onReportGraphGenerate — PIE status distribution
+    // =========================================================================
+
+    public function testPieStatusCallsSetGraphWithDataAndName(): void
+    {
+        $event = $this->makeGraphEvent(true, ReportSubscriber::GRAPH_PIE_STATUS);
+        $event->expects($this->once())->method('setGraph')
+            ->with(
+                ReportSubscriber::GRAPH_PIE_STATUS,
+                $this->callback(fn ($d) => isset($d['data']) && isset($d['name']))
+            );
+
+        $this->subscriber->onReportGraphGenerate($event);
+    }
+
+    public function testPieStatusBucketsDlqIntoFailed(): void
+    {
+        $rows = [
+            ['status' => 'sent',      'cnt' => 100],
+            ['status' => 'delivered', 'cnt' => 80],
+            ['status' => 'read',      'cnt' => 50],
+            ['status' => 'failed',    'cnt' => 10],
+            ['status' => 'dlq',       'cnt' => 5],
+        ];
+
+        $captured = null;
+        $event    = $this->makeGraphEvent(true, ReportSubscriber::GRAPH_PIE_STATUS, $rows);
+        $event->method('setGraph')
+            ->willReturnCallback(function (string $g, array $data) use (&$captured): void {
+                $captured = $data;
+            });
+
+        $this->subscriber->onReportGraphGenerate($event);
+
+        // dlq (5) deve somar em failed (10) → total 15
+        $datasets = $captured['data']['datasets'][0]['data'];
+        $this->assertSame(15, $datasets[3], 'failed bucket deve incluir dlq');
+        $this->assertSame(100, $datasets[0], 'sent bucket');
+        $this->assertSame(80, $datasets[1], 'delivered bucket');
+        $this->assertSame(50, $datasets[2], 'read bucket');
+    }
+
+    public function testPieStatusAppliesFourColors(): void
+    {
+        $event    = $this->makeGraphEvent(true, ReportSubscriber::GRAPH_PIE_STATUS);
+        $captured = null;
+        $event->method('setGraph')
+            ->willReturnCallback(function (string $g, array $data) use (&$captured): void {
+                $captured = $data;
+            });
+
+        $this->subscriber->onReportGraphGenerate($event);
+
+        $colors = $captured['data']['datasets'][0]['backgroundColor'];
+        $this->assertCount(4, $colors);
+        $this->assertStringContainsString('92,184,92',   $colors[0]); // sent    #5cb85c
+        $this->assertStringContainsString('23,162,184',  $colors[1]); // delivered #17a2b8
+        $this->assertStringContainsString('2,117,216',   $colors[2]); // read    #0275d8
+        $this->assertStringContainsString('217,83,79',   $colors[3]); // failed  #d9534f
+    }
+
+    // =========================================================================
+    // onReportGraphGenerate — TABLE top templates
+    // =========================================================================
+
+    public function testTableTopTemplatesCallsSetGraphWithDataKey(): void
+    {
+        $rows = [
+            ['template' => 'tpl_a', 'sent' => 100, 'delivered' => 80, 'read' => 40, 'failed' => 5, 'total' => 105],
+            ['template' => 'tpl_b', 'sent' => 50,  'delivered' => 30, 'read' => 10, 'failed' => 2, 'total' => 52],
+        ];
+
+        $captured = null;
+        $event    = $this->makeGraphEvent(true, ReportSubscriber::GRAPH_TABLE_TOP_TEMPLATES, $rows);
+        $event->method('setGraph')
+            ->willReturnCallback(function (string $g, array $data) use (&$captured): void {
+                $captured = $data;
+            });
+
+        $this->subscriber->onReportGraphGenerate($event);
+
+        $this->assertArrayHasKey('data', $captured);
+        $this->assertArrayHasKey('name', $captured);
+        $this->assertCount(2, $captured['data']);
+        $this->assertArrayHasKey('id', $captured['data'][0]);
+        $this->assertSame(1, $captured['data'][0]['id']);
+        $this->assertSame(2, $captured['data'][1]['id']);
+    }
+
+    // =========================================================================
+    // onReportGraphGenerate — TABLE top read rate
+    // =========================================================================
+
+    public function testTableTopReadRateCalculatesPercentages(): void
+    {
+        $rows = [
+            ['template' => 'tpl_x', 'sent_plus' => 200, 'delivered_plus' => 160, 'read_count' => 80],
+            ['template' => 'tpl_y', 'sent_plus' => 100, 'delivered_plus' => 50,  'read_count' => 10],
+        ];
+
+        $captured = null;
+        $event    = $this->makeGraphEvent(true, ReportSubscriber::GRAPH_TABLE_TOP_READ_RATE, $rows);
+        $event->method('setGraph')
+            ->willReturnCallback(function (string $g, array $data) use (&$captured): void {
+                $captured = $data;
+            });
+
+        $this->subscriber->onReportGraphGenerate($event);
+
+        $this->assertCount(2, $captured['data']);
+        // tpl_x: delivery=160/200=80%, read=80/200=40%
+        $row0Values = array_values($captured['data'][0]);
+        $this->assertContains('80%', $row0Values);
+        $this->assertContains('40%', $row0Values);
+        // tpl_y: delivery=50/100=50%, read=10/100=10%
+        $row1Values = array_values($captured['data'][1]);
+        $this->assertContains('50%', $row1Values);
+        $this->assertContains('10%', $row1Values);
+    }
+
+    // =========================================================================
+    // onReportGraphGenerate — LINE sends per day
+    // =========================================================================
+
+    public function testLineSendsPerDayCallsSetGraph(): void
+    {
+        $event = $this->makeGraphEvent(true, ReportSubscriber::GRAPH_LINE_SENDS_PER_DAY);
+        $event->expects($this->once())->method('setGraph')
+            ->with(
+                ReportSubscriber::GRAPH_LINE_SENDS_PER_DAY,
+                $this->callback(fn ($d) => isset($d['datasets']) && count($d['datasets']) === 4)
+            );
+
+        $this->subscriber->onReportGraphGenerate($event);
+    }
+
+    public function testLineSendsPerDayAppliesDashboardPalette(): void
+    {
+        $captured = null;
+        $event    = $this->makeGraphEvent(true, ReportSubscriber::GRAPH_LINE_SENDS_PER_DAY);
+        $event->method('setGraph')
+            ->willReturnCallback(function (string $g, array $data) use (&$captured): void {
+                $captured = $data;
+            });
+
+        $this->subscriber->onReportGraphGenerate($event);
+
+        $this->assertStringContainsString('92,184,92',  $captured['datasets'][0]['borderColor']); // sent
+        $this->assertStringContainsString('23,162,184', $captured['datasets'][1]['borderColor']); // delivered
+        $this->assertStringContainsString('2,117,216',  $captured['datasets'][2]['borderColor']); // read
+        $this->assertStringContainsString('217,83,79',  $captured['datasets'][3]['borderColor']); // failed
+    }
+
+    // =========================================================================
+    // onReportGraphGenerate — LINE delivery rate
+    // =========================================================================
+
+    public function testLineDeliveryRateCallsSetGraph(): void
+    {
+        $event = $this->makeGraphEvent(true, ReportSubscriber::GRAPH_LINE_DELIVERY_RATE);
+        $event->expects($this->once())->method('setGraph')
+            ->with(
+                ReportSubscriber::GRAPH_LINE_DELIVERY_RATE,
+                $this->callback(fn ($d) => isset($d['datasets']) && count($d['datasets']) === 2)
+            );
+
+        $this->subscriber->onReportGraphGenerate($event);
+    }
+
+    public function testLineDeliveryRateAppliesTwoColors(): void
+    {
+        $captured = null;
+        $event    = $this->makeGraphEvent(true, ReportSubscriber::GRAPH_LINE_DELIVERY_RATE);
+        $event->method('setGraph')
+            ->willReturnCallback(function (string $g, array $data) use (&$captured): void {
+                $captured = $data;
+            });
+
+        $this->subscriber->onReportGraphGenerate($event);
+
+        $this->assertStringContainsString('23,162,184', $captured['datasets'][0]['borderColor']); // delivery #17a2b8
+        $this->assertStringContainsString('2,117,216',  $captured['datasets'][1]['borderColor']); // read     #0275d8
     }
 }
