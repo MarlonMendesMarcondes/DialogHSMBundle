@@ -319,7 +319,7 @@ class ReportSubscriber implements EventSubscriberInterface
                         'COUNT(*) AS total'
                     )
                     ->groupBy(self::ML.'.template_name')
-                    ->orderBy('total', 'DESC')
+                    ->orderBy('COUNT(*)', 'DESC')
                     ->setMaxResults(10);
 
                     $rows = $event->getQueryBuilder()->getConnection()
@@ -434,8 +434,8 @@ class ReportSubscriber implements EventSubscriberInterface
                         'SUM('.self::ML.'.status = \'read\')                           AS read_count'
                     )
                     ->groupBy(self::ML.'.template_name')
-                    ->having('sent_plus > 0')
-                    ->orderBy('read_count / sent_plus', 'DESC')
+                    ->having('SUM('.self::ML.'.status IN (\'sent\',\'delivered\',\'read\')) > 0')
+                    ->orderBy('SUM('.self::ML.'.status = \'read\') / NULLIF(SUM('.self::ML.'.status IN (\'sent\',\'delivered\',\'read\')), 0)', 'DESC')
                     ->setMaxResults(10);
 
                     $rows = $event->getQueryBuilder()->getConnection()
