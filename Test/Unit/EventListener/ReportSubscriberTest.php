@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+defined('MAUTIC_TABLE_PREFIX') or define('MAUTIC_TABLE_PREFIX', '');
+
 use Doctrine\DBAL\Query\QueryBuilder;
 use Mautic\ReportBundle\Event\ReportBuilderEvent;
 use Mautic\ReportBundle\Event\ReportGeneratorEvent;
