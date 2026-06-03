@@ -12,7 +12,7 @@ use Mautic\CampaignBundle\Executioner\Scheduler\EventScheduler;
 use Mautic\IntegrationsBundle\Helper\IntegrationsHelper;
 use Mautic\LeadBundle\Entity\Lead;
 use Mautic\LeadBundle\Helper\TokenHelper;
-use Mautic\LeadBundle\Services\PeakInteractionTimer;
+use MauticPlugin\DialogHSMBundle\Service\OptimalTimeResolver;
 use MauticPlugin\DialogHSMBundle\DialogHSMEvents;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
@@ -33,10 +33,7 @@ use Symfony\Component\Messenger\MessageBusInterface;
 
 class CampaignSubscriber implements EventSubscriberInterface
 {
-    private const WEBHOOK_TIMEOUT_SECONDS    = 120;
-    private const BUSINESS_HOUR_START        = 8;   // 08:00
-    private const BUSINESS_HOUR_END          = 18;  // 18:00
-    private const BUSINESS_DAYS             = [1, 2, 3, 4, 5]; // seg–sex (ISO 8601)
+    private const WEBHOOK_TIMEOUT_SECONDS = 120;
 
     public function __construct(
         private IntegrationsHelper $integrationsHelper,
@@ -47,7 +44,7 @@ class CampaignSubscriber implements EventSubscriberInterface
         private EntityManagerInterface $entityManager,
         private SendWhatsAppDirectBatchMessageHandler $directBatchHandler,
         private MessageLogRepository $messageLogRepository,
-        private PeakInteractionTimer $peakInteractionTimer,
+        private OptimalTimeResolver $optimalTimeResolver,
         private EventScheduler $eventScheduler,
         private string $directTransportDsn = 'null://null',
     ) {
@@ -266,10 +263,7 @@ class CampaignSubscriber implements EventSubscriberInterface
             if ($useOptimalTime) {
                 $log = $event->getPending()->get($logId);
                 if ($log->getTriggerDate() === null) {
-                    $optimalTime = $this->peakInteractionTimer->getOptimalTimeAndDay($contact);
-                    if ($restrictBusinessHours) {
-                        $optimalTime = $this->applyBusinessHoursRestriction($optimalTime);
-                    }
+                    $optimalTime = $this->optimalTimeResolver->resolve($contact, $restrictBusinessHours);
                     if ($optimalTime > new \DateTime()) {
                         // pass() deve ser chamado ANTES de reschedule():
                         // reschedule() chama setTriggerDate() que invoca setIsScheduled(true),
@@ -567,36 +561,6 @@ class CampaignSubscriber implements EventSubscriberInterface
         }
 
         return $number;
-    }
-
-    /**
-     * Ajusta um horário para cair dentro do horário comercial (seg–sex, 8h–18h).
-     * Se o horário calculado estiver fora dessa janela, avança para o próximo
-     * dia útil às 8h, garantindo que nenhuma mensagem seja enviada em horário impróprio.
-     */
-    private function applyBusinessHoursRestriction(\DateTime $dateTime): \DateTime
-    {
-        $dt = clone $dateTime;
-
-        // Se for fim de semana, avança para a segunda-feira
-        while (!in_array((int) $dt->format('N'), self::BUSINESS_DAYS, true)) {
-            $dt->modify('+1 day')->setTime(self::BUSINESS_HOUR_START, 0);
-        }
-
-        $hour = (int) $dt->format('G');
-
-        if ($hour < self::BUSINESS_HOUR_START) {
-            // Antes do expediente → início do expediente no mesmo dia
-            $dt->setTime(self::BUSINESS_HOUR_START, 0);
-        } elseif ($hour >= self::BUSINESS_HOUR_END) {
-            // Após o expediente → próximo dia útil às 8h
-            $dt->modify('+1 day')->setTime(self::BUSINESS_HOUR_START, 0);
-            while (!in_array((int) $dt->format('N'), self::BUSINESS_DAYS, true)) {
-                $dt->modify('+1 day');
-            }
-        }
-
-        return $dt;
     }
 
     private function isRedisTransport(string $dsn): bool

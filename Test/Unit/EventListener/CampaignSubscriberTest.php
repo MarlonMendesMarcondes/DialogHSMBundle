@@ -6,7 +6,7 @@ use Doctrine\ORM\EntityManagerInterface;
 use Mautic\CampaignBundle\Event\CampaignBuilderEvent;
 use Mautic\CampaignBundle\Executioner\Scheduler\EventScheduler;
 use Mautic\IntegrationsBundle\Helper\IntegrationsHelper;
-use Mautic\LeadBundle\Services\PeakInteractionTimer;
+use MauticPlugin\DialogHSMBundle\Service\OptimalTimeResolver;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\EventListener\CampaignSubscriber;
 use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppDirectBatchMessageHandler;
@@ -29,7 +29,7 @@ class CampaignSubscriberTest extends TestCase
             $this->createMock(EntityManagerInterface::class),
             $this->createMock(SendWhatsAppDirectBatchMessageHandler::class),
             $this->createMock(MessageLogRepository::class),
-            $this->createMock(PeakInteractionTimer::class),
+            $this->createMock(OptimalTimeResolver::class),
             $this->createMock(EventScheduler::class),
         );
     }

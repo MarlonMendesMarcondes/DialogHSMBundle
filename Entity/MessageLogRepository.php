@@ -538,4 +538,24 @@ class MessageLogRepository extends CommonRepository
              LIMIT {$limit}"
         );
     }
+
+    /**
+     * Retorna os timestamps de leitura de HSM de um contato a partir de uma data.
+     *
+     * @return array<int, array{dateRead: \DateTime}>
+     */
+    public function getReadInteractionsByLead(int $leadId, \DateTime $fromDate): array
+    {
+        return $this->createQueryBuilder('dhml')
+            ->select('dhml.dateRead')
+            ->where('dhml.leadId = :leadId')
+            ->andWhere('dhml.status = :status')
+            ->andWhere('dhml.dateRead IS NOT NULL')
+            ->andWhere('dhml.dateRead >= :fromDate')
+            ->setParameter('leadId', $leadId)
+            ->setParameter('status', MessageLog::STATUS_READ)
+            ->setParameter('fromDate', $fromDate)
+            ->getQuery()
+            ->getResult();
+    }
 }

@@ -11,7 +11,7 @@ use Mautic\CampaignBundle\Executioner\Scheduler\EventScheduler;
 use Mautic\IntegrationsBundle\Helper\IntegrationsHelper;
 use Mautic\LeadBundle\Entity\Lead;
 use Mautic\LeadBundle\Model\LeadModel;
-use Mautic\LeadBundle\Services\PeakInteractionTimer;
+use MauticPlugin\DialogHSMBundle\Service\OptimalTimeResolver;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
@@ -129,7 +129,7 @@ class WebhookSentFlowTest extends TestCase
             $this->createMock(EntityManagerInterface::class),
             $batchHandler,
             $logRepo,
-            $this->createMock(PeakInteractionTimer::class),
+            $this->createMock(OptimalTimeResolver::class),
             $this->createMock(EventScheduler::class),
         );
     }

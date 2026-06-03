@@ -12,7 +12,7 @@ use Mautic\CampaignBundle\Entity\LeadEventLog;
 use Mautic\CampaignBundle\Event\PendingEvent;
 use Mautic\IntegrationsBundle\Helper\IntegrationsHelper;
 use Mautic\LeadBundle\Entity\Lead;
-use Mautic\LeadBundle\Services\PeakInteractionTimer;
+use MauticPlugin\DialogHSMBundle\Service\OptimalTimeResolver;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
@@ -37,7 +37,7 @@ class CampaignSubscriberActionTest extends TestCase
     private EntityManagerInterface&MockObject $mockEntityManager;
     private SendWhatsAppDirectBatchMessageHandler&MockObject $mockDirectBatchHandler;
     private MessageLogRepository&MockObject $mockMessageLogRepository;
-    private PeakInteractionTimer&MockObject $mockPeakInteractionTimer;
+    private OptimalTimeResolver&MockObject $mockOptimalTimeResolver;
     private EventScheduler&MockObject $mockEventScheduler;
     private CampaignSubscriber $subscriber;
 
@@ -51,7 +51,7 @@ class CampaignSubscriberActionTest extends TestCase
         $this->mockEntityManager           = $this->createMock(EntityManagerInterface::class);
         $this->mockDirectBatchHandler      = $this->createMock(SendWhatsAppDirectBatchMessageHandler::class);
         $this->mockMessageLogRepository    = $this->createMock(MessageLogRepository::class);
-        $this->mockPeakInteractionTimer    = $this->createMock(PeakInteractionTimer::class);
+        $this->mockOptimalTimeResolver     = $this->createMock(OptimalTimeResolver::class);
         $this->mockEventScheduler          = $this->createMock(EventScheduler::class);
 
         // Default: primeira execução — sem log existente
@@ -73,7 +73,7 @@ class CampaignSubscriberActionTest extends TestCase
             $this->mockEntityManager,
             $this->mockDirectBatchHandler,
             $this->mockMessageLogRepository,
-            $this->mockPeakInteractionTimer,
+            $this->mockOptimalTimeResolver,
             $this->mockEventScheduler,
             $directTransportDsn,
         );

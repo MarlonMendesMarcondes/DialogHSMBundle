@@ -11,7 +11,7 @@ use Mautic\CampaignBundle\Event\PendingEvent;
 use Mautic\CampaignBundle\Executioner\Scheduler\EventScheduler;
 use Mautic\IntegrationsBundle\Helper\IntegrationsHelper;
 use Mautic\LeadBundle\Entity\Lead;
-use Mautic\LeadBundle\Services\PeakInteractionTimer;
+use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
 use MauticPlugin\DialogHSMBundle\EventListener\CampaignSubscriber;
@@ -20,6 +20,7 @@ use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppDirectBatchMessageHandler;
 use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppMessageHandler;
 use MauticPlugin\DialogHSMBundle\Model\WhatsAppNumberModel;
+use MauticPlugin\DialogHSMBundle\Service\OptimalTimeResolver;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
@@ -28,7 +29,7 @@ use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\MessageBusInterface;
 
 /**
- * Testa o mecanismo nativo de agendamento (EventScheduler::reschedule) para use_optimal_time.
+ * Testa o mecanismo de agendamento via OptimalTimeResolver no CampaignSubscriber.
  *
  * Cenários cobertos:
  *  1. Primeira execução + optimal time + futuro  → reschedule(), sem envio
@@ -39,6 +40,8 @@ use Symfony\Component\Messenger\MessageBusInterface;
  *  6. Queue + optimal time                       → reschedule(), bus NÃO chamado
  *  7. Múltiplos contatos                         → cada um agendado individualmente
  *  8. Inline + optimal time                      → reschedule() funciona igual (mecanismo nativo)
+ *  9. restrict_business_hours=true               → resolve() chamado com flag=true, horário respeitado
+ * 10. restrict_business_hours=false              → resolve() chamado com flag=false
  */
 class CampaignSubscriberOptimalTimeTest extends TestCase
 {
@@ -50,7 +53,7 @@ class CampaignSubscriberOptimalTimeTest extends TestCase
     private EntityManagerInterface&MockObject $mockEntityManager;
     private SendWhatsAppDirectBatchMessageHandler&MockObject $mockDirectBatchHandler;
     private MessageLogRepository&MockObject $mockMessageLogRepository;
-    private PeakInteractionTimer&MockObject $mockPeakInteractionTimer;
+    private OptimalTimeResolver&MockObject $mockOptimalTimeResolver;
     private EventScheduler&MockObject $mockEventScheduler;
 
     protected function setUp(): void
@@ -63,7 +66,7 @@ class CampaignSubscriberOptimalTimeTest extends TestCase
         $this->mockEntityManager        = $this->createMock(EntityManagerInterface::class);
         $this->mockDirectBatchHandler   = $this->createMock(SendWhatsAppDirectBatchMessageHandler::class);
         $this->mockMessageLogRepository = $this->createMock(MessageLogRepository::class);
-        $this->mockPeakInteractionTimer = $this->createMock(PeakInteractionTimer::class);
+        $this->mockOptimalTimeResolver  = $this->createMock(OptimalTimeResolver::class);
         $this->mockEventScheduler       = $this->createMock(EventScheduler::class);
 
         $this->mockMessageLogRepository
@@ -71,9 +74,7 @@ class CampaignSubscriberOptimalTimeTest extends TestCase
             ->willReturn(null);
     }
 
-    // -------------------------------------------------------------------------
-    // Helpers
-    // -------------------------------------------------------------------------
+    // ─── helpers ──────────────────────────────────────────────────────────────
 
     private function makeSubscriber(string $directTransportDsn = 'null://null'): CampaignSubscriber
     {
@@ -86,7 +87,7 @@ class CampaignSubscriberOptimalTimeTest extends TestCase
             $this->mockEntityManager,
             $this->mockDirectBatchHandler,
             $this->mockMessageLogRepository,
-            $this->mockPeakInteractionTimer,
+            $this->mockOptimalTimeResolver,
             $this->mockEventScheduler,
             $directTransportDsn,
         );
@@ -132,8 +133,6 @@ class CampaignSubscriberOptimalTimeTest extends TestCase
     }
 
     /**
-     * Constrói um PendingEvent mockado.
-     *
      * @param \DateTime|null $logTriggerDate null = primeira execução, DateTime = segunda execução
      */
     private function buildPendingEvent(
@@ -173,9 +172,9 @@ class CampaignSubscriberOptimalTimeTest extends TestCase
         return $event;
     }
 
-    // -------------------------------------------------------------------------
+    // =========================================================================
     // Cenário 1: Primeira execução + optimal time + horário futuro → reschedule
-    // -------------------------------------------------------------------------
+    // =========================================================================
 
     public function testFirstExecutionOptimalTimeFutureReschedulesAndDoesNotSend(): void
     {
@@ -183,21 +182,20 @@ class CampaignSubscriberOptimalTimeTest extends TestCase
         $this->mockNumberModel->method('getEntity')->willReturn($this->makeWhatsAppNumber());
 
         $optimalTime = new \DateTime('+1 hour');
-        $this->mockPeakInteractionTimer
+        $this->mockOptimalTimeResolver
             ->expects($this->once())
-            ->method('getOptimalTimeAndDay')
+            ->method('resolve')
             ->willReturn($optimalTime);
 
+        $rescheduled = null;
         $this->mockEventScheduler
             ->expects($this->once())
             ->method('reschedule')
-            ->with(
-                $this->isInstanceOf(LeadEventLog::class),
-                $this->equalTo($optimalTime)
-            );
+            ->willReturnCallback(function ($log, \DateTimeInterface $date) use (&$rescheduled): void {
+                $rescheduled = $date;
+            });
 
         $contact = $this->makeContact('+5511999999999', 1);
-        // trigger_date = null → primeira execução
         $event = $this->buildPendingEvent(
             'dialoghsm.send_whatsapp',
             [1 => $contact],
@@ -205,33 +203,35 @@ class CampaignSubscriberOptimalTimeTest extends TestCase
             null,
         );
 
-        // Nenhuma mensagem deve ser enviada
         $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
         $this->mockBus->expects($this->never())->method('dispatch');
 
         $this->makeSubscriber()->onCampaignTriggerAction($event);
+
+        // Valida que o horário passado ao reschedule é exatamente o que o resolver retornou
+        $this->assertSame(
+            $optimalTime->format('Y-m-d H:i:s'),
+            $rescheduled->format('Y-m-d H:i:s'),
+            'O horário agendado deve ser exatamente o que o OptimalTimeResolver retornou'
+        );
     }
 
-    // -------------------------------------------------------------------------
+    // =========================================================================
     // Cenário 2: Primeira execução + optimal time + horário passado → envia imediatamente
-    // -------------------------------------------------------------------------
+    // =========================================================================
 
     public function testFirstExecutionOptimalTimePastSendsImmediately(): void
     {
         $this->mockIntegrationsHelper->method('getIntegration')->willReturn($this->makeIntegration());
         $this->mockNumberModel->method('getEntity')->willReturn($this->makeWhatsAppNumber());
 
-        // Horário ideal já passou → deve enviar imediatamente
-        $pastTime = new \DateTime('-1 hour');
-        $this->mockPeakInteractionTimer
+        $this->mockOptimalTimeResolver
             ->expects($this->once())
-            ->method('getOptimalTimeAndDay')
-            ->willReturn($pastTime);
+            ->method('resolve')
+            ->willReturn(new \DateTime('-1 hour'));
 
-        // reschedule NÃO deve ser chamado
         $this->mockEventScheduler->expects($this->never())->method('reschedule');
 
-        // directBatchHandler deve ser chamado (envio imediato)
         $this->mockDirectBatchHandler
             ->expects($this->once())
             ->method('__invoke')
@@ -248,53 +248,46 @@ class CampaignSubscriberOptimalTimeTest extends TestCase
         $this->makeSubscriber()->onCampaignTriggerAction($event);
     }
 
-    // -------------------------------------------------------------------------
+    // =========================================================================
     // Cenário 3: Segunda execução (trigger_date definido) → envia, sem reschedule
-    // -------------------------------------------------------------------------
+    // =========================================================================
 
     public function testSecondExecutionWithTriggerDateSendsWithoutReschedule(): void
     {
         $this->mockIntegrationsHelper->method('getIntegration')->willReturn($this->makeIntegration());
         $this->mockNumberModel->method('getEntity')->willReturn($this->makeWhatsAppNumber());
 
-        // PeakInteractionTimer NÃO deve ser consultado na segunda execução
-        $this->mockPeakInteractionTimer->expects($this->never())->method('getOptimalTimeAndDay');
-
-        // reschedule NÃO deve ser chamado
+        $this->mockOptimalTimeResolver->expects($this->never())->method('resolve');
         $this->mockEventScheduler->expects($this->never())->method('reschedule');
 
-        // directBatchHandler deve ser chamado (é a segunda execução, envia normalmente)
         $this->mockDirectBatchHandler
             ->expects($this->once())
             ->method('__invoke')
             ->with($this->isInstanceOf(SendWhatsAppDirectBatchMessage::class));
 
         $contact = $this->makeContact('+5511999999999', 1);
-        // trigger_date definido → segunda execução
-        $event = $this->buildPendingEvent(
+        $event   = $this->buildPendingEvent(
             'dialoghsm.send_whatsapp',
             [1 => $contact],
             ['use_optimal_time' => true],
-            new \DateTime('-1 minute'),
+            new \DateTime('-1 minute'), // trigger_date definido → segunda execução
         );
 
         $this->makeSubscriber()->onCampaignTriggerAction($event);
     }
 
-    // -------------------------------------------------------------------------
+    // =========================================================================
     // Cenário 4: Sem optimal time → comportamento normal, reschedule nunca chamado
-    // -------------------------------------------------------------------------
+    // =========================================================================
 
     public function testWithoutOptimalTimeNeverCallsReschedule(): void
     {
         $this->mockIntegrationsHelper->method('getIntegration')->willReturn($this->makeIntegration());
         $this->mockNumberModel->method('getEntity')->willReturn($this->makeWhatsAppNumber());
 
-        // PeakInteractionTimer e reschedule nunca devem ser chamados
-        $this->mockPeakInteractionTimer->expects($this->never())->method('getOptimalTimeAndDay');
+        $this->mockOptimalTimeResolver->expects($this->never())->method('resolve');
         $this->mockEventScheduler->expects($this->never())->method('reschedule');
 
-        // directBatchHandler deve ser chamado normalmente
         $this->mockDirectBatchHandler
             ->expects($this->once())
             ->method('__invoke')
@@ -310,9 +303,9 @@ class CampaignSubscriberOptimalTimeTest extends TestCase
         $this->makeSubscriber()->onCampaignTriggerAction($event);
     }
 
-    // -------------------------------------------------------------------------
-    // Cenário 5: Redis + optimal time → reschedule, items vazio, batch NÃO despachado
-    // -------------------------------------------------------------------------
+    // =========================================================================
+    // Cenário 5: Redis + optimal time → reschedule, batch NÃO despachado
+    // =========================================================================
 
     public function testRedisOptimalTimeReschedulesAndDoesNotDispatchBatch(): void
     {
@@ -320,16 +313,16 @@ class CampaignSubscriberOptimalTimeTest extends TestCase
         $this->mockNumberModel->method('getEntity')->willReturn($this->makeWhatsAppNumber());
 
         $optimalTime = new \DateTime('+2 hours');
-        $this->mockPeakInteractionTimer
-            ->expects($this->once())
-            ->method('getOptimalTimeAndDay')
-            ->willReturn($optimalTime);
+        $this->mockOptimalTimeResolver->method('resolve')->willReturn($optimalTime);
 
+        $rescheduled = null;
         $this->mockEventScheduler
             ->expects($this->once())
-            ->method('reschedule');
+            ->method('reschedule')
+            ->willReturnCallback(function ($log, \DateTimeInterface $date) use (&$rescheduled): void {
+                $rescheduled = $date;
+            });
 
-        // Bus NÃO deve despachar nenhuma mensagem (items vazio, contato agendado)
         $this->mockBus->expects($this->never())->method('dispatch');
 
         $contact = $this->makeContact('+5511999999999', 1);
@@ -341,11 +334,17 @@ class CampaignSubscriberOptimalTimeTest extends TestCase
         );
 
         $this->makeSubscriber('redis://localhost:6379')->onCampaignTriggerAction($event);
+
+        $this->assertSame(
+            $optimalTime->format('Y-m-d H:i:s'),
+            $rescheduled->format('Y-m-d H:i:s'),
+            'Horário agendado deve corresponder ao retorno do resolver'
+        );
     }
 
-    // -------------------------------------------------------------------------
+    // =========================================================================
     // Cenário 6: Queue (AMQP) + optimal time → reschedule, bus NÃO chamado
-    // -------------------------------------------------------------------------
+    // =========================================================================
 
     public function testQueueOptimalTimeReschedulesAndDoesNotDispatchToQueue(): void
     {
@@ -353,20 +352,16 @@ class CampaignSubscriberOptimalTimeTest extends TestCase
         $this->mockNumberModel->method('getEntity')->willReturn($this->makeWhatsAppNumber());
 
         $optimalTime = new \DateTime('+3 hours');
-        $this->mockPeakInteractionTimer
-            ->expects($this->once())
-            ->method('getOptimalTimeAndDay')
-            ->willReturn($optimalTime);
+        $this->mockOptimalTimeResolver->method('resolve')->willReturn($optimalTime);
 
+        $rescheduled = null;
         $this->mockEventScheduler
             ->expects($this->once())
             ->method('reschedule')
-            ->with(
-                $this->isInstanceOf(LeadEventLog::class),
-                $this->equalTo($optimalTime)
-            );
+            ->willReturnCallback(function ($log, \DateTimeInterface $date) use (&$rescheduled): void {
+                $rescheduled = $date;
+            });
 
-        // Bus NÃO deve ser chamado
         $this->mockBus->expects($this->never())->method('dispatch');
 
         $contact = $this->makeContact('+5511999999999', 1);
@@ -378,11 +373,17 @@ class CampaignSubscriberOptimalTimeTest extends TestCase
         );
 
         $this->makeSubscriber()->onCampaignTriggerActionQueue($event);
+
+        $this->assertSame(
+            $optimalTime->format('Y-m-d H:i:s'),
+            $rescheduled->format('Y-m-d H:i:s'),
+            'Horário agendado deve corresponder ao retorno do resolver'
+        );
     }
 
-    // -------------------------------------------------------------------------
+    // =========================================================================
     // Cenário 7: Múltiplos contatos → cada um agendado individualmente
-    // -------------------------------------------------------------------------
+    // =========================================================================
 
     public function testMultipleContactsEachRescheduledIndividually(): void
     {
@@ -393,16 +394,19 @@ class CampaignSubscriberOptimalTimeTest extends TestCase
         $time2 = new \DateTime('+2 hours');
         $time3 = new \DateTime('+3 hours');
 
-        $this->mockPeakInteractionTimer
+        $this->mockOptimalTimeResolver
             ->expects($this->exactly(3))
-            ->method('getOptimalTimeAndDay')
+            ->method('resolve')
             ->willReturnOnConsecutiveCalls($time1, $time2, $time3);
 
+        $rescheduledTimes = [];
         $this->mockEventScheduler
             ->expects($this->exactly(3))
-            ->method('reschedule');
+            ->method('reschedule')
+            ->willReturnCallback(function ($log, \DateTimeInterface $date) use (&$rescheduledTimes): void {
+                $rescheduledTimes[] = $date->format('Y-m-d H:i:s');
+            });
 
-        // Nenhuma mensagem enviada (todos agendados)
         $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
         $this->mockBus->expects($this->never())->method('dispatch');
 
@@ -420,11 +424,16 @@ class CampaignSubscriberOptimalTimeTest extends TestCase
         );
 
         $this->makeSubscriber()->onCampaignTriggerAction($event);
+
+        // Valida que cada contato foi agendado no horário correto
+        $this->assertSame($time1->format('Y-m-d H:i:s'), $rescheduledTimes[0], 'Contato 1');
+        $this->assertSame($time2->format('Y-m-d H:i:s'), $rescheduledTimes[1], 'Contato 2');
+        $this->assertSame($time3->format('Y-m-d H:i:s'), $rescheduledTimes[2], 'Contato 3');
     }
 
-    // -------------------------------------------------------------------------
-    // Cenário 8: Inline + optimal time → reschedule funciona igual (mecanismo nativo)
-    // -------------------------------------------------------------------------
+    // =========================================================================
+    // Cenário 8: Inline + optimal time → reschedule funciona igual ao Redis
+    // =========================================================================
 
     public function testInlineOptimalTimeAlsoReschedulesViaNativeMechanism(): void
     {
@@ -432,22 +441,17 @@ class CampaignSubscriberOptimalTimeTest extends TestCase
         $this->mockNumberModel->method('getEntity')->willReturn($this->makeWhatsAppNumber());
 
         $optimalTime = new \DateTime('+30 minutes');
-        $this->mockPeakInteractionTimer
-            ->expects($this->once())
-            ->method('getOptimalTimeAndDay')
-            ->willReturn($optimalTime);
+        $this->mockOptimalTimeResolver->method('resolve')->willReturn($optimalTime);
 
+        $rescheduled = null;
         $this->mockEventScheduler
             ->expects($this->once())
             ->method('reschedule')
-            ->with(
-                $this->isInstanceOf(LeadEventLog::class),
-                $this->equalTo($optimalTime)
-            );
+            ->willReturnCallback(function ($log, \DateTimeInterface $date) use (&$rescheduled): void {
+                $rescheduled = $date;
+            });
 
-        // directBatchHandler NÃO deve ser chamado (contato foi agendado)
         $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
-        $this->mockBus->expects($this->never())->method('dispatch');
 
         $contact = $this->makeContact('+5511999999999', 1);
         $event   = $this->buildPendingEvent(
@@ -457,87 +461,34 @@ class CampaignSubscriberOptimalTimeTest extends TestCase
             null,
         );
 
-        // null://null = modo inline
         $this->makeSubscriber('null://null')->onCampaignTriggerAction($event);
-    }
 
-    // -------------------------------------------------------------------------
-    // Regressão: Queue sem optimal time → comportamento original (só AmqpStamp)
-    // -------------------------------------------------------------------------
-
-    public function testQueueWithoutOptimalTimeDispatchesNormally(): void
-    {
-        $this->mockIntegrationsHelper->method('getIntegration')->willReturn($this->makeIntegration());
-        $this->mockNumberModel->method('getEntity')->willReturn($this->makeWhatsAppNumber());
-
-        $this->mockPeakInteractionTimer->expects($this->never())->method('getOptimalTimeAndDay');
-        $this->mockEventScheduler->expects($this->never())->method('reschedule');
-
-        $capturedStamps = [];
-        $this->mockBus
-            ->expects($this->once())
-            ->method('dispatch')
-            ->willReturnCallback(function ($msg, array $stamps) use (&$capturedStamps): Envelope {
-                $capturedStamps = $stamps;
-
-                return new Envelope($msg);
-            });
-
-        $contact = $this->makeContact('+5511999999999', 1);
-        $event   = $this->buildPendingEvent(
-            'dialoghsm.send_whatsapp_queue',
-            [1 => $contact],
-            ['queue_override' => 'bulk', 'use_optimal_time' => false],
+        $this->assertSame(
+            $optimalTime->format('Y-m-d H:i:s'),
+            $rescheduled->format('Y-m-d H:i:s')
         );
-
-        $this->makeSubscriber()->onCampaignTriggerActionQueue($event);
-
-        $amqpStamps = array_filter($capturedStamps, fn ($s) => $s instanceof AmqpStamp);
-        $this->assertCount(1, $amqpStamps, 'Sem optimal time: apenas AmqpStamp');
     }
 
-    // -------------------------------------------------------------------------
-    // Regressão: Redis sem optimal time → SendWhatsAppDirectBatchMessage (batch)
-    // -------------------------------------------------------------------------
+    // =========================================================================
+    // Cenário 9: restrict_business_hours=true → resolve() chamado com flag=true
+    // e horário retornado (já ajustado pelo resolver) é passado ao reschedule
+    // =========================================================================
 
-    public function testRedisWithoutOptimalTimeDispatchesBatchMessage(): void
+    public function testRestrictBusinessHoursTruePassesFlagToResolver(): void
     {
         $this->mockIntegrationsHelper->method('getIntegration')->willReturn($this->makeIntegration());
         $this->mockNumberModel->method('getEntity')->willReturn($this->makeWhatsAppNumber());
 
-        $this->mockPeakInteractionTimer->expects($this->never())->method('getOptimalTimeAndDay');
-        $this->mockEventScheduler->expects($this->never())->method('reschedule');
-
-        $this->mockBus
+        // O resolver já retorna um horário ajustado (segunda às 8h)
+        $mondayAt8 = new \DateTime('next Monday 08:00:00');
+        $this->mockOptimalTimeResolver
             ->expects($this->once())
-            ->method('dispatch')
-            ->with($this->isInstanceOf(SendWhatsAppDirectBatchMessage::class))
-            ->willReturn(new Envelope(new \stdClass()));
-
-        $contact = $this->makeContact('+5511999999999', 1);
-        $event   = $this->buildPendingEvent(
-            'dialoghsm.send_whatsapp',
-            [1 => $contact],
-            ['use_optimal_time' => false],
-        );
-
-        $this->makeSubscriber('redis://localhost:6379')->onCampaignTriggerAction($event);
-    }
-
-    // -------------------------------------------------------------------------
-    // restrict_business_hours: horário comercial seg–sex 8h–18h
-    // -------------------------------------------------------------------------
-
-    public function testRestrictBusinessHoursAdjustsWeekendToMonday(): void
-    {
-        $this->mockIntegrationsHelper->method('getIntegration')->willReturn($this->makeIntegration());
-        $this->mockNumberModel->method('getEntity')->willReturn($this->makeWhatsAppNumber());
-
-        // PeakInteractionTimer retorna sábado às 10h → deve virar segunda às 8h
-        $saturday = new \DateTime('next Saturday 10:00:00');
-        $this->mockPeakInteractionTimer
-            ->method('getOptimalTimeAndDay')
-            ->willReturn($saturday);
+            ->method('resolve')
+            ->with(
+                $this->isInstanceOf(Lead::class),
+                true  // ← flag restrict_business_hours deve ser true
+            )
+            ->willReturn($mondayAt8);
 
         $rescheduled = null;
         $this->mockEventScheduler
@@ -556,124 +507,32 @@ class CampaignSubscriberOptimalTimeTest extends TestCase
 
         $this->makeSubscriber()->onCampaignTriggerAction($event);
 
-        $this->assertNotNull($rescheduled);
-        $this->assertSame('8', $rescheduled->format('G'), 'Deve ser agendado para as 8h');
-        $this->assertContains(
-            (int) $rescheduled->format('N'),
-            [1, 2, 3, 4, 5],
-            'Deve cair em dia útil (seg–sex)'
+        $this->assertSame(
+            $mondayAt8->format('Y-m-d H:i:s'),
+            $rescheduled->format('Y-m-d H:i:s'),
+            'O horário agendado deve ser o que o resolver retornou (segunda 8h)'
         );
+        $this->assertSame('8', $rescheduled->format('G'),  'Deve ser às 8h');
+        $this->assertSame('1', $rescheduled->format('N'),  'Deve ser segunda (ISO 1)');
     }
 
-    public function testRestrictBusinessHoursAdjustsAfterHoursToNextDay(): void
+    // =========================================================================
+    // Cenário 10: restrict_business_hours=false → resolve() chamado com flag=false
+    // =========================================================================
+
+    public function testRestrictBusinessHoursFalsePassesFlagToResolver(): void
     {
         $this->mockIntegrationsHelper->method('getIntegration')->willReturn($this->makeIntegration());
         $this->mockNumberModel->method('getEntity')->willReturn($this->makeWhatsAppNumber());
 
-        // PeakInteractionTimer retorna terça às 21h → deve virar quarta às 8h
-        $tuesdayNight = new \DateTime('next Tuesday 21:00:00');
-        $this->mockPeakInteractionTimer
-            ->method('getOptimalTimeAndDay')
-            ->willReturn($tuesdayNight);
-
-        $rescheduled = null;
-        $this->mockEventScheduler
-            ->expects($this->once())
-            ->method('reschedule')
-            ->willReturnCallback(function ($log, \DateTimeInterface $date) use (&$rescheduled): void {
-                $rescheduled = $date;
-            });
-
-        $contact = $this->makeContact('+5511999999999', 1);
-        $event   = $this->buildPendingEvent(
-            'dialoghsm.send_whatsapp',
-            [1 => $contact],
-            ['use_optimal_time' => true, 'restrict_business_hours' => true],
-        );
-
-        $this->makeSubscriber()->onCampaignTriggerAction($event);
-
-        $this->assertNotNull($rescheduled);
-        $this->assertSame('8', $rescheduled->format('G'), 'Deve ser agendado para as 8h');
-        $dayAfterTuesday = (clone $tuesdayNight)->modify('+1 day')->format('N');
-        $this->assertSame($dayAfterTuesday, $rescheduled->format('N'), 'Deve ser o dia seguinte');
-    }
-
-    public function testRestrictBusinessHoursAdjutsBeforeHoursToSameDay(): void
-    {
-        $this->mockIntegrationsHelper->method('getIntegration')->willReturn($this->makeIntegration());
-        $this->mockNumberModel->method('getEntity')->willReturn($this->makeWhatsAppNumber());
-
-        // PeakInteractionTimer retorna quarta às 6h → deve virar quarta às 8h
-        $wednesdayEarly = new \DateTime('next Wednesday 06:00:00');
-        $this->mockPeakInteractionTimer
-            ->method('getOptimalTimeAndDay')
-            ->willReturn($wednesdayEarly);
-
-        $rescheduled = null;
-        $this->mockEventScheduler
-            ->expects($this->once())
-            ->method('reschedule')
-            ->willReturnCallback(function ($log, \DateTimeInterface $date) use (&$rescheduled): void {
-                $rescheduled = $date;
-            });
-
-        $contact = $this->makeContact('+5511999999999', 1);
-        $event   = $this->buildPendingEvent(
-            'dialoghsm.send_whatsapp',
-            [1 => $contact],
-            ['use_optimal_time' => true, 'restrict_business_hours' => true],
-        );
-
-        $this->makeSubscriber()->onCampaignTriggerAction($event);
-
-        $this->assertNotNull($rescheduled);
-        $this->assertSame('8', $rescheduled->format('G'), 'Deve ser ajustado para 8h no mesmo dia');
-        $this->assertSame($wednesdayEarly->format('N'), $rescheduled->format('N'), 'Deve ser o mesmo dia');
-    }
-
-    public function testRestrictBusinessHoursDoesNotChangeTimeAlreadyInWindow(): void
-    {
-        $this->mockIntegrationsHelper->method('getIntegration')->willReturn($this->makeIntegration());
-        $this->mockNumberModel->method('getEntity')->willReturn($this->makeWhatsAppNumber());
-
-        // PeakInteractionTimer retorna segunda às 10h → dentro do horário comercial, não deve mudar o dia/hora
-        $mondayMorning = new \DateTime('next Monday 10:00:00');
-        $this->mockPeakInteractionTimer
-            ->method('getOptimalTimeAndDay')
-            ->willReturn($mondayMorning);
-
-        $rescheduled = null;
-        $this->mockEventScheduler
-            ->expects($this->once())
-            ->method('reschedule')
-            ->willReturnCallback(function ($log, \DateTimeInterface $date) use (&$rescheduled): void {
-                $rescheduled = $date;
-            });
-
-        $contact = $this->makeContact('+5511999999999', 1);
-        $event   = $this->buildPendingEvent(
-            'dialoghsm.send_whatsapp',
-            [1 => $contact],
-            ['use_optimal_time' => true, 'restrict_business_hours' => true],
-        );
-
-        $this->makeSubscriber()->onCampaignTriggerAction($event);
-
-        $this->assertNotNull($rescheduled);
-        $this->assertSame($mondayMorning->format('N'), $rescheduled->format('N'), 'Dia não deve mudar');
-        $this->assertSame('10', $rescheduled->format('G'), 'Hora não deve mudar');
-    }
-
-    public function testWithoutRestrictBusinessHoursWeekendTimeIsKeptAsIs(): void
-    {
-        $this->mockIntegrationsHelper->method('getIntegration')->willReturn($this->makeIntegration());
-        $this->mockNumberModel->method('getEntity')->willReturn($this->makeWhatsAppNumber());
-
-        // Sem restrict_business_hours → sábado às 21h é mantido como veio do PeakInteractionTimer
         $saturdayNight = new \DateTime('next Saturday 21:00:00');
-        $this->mockPeakInteractionTimer
-            ->method('getOptimalTimeAndDay')
+        $this->mockOptimalTimeResolver
+            ->expects($this->once())
+            ->method('resolve')
+            ->with(
+                $this->isInstanceOf(Lead::class),
+                false  // ← flag deve ser false
+            )
             ->willReturn($saturdayNight);
 
         $rescheduled = null;
@@ -692,54 +551,16 @@ class CampaignSubscriberOptimalTimeTest extends TestCase
 
         $this->makeSubscriber()->onCampaignTriggerAction($event);
 
-        $this->assertNotNull($rescheduled);
-        $this->assertSame($saturdayNight->format('Y-m-d H'), $rescheduled->format('Y-m-d H'), 'Sem restrict: horário deve ser mantido');
-    }
-
-    // -------------------------------------------------------------------------
-    // Regressão: existingLog presente + optimal time → resolveFromWebhookLog, sem reschedule
-    // -------------------------------------------------------------------------
-
-    public function testExistingMessageLogWithOptimalTimeSkipsReschedule(): void
-    {
-        $this->mockIntegrationsHelper->method('getIntegration')->willReturn($this->makeIntegration());
-        $this->mockNumberModel->method('getEntity')->willReturn($this->makeWhatsAppNumber());
-
-        // Simula que já existe um MessageLog (mensagem já enviada, aguardando webhook)
-        $existingLog = $this->createMock(\MauticPlugin\DialogHSMBundle\Entity\MessageLog::class);
-        $existingLog->method('getStatus')->willReturn(\MauticPlugin\DialogHSMBundle\Entity\MessageLog::STATUS_PENDING_WEBHOOK);
-        $existingLog->method('getDateSent')->willReturn(new \DateTime());
-
-        // Reassigna o mock do repo para que findByCampaignEventAndLead retorne o log existente.
-        // Necessário porque o setUp() já configurou o mock compartilhado com willReturn(null)
-        // e PHPUnit não permite sobrescrever stubs no mesmo objeto.
-        $freshRepo = $this->createMock(MessageLogRepository::class);
-        $freshRepo->method('findByCampaignEventAndLead')->willReturn($existingLog);
-        $this->mockMessageLogRepository = $freshRepo;
-
-        // PeakInteractionTimer e reschedule NUNCA devem ser chamados
-        $this->mockPeakInteractionTimer->expects($this->never())->method('getOptimalTimeAndDay');
-        $this->mockEventScheduler->expects($this->never())->method('reschedule');
-
-        // directBatchHandler NÃO deve ser chamado (contato está aguardando webhook)
-        $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
-
-        $contact = $this->makeContact('+5511999999999', 1);
-        $event   = $this->buildPendingEvent(
-            'dialoghsm.send_whatsapp',
-            [1 => $contact],
-            ['use_optimal_time' => true],
-            null,
+        $this->assertSame(
+            $saturdayNight->format('Y-m-d H:i:s'),
+            $rescheduled->format('Y-m-d H:i:s'),
+            'Sem restrict: horário deve ser mantido exatamente como o resolver retornou'
         );
-
-        $this->makeSubscriber()->onCampaignTriggerAction($event);
     }
 
-    // -------------------------------------------------------------------------
-    // Fix: pass() deve ser chamado ANTES de reschedule() no path de agendamento
-    // Garante que PendingEvent não lance LogNotProcessedException e que
-    // is_scheduled fique true (setTriggerDate() sobrescreve setIsScheduled(false))
-    // -------------------------------------------------------------------------
+    // =========================================================================
+    // Fix: pass() deve ser chamado ANTES de reschedule()
+    // =========================================================================
 
     public function testOptimalTimeRescheduleCallsPassBeforeReschedule(): void
     {
@@ -747,13 +568,10 @@ class CampaignSubscriberOptimalTimeTest extends TestCase
         $this->mockNumberModel->method('getEntity')->willReturn($this->makeWhatsAppNumber());
 
         $optimalTime = new \DateTime('+1 hour');
-        $this->mockPeakInteractionTimer
-            ->method('getOptimalTimeAndDay')
-            ->willReturn($optimalTime);
+        $this->mockOptimalTimeResolver->method('resolve')->willReturn($optimalTime);
 
         $callOrder = [];
 
-        // pass() deve ser chamado
         $mockLog = $this->createMock(LeadEventLog::class);
         $mockLog->method('getTriggerDate')->willReturn(null);
 
@@ -800,55 +618,98 @@ class CampaignSubscriberOptimalTimeTest extends TestCase
         );
     }
 
-    // -------------------------------------------------------------------------
-    // Fix: pass() deve ser chamado no path de sucesso de envio
-    // Garante que o contato avança na campanha e que is_scheduled vira false
-    // -------------------------------------------------------------------------
+    // =========================================================================
+    // Regressão: existingLog presente → resolveFromWebhookLog, resolver NÃO chamado
+    // =========================================================================
 
-    public function testSuccessfulSendCallsPass(): void
+    public function testExistingMessageLogWithOptimalTimeSkipsResolver(): void
     {
         $this->mockIntegrationsHelper->method('getIntegration')->willReturn($this->makeIntegration());
         $this->mockNumberModel->method('getEntity')->willReturn($this->makeWhatsAppNumber());
 
-        // Sem optimal time → vai direto para o envio
-        $this->mockPeakInteractionTimer->expects($this->never())->method('getOptimalTimeAndDay');
-        $this->mockEventScheduler->expects($this->never())->method('reschedule');
+        $existingLog = $this->createMock(MessageLog::class);
+        $existingLog->method('getStatus')->willReturn(MessageLog::STATUS_PENDING_WEBHOOK);
+        $existingLog->method('getDateSent')->willReturn(new \DateTime());
 
-        $this->mockDirectBatchHandler
-            ->expects($this->once())
-            ->method('__invoke');
+        $freshRepo = $this->createMock(MessageLogRepository::class);
+        $freshRepo->method('findByCampaignEventAndLead')->willReturn($existingLog);
+        $this->mockMessageLogRepository = $freshRepo;
+
+        $this->mockOptimalTimeResolver->expects($this->never())->method('resolve');
+        $this->mockEventScheduler->expects($this->never())->method('reschedule');
+        $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
 
         $contact = $this->makeContact('+5511999999999', 1);
-
-        // PendingEvent com expectativa de pass()
-        $mockLog = $this->createMock(LeadEventLog::class);
-        $mockLog->method('getTriggerDate')->willReturn(null);
-
-        $mockPending = $this->createMock(ArrayCollection::class);
-        $mockPending->method('get')->willReturn($mockLog);
-
-        $mockCampaign = $this->createMock(Campaign::class);
-        $mockCampaign->method('getId')->willReturn(10);
-        $mockCampaignEvent = $this->createMock(CampaignEvent::class);
-        $mockCampaignEvent->method('getProperties')->willReturn([
-            'whatsapp_number'  => 1,
-            'payload_data'     => ['list' => [['label' => 'content', 'value' => 'tpl']]],
-            'send_delay'       => 0,
-            'batch_limit'      => 0,
-            'use_optimal_time' => false,
-        ]);
-        $mockCampaignEvent->method('getId')->willReturn(20);
-        $mockCampaignEvent->method('getCampaign')->willReturn($mockCampaign);
-
-        $event = $this->createMock(PendingEvent::class);
-        $event->method('checkContext')->with('dialoghsm.send_whatsapp')->willReturn(true);
-        $event->method('getEvent')->willReturn($mockCampaignEvent);
-        $event->method('getContacts')->willReturn([1 => $contact]);
-        $event->method('getPending')->willReturn($mockPending);
-
-        // pass() não é chamado na primeira execução — contato aguarda webhook (is_scheduled=1)
-        $event->expects($this->never())->method('pass');
+        $event   = $this->buildPendingEvent(
+            'dialoghsm.send_whatsapp',
+            [1 => $contact],
+            ['use_optimal_time' => true],
+            null,
+        );
 
         $this->makeSubscriber()->onCampaignTriggerAction($event);
+    }
+
+    // =========================================================================
+    // Regressão: Queue sem optimal time → dispatch normal (AmqpStamp)
+    // =========================================================================
+
+    public function testQueueWithoutOptimalTimeDispatchesNormally(): void
+    {
+        $this->mockIntegrationsHelper->method('getIntegration')->willReturn($this->makeIntegration());
+        $this->mockNumberModel->method('getEntity')->willReturn($this->makeWhatsAppNumber());
+
+        $this->mockOptimalTimeResolver->expects($this->never())->method('resolve');
+        $this->mockEventScheduler->expects($this->never())->method('reschedule');
+
+        $capturedStamps = [];
+        $this->mockBus
+            ->expects($this->once())
+            ->method('dispatch')
+            ->willReturnCallback(function ($msg, array $stamps) use (&$capturedStamps): Envelope {
+                $capturedStamps = $stamps;
+
+                return new Envelope($msg);
+            });
+
+        $contact = $this->makeContact('+5511999999999', 1);
+        $event   = $this->buildPendingEvent(
+            'dialoghsm.send_whatsapp_queue',
+            [1 => $contact],
+            ['queue_override' => 'bulk', 'use_optimal_time' => false],
+        );
+
+        $this->makeSubscriber()->onCampaignTriggerActionQueue($event);
+
+        $amqpStamps = array_filter($capturedStamps, fn ($s) => $s instanceof AmqpStamp);
+        $this->assertCount(1, $amqpStamps, 'Sem optimal time: apenas AmqpStamp');
+    }
+
+    // =========================================================================
+    // Regressão: Redis sem optimal time → SendWhatsAppDirectBatchMessage
+    // =========================================================================
+
+    public function testRedisWithoutOptimalTimeDispatchesBatchMessage(): void
+    {
+        $this->mockIntegrationsHelper->method('getIntegration')->willReturn($this->makeIntegration());
+        $this->mockNumberModel->method('getEntity')->willReturn($this->makeWhatsAppNumber());
+
+        $this->mockOptimalTimeResolver->expects($this->never())->method('resolve');
+        $this->mockEventScheduler->expects($this->never())->method('reschedule');
+
+        $this->mockBus
+            ->expects($this->once())
+            ->method('dispatch')
+            ->with($this->isInstanceOf(SendWhatsAppDirectBatchMessage::class))
+            ->willReturn(new Envelope(new \stdClass()));
+
+        $contact = $this->makeContact('+5511999999999', 1);
+        $event   = $this->buildPendingEvent(
+            'dialoghsm.send_whatsapp',
+            [1 => $contact],
+            ['use_optimal_time' => false],
+        );
+
+        $this->makeSubscriber('redis://localhost:6379')->onCampaignTriggerAction($event);
     }
 }
