@@ -10,13 +10,15 @@ use Mautic\CoreBundle\Doctrine\Mapping\ClassMetadataBuilder;
 
 class MessageLog
 {
-    public const STATUS_QUEUED           = 'queued';
-    public const STATUS_PENDING_WEBHOOK  = 'pending_webhook';
-    public const STATUS_SENT             = 'sent';
-    public const STATUS_DELIVERED        = 'delivered';
-    public const STATUS_READ             = 'read';
-    public const STATUS_FAILED           = 'failed';
-    public const STATUS_DLQ              = 'dlq';
+    public const STATUS_QUEUED                   = 'queued';
+    public const STATUS_PENDING_WEBHOOK          = 'pending_webhook';
+    public const STATUS_SENT                     = 'sent';
+    public const STATUS_DELIVERED                = 'delivered';
+    public const STATUS_READ                     = 'read';
+    public const STATUS_FAILED                   = 'failed';
+    public const STATUS_DLQ                      = 'dlq';
+    // Marcador persistente: horário ideal agendado, aguardando re-trigger do cron
+    public const STATUS_OPTIMAL_TIME_SCHEDULED   = 'ot_scheduled';
 
     private ?int $id = null;
     private ?string $wamid = null;

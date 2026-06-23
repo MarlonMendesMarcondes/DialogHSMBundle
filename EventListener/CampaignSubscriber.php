@@ -254,38 +254,39 @@ class CampaignSubscriber implements EventSubscriberInterface
                 (int) $contact->getId()
             );
 
-            if ($existingLog !== null) {
+            if ($existingLog !== null && $existingLog->getStatus() !== MessageLog::STATUS_OPTIMAL_TIME_SCHEDULED) {
                 $this->resolveFromWebhookLog($event, $logId, $existingLog);
                 continue;
             }
 
-            // Melhor horário: primeira passagem sem MessageLog — agenda para o horário ideal
-            if ($useOptimalTime) {
-                $log = $event->getPending()->get($logId);
-                if ($log->getTriggerDate() === null) {
-                    $optimalTime = $this->optimalTimeResolver->resolve($contact, $restrictBusinessHours);
-                    if ($optimalTime > new \DateTime()) {
-                        // pass() deve ser chamado ANTES de reschedule():
-                        // reschedule() chama setTriggerDate() que invoca setIsScheduled(true),
-                        // sobrescrevendo o setIsScheduled(false) do pass(). A ordem garante que
-                        // o PendingEvent não lance LogNotProcessedException E que is_scheduled
-                        // fique corretamente como true para o próximo cron.
-                        $event->pass($log);
-                        $this->eventScheduler->reschedule($log, $optimalTime);
-                        continue; // Será re-executado no cron ao chegar no horário ideal
-                    }
-                    // Horário já passou ou é agora → envia imediatamente
-                }
-                // Segunda passagem (trigger_date definido) → cai no envio abaixo
-            }
-
-            // Primeira/segunda execução: normaliza telefone e constrói payload
-            $phone = $this->normalizePhone($contact->getLeadPhoneNumber() ?? '');
-
-            // Payload construído aqui (antes da validação) para ter templateName disponível nos logs de erro.
+            // Payload e telefone construídos cedo: necessários tanto para o log de agendamento quanto para o envio.
+            $phone         = $this->normalizePhone($contact->getLeadPhoneNumber() ?? '');
             $profileFields = $contact->getProfileFields();
             $payloadData   = $this->buildPayloadFromConfig($config, $profileFields);
             $templateName  = $payloadData['content'] ?? $payloadData['template'] ?? 'unknown';
+
+            // Primeira passagem (sem log): agenda para o horário ideal e persiste marcador.
+            // Re-entrada com STATUS_OPTIMAL_TIME_SCHEDULED: pula agendamento, cai direto no envio.
+            if ($existingLog === null && $useOptimalTime) {
+                $optimalTime = $this->optimalTimeResolver->resolve($contact, $restrictBusinessHours);
+                if ($optimalTime > new \DateTime()) {
+                    $log = $event->getPending()->get($logId);
+                    // pass() antes de reschedule(): reschedule() invoca setIsScheduled(true),
+                    // que sobrescreveria o setIsScheduled(false) do pass() se a ordem fosse invertida.
+                    $event->pass($log);
+                    $this->eventScheduler->reschedule($log, $optimalTime);
+                    $this->persistOptimalTimeScheduledLog(
+                        $contact->getId(),
+                        $phone,
+                        $templateName,
+                        $whatsAppNumber->getName() ?? '',
+                        $campaignId,
+                        $campaignEventId,
+                    );
+                    continue;
+                }
+                // Horário já passou → envia imediatamente
+            }
 
             if (!$this->isValidE164($phone)) {
                 $this->persistFailureLog(
@@ -409,6 +410,41 @@ class CampaignSubscriber implements EventSubscriberInterface
         }
 
         $event->failAll($failMessage);
+    }
+
+    /**
+     * Persiste um MessageLog com STATUS_OPTIMAL_TIME_SCHEDULED como marcador persistente de agendamento.
+     * Impede que re-entradas do cron recalculem e empurrem o horário para o próximo dia (slip-forward).
+     * Na re-entrada, o check de existingLog detecta este status e cai direto no envio.
+     */
+    private function persistOptimalTimeScheduledLog(
+        int $leadId,
+        string $phone,
+        string $templateName,
+        string $senderName,
+        ?int $campaignId,
+        ?int $campaignEventId,
+    ): void {
+        try {
+            $log = new MessageLog();
+            $log->setLeadId($leadId);
+            $log->setCampaignId($campaignId);
+            $log->setCampaignEventId($campaignEventId);
+            $log->setSenderName($senderName ?: null);
+            $log->setTemplateName($templateName);
+            $log->setPhoneNumber($phone);
+            $log->setWamid(null);
+            $log->setStatus(MessageLog::STATUS_OPTIMAL_TIME_SCHEDULED);
+            $log->setDateSent(null);
+
+            $this->entityManager->persist($log);
+            $this->entityManager->flush();
+        } catch (\Throwable $e) {
+            $this->logger->warning('DialogHSM: Falha ao registrar log ot_scheduled', [
+                'lead_id' => $leadId,
+                'error'   => $e->getMessage(),
+            ]);
+        }
     }
 
     /**

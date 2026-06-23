@@ -34,7 +34,7 @@ use Symfony\Component\Messenger\MessageBusInterface;
  * Cenários cobertos:
  *  1. Primeira execução + optimal time + futuro  → reschedule(), sem envio
  *  2. Primeira execução + optimal time + passado → envia imediatamente, sem reschedule()
- *  3. Segunda execução (trigger_date definido)   → envia, reschedule() NÃO chamado novamente
+ *  3. Re-entrada (log STATUS_OPTIMAL_TIME_SCHEDULED) → envia, reschedule() NÃO chamado novamente
  *  4. Sem optimal time                           → comportamento normal, reschedule() nunca chamado
  *  5. Redis + optimal time                       → reschedule(), items vazio, batch NÃO despachado
  *  6. Queue + optimal time                       → reschedule(), bus NÃO chamado
@@ -249,14 +249,24 @@ class CampaignSubscriberOptimalTimeTest extends TestCase
     }
 
     // =========================================================================
-    // Cenário 3: Segunda execução (trigger_date definido) → envia, sem reschedule
+    // Cenário 3: Re-entrada com STATUS_OPTIMAL_TIME_SCHEDULED → envia, sem reschedule
+    // (corrige slip-forward: o marcador persistente impede recálculo do horário ideal)
     // =========================================================================
 
-    public function testSecondExecutionWithTriggerDateSendsWithoutReschedule(): void
+    public function testReentryWithOptimalTimeScheduledLogSendsWithoutReschedule(): void
     {
         $this->mockIntegrationsHelper->method('getIntegration')->willReturn($this->makeIntegration());
         $this->mockNumberModel->method('getEntity')->willReturn($this->makeWhatsAppNumber());
 
+        // Simula re-entrada: log com STATUS_OPTIMAL_TIME_SCHEDULED existe no banco
+        $scheduledMarker = $this->createMock(MessageLog::class);
+        $scheduledMarker->method('getStatus')->willReturn(MessageLog::STATUS_OPTIMAL_TIME_SCHEDULED);
+
+        $freshRepo = $this->createMock(MessageLogRepository::class);
+        $freshRepo->method('findByCampaignEventAndLead')->willReturn($scheduledMarker);
+        $this->mockMessageLogRepository = $freshRepo;
+
+        // Resolver e reschedule NÃO devem ser chamados — marcador já indica que foi agendado
         $this->mockOptimalTimeResolver->expects($this->never())->method('resolve');
         $this->mockEventScheduler->expects($this->never())->method('reschedule');
 
@@ -270,7 +280,6 @@ class CampaignSubscriberOptimalTimeTest extends TestCase
             'dialoghsm.send_whatsapp',
             [1 => $contact],
             ['use_optimal_time' => true],
-            new \DateTime('-1 minute'), // trigger_date definido → segunda execução
         );
 
         $this->makeSubscriber()->onCampaignTriggerAction($event);
