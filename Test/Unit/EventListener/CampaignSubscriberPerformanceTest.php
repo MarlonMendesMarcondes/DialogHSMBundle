@@ -12,6 +12,7 @@ use Mautic\LeadBundle\Entity\Lead;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
 use MauticPlugin\DialogHSMBundle\EventListener\CampaignSubscriber;
+use MauticPlugin\DialogHSMBundle\Service\LeadEventLogWriter;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppDirectBatchMessage;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppDirectBatchMessageHandler;
@@ -75,6 +76,7 @@ class CampaignSubscriberPerformanceTest extends TestCase
             $this->mockEntityManager,
             $this->mockDirectBatchHandler,
             $repo,
+            $this->createMock(LeadEventLogWriter::class),
             $directTransportDsn,
         );
     }

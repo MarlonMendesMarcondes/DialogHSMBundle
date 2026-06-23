@@ -10,6 +10,7 @@ use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumberRepository;
 use MauticPlugin\DialogHSMBundle\Event\WebhookMessageFailedEvent;
+use MauticPlugin\DialogHSMBundle\Service\LeadEventLogWriter;
 use MauticPlugin\DialogHSMBundle\Service\WebhookProcessor;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
@@ -23,6 +24,7 @@ class WebhookProcessorTest extends TestCase
     private EntityManagerInterface&MockObject $em;
     private EventDispatcherInterface&MockObject $dispatcher;
     private LeadModel&MockObject $leadModel;
+    private LeadEventLogWriter&MockObject $eventLogWriter;
     private WebhookProcessor $processor;
 
     protected function setUp(): void
@@ -32,16 +34,18 @@ class WebhookProcessorTest extends TestCase
             ->onlyMethods(['findByPhoneNumber'])
             ->getMock();
 
-        $this->logRepository = $this->createMock(MessageLogRepository::class);
-        $this->em            = $this->createMock(EntityManagerInterface::class);
-        $this->dispatcher    = $this->createMock(EventDispatcherInterface::class);
-        $this->leadModel     = $this->createMock(LeadModel::class);
-        $this->processor     = new WebhookProcessor(
+        $this->logRepository  = $this->createMock(MessageLogRepository::class);
+        $this->em             = $this->createMock(EntityManagerInterface::class);
+        $this->dispatcher     = $this->createMock(EventDispatcherInterface::class);
+        $this->leadModel      = $this->createMock(LeadModel::class);
+        $this->eventLogWriter = $this->createMock(LeadEventLogWriter::class);
+        $this->processor      = new WebhookProcessor(
             $this->numberRepository,
             $this->logRepository,
             $this->em,
             $this->dispatcher,
             $this->leadModel,
+            $this->eventLogWriter,
         );
     }
 
@@ -907,5 +911,106 @@ class WebhookProcessorTest extends TestCase
         $this->assertSame('sent', $capturedFields['dialoghsm_status']);
         $this->assertArrayNotHasKey('dialoghsm_meta_error_code', $capturedFields,
             'Status sent não deve alterar o campo de código de erro');
+    }
+
+    // =========================================================================
+    // LeadEventLogWriter — integração
+    // =========================================================================
+
+    public function testValidTransitionCallsEventLogWriter(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_PENDING_WEBHOOK);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+        $this->em->method('flush');
+
+        $this->eventLogWriter->expects($this->once())
+            ->method('write')
+            ->with($log, MessageLog::STATUS_SENT, $this->isInstanceOf(\DateTimeInterface::class));
+
+        $this->processor->process('+5511999999999', $this->makePayload([
+            $this->makeStatusEntry('wamid.abc', 'sent'),
+        ]));
+    }
+
+    public function testDeliveredPassesDateDeliveredToWriter(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_SENT);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+        $this->em->method('flush');
+
+        $capturedDate = null;
+        $this->eventLogWriter->method('write')
+            ->willReturnCallback(function (MessageLog $l, string $action, \DateTimeInterface $date) use (&$capturedDate): void {
+                if ($action === MessageLog::STATUS_DELIVERED) {
+                    $capturedDate = $date;
+                }
+            });
+
+        $this->processor->process('+5511999999999', $this->makePayload([
+            $this->makeStatusEntry('wamid.abc', 'delivered'),
+        ]));
+
+        $this->assertNotNull($capturedDate);
+        $this->assertSame($log->getDateDelivered(), $capturedDate);
+    }
+
+    public function testReadPassesDateReadToWriter(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_DELIVERED);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+        $this->em->method('flush');
+
+        $capturedDate = null;
+        $this->eventLogWriter->method('write')
+            ->willReturnCallback(function (MessageLog $l, string $action, \DateTimeInterface $date) use (&$capturedDate): void {
+                if ($action === MessageLog::STATUS_READ) {
+                    $capturedDate = $date;
+                }
+            });
+
+        $this->processor->process('+5511999999999', $this->makePayload([
+            $this->makeStatusEntry('wamid.abc', 'read'),
+        ]));
+
+        $this->assertNotNull($capturedDate);
+        $this->assertSame($log->getDateRead(), $capturedDate);
+    }
+
+    public function testInvalidTransitionDoesNotCallWriter(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_READ);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+
+        $this->eventLogWriter->expects($this->never())->method('write');
+
+        $this->processor->process('+5511999999999', $this->makePayload([
+            $this->makeStatusEntry('wamid.abc', 'delivered'),
+        ]));
+    }
+
+    public function testWriterExceptionDoesNotBreakWebhookFlow(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_SENT);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+        $this->em->method('flush');
+
+        $this->eventLogWriter->method('write')->willThrowException(new \RuntimeException('DB error'));
+
+        $result = $this->processor->process('+5511999999999', $this->makePayload([
+            $this->makeStatusEntry('wamid.abc', 'delivered'),
+        ]));
+
+        $this->assertSame(200, $result);
+        $this->assertSame(MessageLog::STATUS_DELIVERED, $log->getStatus());
     }
 }

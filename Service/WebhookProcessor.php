@@ -20,6 +20,7 @@ class WebhookProcessor
         private readonly EntityManagerInterface $em,
         private readonly EventDispatcherInterface $dispatcher,
         private readonly LeadModel $leadModel,
+        private readonly LeadEventLogWriter $eventLogWriter,
     ) {}
 
     /**
@@ -88,6 +89,18 @@ class WebhookProcessor
 
         $this->em->persist($log);
         $this->em->flush();
+
+        $eventDate = match ($status) {
+            MessageLog::STATUS_DELIVERED => $log->getDateDelivered() ?? $now,
+            MessageLog::STATUS_READ      => $log->getDateRead()      ?? $now,
+            default                      => $log->getDateSent()      ?? $now,
+        };
+
+        try {
+            $this->eventLogWriter->write($log, $status, $eventDate);
+        } catch (\Throwable) {
+            // falha silenciosa — não interrompe o fluxo do webhook
+        }
 
         $this->updateLeadStatus($log, $status);
 

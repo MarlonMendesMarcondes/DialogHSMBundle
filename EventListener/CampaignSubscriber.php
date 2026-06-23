@@ -23,6 +23,7 @@ use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppDirectBatchMessageHa
 use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppMessageHandler;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Model\WhatsAppNumberModel;
+use MauticPlugin\DialogHSMBundle\Service\LeadEventLogWriter;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\Messenger\Bridge\Amqp\Transport\AmqpStamp;
@@ -41,6 +42,7 @@ class CampaignSubscriber implements EventSubscriberInterface
         private EntityManagerInterface $entityManager,
         private SendWhatsAppDirectBatchMessageHandler $directBatchHandler,
         private MessageLogRepository $messageLogRepository,
+        private LeadEventLogWriter $leadEventLogWriter,
         private string $directTransportDsn = 'null://null',
     ) {
     }
@@ -59,34 +61,37 @@ class CampaignSubscriber implements EventSubscriberInterface
         $event->addAction(
             'dialoghsm.send_whatsapp',
             [
-                'label'          => 'dialoghsm.campaign.send_whatsapp',
-                'description'    => 'dialoghsm.campaign.send_whatsapp.tooltip',
-                'batchEventName' => DialogHSMEvents::ON_CAMPAIGN_TRIGGER_ACTION,
-                'formType'       => SendWhatsAppType::class,
-                'channel'        => 'whatsapp',
+                'label'            => 'dialoghsm.campaign.send_whatsapp',
+                'description'      => 'dialoghsm.campaign.send_whatsapp.tooltip',
+                'batchEventName'   => DialogHSMEvents::ON_CAMPAIGN_TRIGGER_ACTION,
+                'formType'         => SendWhatsAppType::class,
+                'channel'          => 'whatsapp',
+                'timelineTemplate' => '@DialogHSM/Timeline/campaign_action.html.twig',
             ]
         );
 
         $event->addAction(
             'dialoghsm.send_whatsapp_queue',
             [
-                'label'          => 'dialoghsm.campaign.send_whatsapp_queue',
-                'description'    => 'dialoghsm.campaign.send_whatsapp_queue.tooltip',
-                'batchEventName' => DialogHSMEvents::ON_CAMPAIGN_TRIGGER_ACTION_QUEUE,
-                'formType'       => SendWhatsAppQueueType::class,
-                'channel'        => 'whatsapp',
+                'label'            => 'dialoghsm.campaign.send_whatsapp_queue',
+                'description'      => 'dialoghsm.campaign.send_whatsapp_queue.tooltip',
+                'batchEventName'   => DialogHSMEvents::ON_CAMPAIGN_TRIGGER_ACTION_QUEUE,
+                'formType'         => SendWhatsAppQueueType::class,
+                'channel'          => 'whatsapp',
+                'timelineTemplate' => '@DialogHSM/Timeline/campaign_action.html.twig',
             ]
         );
 
         $event->addAction(
             'dialoghsm.send_whatsapp_message',
             [
-                'label'          => 'dialoghsm.campaign.send_whatsapp_message',
-                'description'    => 'dialoghsm.campaign.send_whatsapp_message.tooltip',
-                'batchEventName' => DialogHSMEvents::ON_MARKETING_MESSAGE_SEND,
-                'formType'       => WhatsAppMessageSendType::class,
-                'channel'        => 'whatsapp',
-                'channelIdField' => 'whatsAppMessage',
+                'label'            => 'dialoghsm.campaign.send_whatsapp_message',
+                'description'      => 'dialoghsm.campaign.send_whatsapp_message.tooltip',
+                'batchEventName'   => DialogHSMEvents::ON_MARKETING_MESSAGE_SEND,
+                'formType'         => WhatsAppMessageSendType::class,
+                'channel'          => 'whatsapp',
+                'channelIdField'   => 'whatsAppMessage',
+                'timelineTemplate' => '@DialogHSM/Timeline/campaign_action.html.twig',
             ]
         );
     }
@@ -343,17 +348,22 @@ class CampaignSubscriber implements EventSubscriberInterface
 
     private function resolveFromWebhookLog(PendingEvent $event, mixed $logId, MessageLog $log): void
     {
-        $status = $log->getStatus();
+        $status      = $log->getStatus();
+        $campaignLog = $event->getPending()->get($logId);
+
+        if ($campaignLog !== null) {
+            $campaignLog->appendToMetadata(['whatsapp' => $this->buildWhatsAppMetadata($log)]);
+        }
 
         $successStatuses = [MessageLog::STATUS_SENT, MessageLog::STATUS_DELIVERED, MessageLog::STATUS_READ];
         if (in_array($status, $successStatuses, true)) {
-            $event->pass($event->getPending()->get($logId));
+            $event->pass($campaignLog);
 
             return;
         }
 
         if (MessageLog::STATUS_FAILED === $status || MessageLog::STATUS_DLQ === $status) {
-            $event->fail($event->getPending()->get($logId), 'dialoghsm.campaign.error.webhook_failed');
+            $event->fail($campaignLog, 'dialoghsm.campaign.error.webhook_failed');
 
             return;
         }
@@ -361,10 +371,26 @@ class CampaignSubscriber implements EventSubscriberInterface
         if (MessageLog::STATUS_PENDING_WEBHOOK === $status) {
             $elapsed = (new \DateTime())->getTimestamp() - ($log->getDateSent()?->getTimestamp() ?? 0);
             if ($elapsed > self::WEBHOOK_TIMEOUT_SECONDS) {
-                $event->fail($event->getPending()->get($logId), 'dialoghsm.campaign.error.webhook_timeout');
+                $event->fail($campaignLog, 'dialoghsm.campaign.error.webhook_timeout');
             }
             // Dentro do timeout: permanece is_scheduled=1, reavaliado no próximo batch
         }
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function buildWhatsAppMetadata(MessageLog $log): array
+    {
+        return array_filter([
+            'template_name' => $log->getTemplateName(),
+            'sender_name'   => $log->getSenderName(),
+            'phone_number'  => $log->getPhoneNumber(),
+            'wamid'         => $log->getWamid(),
+            'status'        => $log->getStatus(),
+            'date_sent'     => $log->getDateSent()?->format('Y-m-d H:i:s'),
+            'error_message' => $log->getErrorMessage(),
+        ], static fn ($v) => $v !== null && $v !== '');
     }
 
     /**
@@ -453,6 +479,10 @@ class CampaignSubscriber implements EventSubscriberInterface
 
             $this->entityManager->persist($log);
             $this->entityManager->flush();
+
+            try {
+                $this->leadEventLogWriter->write($log, MessageLog::STATUS_FAILED, $log->getDateSent() ?? new \DateTime());
+            } catch (\Throwable) {}
         } catch (\Throwable $e) {
             $this->logger->warning('DialogHSM: Falha ao registrar log de erro de campanha', [
                 'lead_id' => $leadId,
