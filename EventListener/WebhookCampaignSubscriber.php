@@ -28,17 +28,22 @@ class WebhookCampaignSubscriber implements EventSubscriberInterface
         $prefix = defined('MAUTIC_TABLE_PREFIX') ? MAUTIC_TABLE_PREFIX : '';
         $table  = $prefix . 'campaign_lead_event_log';
 
-        // Marca o evento como failed=1 apenas quando já foi disparado (pass() chamado
-        // previamente — fluxo de fila). Para contatos ainda em is_scheduled=1
-        // (fluxo direto aguardando webhook), o resolveFromWebhookLog no próximo
-        // batch cuida do roteamento; não tocamos a entrada para não interferir.
+        // Usa metadata.failed (padrão Mautic) — a tabela campaign_lead_event_log não
+        // tem coluna `failed`. Guarda com JSON_VALID pois registros antigos usam
+        // PHP serialize (a:0:{}), não JSON. Só atualiza entradas já disparadas.
         $this->connection->executeStatement(
-            "UPDATE `{$table}` SET failed = 1
+            "UPDATE `{$table}`
+             SET metadata = JSON_SET(
+               IF(JSON_VALID(COALESCE(metadata, '{}')), COALESCE(metadata, '{}'), '{}'),
+               '$.failed', 1,
+               '$.reason', 'dialoghsm.campaign.error.webhook_failed'
+             )
              WHERE id = (
                SELECT t.id FROM (
                  SELECT id FROM `{$table}`
                  WHERE event_id = :eventId AND lead_id = :leadId
-                   AND failed = 0 AND is_scheduled = 0 AND date_triggered IS NOT NULL
+                   AND (metadata IS NULL OR NOT JSON_VALID(metadata) OR JSON_EXTRACT(metadata, '$.failed') IS NULL)
+                   AND is_scheduled = 0 AND date_triggered IS NOT NULL
                  ORDER BY id DESC LIMIT 1
                ) AS t
              )",
