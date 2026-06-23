@@ -17,6 +17,7 @@ use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumberRepository;
 use MauticPlugin\DialogHSMBundle\EventListener\CampaignSubscriber;
+use MauticPlugin\DialogHSMBundle\Service\LeadEventLogWriter;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppDirectBatchMessage;
 use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppDirectBatchMessageHandler;
 use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppMessageHandler;
@@ -131,6 +132,7 @@ class WebhookSentFlowTest extends TestCase
             $logRepo,
             $this->createMock(OptimalTimeResolver::class),
             $this->createMock(EventScheduler::class),
+            $this->createMock(LeadEventLogWriter::class),
         );
     }
 
@@ -148,9 +150,10 @@ class WebhookSentFlowTest extends TestCase
         $em         = $this->createMock(EntityManagerInterface::class);
         $dispatcher = $this->createMock(EventDispatcherInterface::class);
 
-        $leadModel = $this->createMock(LeadModel::class);
+        $leadModel      = $this->createMock(LeadModel::class);
+        $eventLogWriter = $this->createMock(LeadEventLogWriter::class);
 
-        return new WebhookProcessor($numberRepo, $logRepo, $em, $dispatcher, $leadModel);
+        return new WebhookProcessor($numberRepo, $logRepo, $em, $dispatcher, $leadModel, $eventLogWriter);
     }
 
     private function makeWebhookPayload(string $wamid, string $status, array $errors = []): array
@@ -285,8 +288,9 @@ class WebhookSentFlowTest extends TestCase
         $dispatcher = $this->createMock(EventDispatcherInterface::class);
         $dispatcher->expects($this->once())->method('dispatch'); // evento de falha é despachado
 
-        $leadModel = $this->createMock(LeadModel::class);
-        $processor = new WebhookProcessor($numberRepo, $logRepo, $em, $dispatcher, $leadModel);
+        $leadModel      = $this->createMock(LeadModel::class);
+        $eventLogWriter = $this->createMock(LeadEventLogWriter::class);
+        $processor      = new WebhookProcessor($numberRepo, $logRepo, $em, $dispatcher, $leadModel, $eventLogWriter);
         $processor->process('+5511999999999', $this->makeWebhookPayload($wamid, 'failed', $errors));
 
         $this->assertSame(MessageLog::STATUS_FAILED, $sharedLog->getStatus(),

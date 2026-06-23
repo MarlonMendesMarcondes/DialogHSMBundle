@@ -9,6 +9,7 @@ use Mautic\IntegrationsBundle\Helper\IntegrationsHelper;
 use MauticPlugin\DialogHSMBundle\Service\OptimalTimeResolver;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\EventListener\CampaignSubscriber;
+use MauticPlugin\DialogHSMBundle\Service\LeadEventLogWriter;
 use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppDirectBatchMessageHandler;
 use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppMessageHandler;
 use MauticPlugin\DialogHSMBundle\Model\WhatsAppNumberModel;
@@ -31,6 +32,7 @@ class CampaignSubscriberTest extends TestCase
             $this->createMock(MessageLogRepository::class),
             $this->createMock(OptimalTimeResolver::class),
             $this->createMock(EventScheduler::class),
+            $this->createMock(LeadEventLogWriter::class),
         );
     }
 
@@ -76,7 +78,7 @@ class CampaignSubscriberTest extends TestCase
 
         $builderEvent = $this->createMock(CampaignBuilderEvent::class);
         $builderEvent
-            ->expects($this->exactly(2))
+            ->expects($this->exactly(3))
             ->method('addAction')
             ->willReturnCallback(function (string $key) use (&$registeredActions): void {
                 $registeredActions[] = $key;
@@ -86,7 +88,7 @@ class CampaignSubscriberTest extends TestCase
 
         $this->assertContains('dialoghsm.send_whatsapp', $registeredActions);
         $this->assertContains('dialoghsm.send_whatsapp_queue', $registeredActions);
-        $this->assertNotContains('dialoghsm.send_whatsapp_message', $registeredActions);
+        $this->assertContains('dialoghsm.send_whatsapp_message', $registeredActions);
     }
 
     public function testOnCampaignBuildPassesCorrectMetadataForDirectAction(): void

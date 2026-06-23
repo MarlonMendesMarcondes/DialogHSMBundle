@@ -1,0 +1,57 @@
+{#
+  Variables: event, lead
+  event.extra.log        = campaign_lead_event_log row
+  event.extra.log.metadata.whatsapp = WhatsApp send details (set by CampaignSubscriber)
+#}
+{% set item = event.extra.log %}
+{% set errors = false %}
+
+{% if item.metadata.errors is defined and item.metadata.errors is not empty %}
+    {% set errors = (item.metadata.errors is iterable) ? item.metadata.errors|join('<br />') : item.metadata.errors %}
+{% elseif item.metadata.failed is defined and item.metadata.failed is not empty %}
+    {% set errors = (item.metadata.reason is not empty) ? item.metadata.reason : 'mautic.campaign.event.failed.timeline' %}
+    {% set errors = errors|trans %}
+{% elseif item.fail_reason is defined and item.fail_reason is not empty %}
+    {% set errors = item.fail_reason %}
+{% endif %}
+
+<div class="mt-10">
+{% if errors %}
+    <p class="text-danger mt-0 mb-10"><i class="ri-alert-line"></i> {{ 'mautic.campaign.event.last_error'|trans }}:<br/>{{ errors|purify }}</p>
+{% endif %}
+
+{% set wa = (item.metadata.whatsapp is defined and item.metadata.whatsapp is not empty) ? item.metadata.whatsapp : {} %}
+{% if wa is not empty %}
+    {% if errors %}<hr />{% endif %}
+    <dl class="dl-horizontal" style="margin-bottom: 0;">
+        {% if wa.template_name is defined and wa.template_name %}
+            <dt>{{ 'dialoghsm.log.template'|trans }}</dt>
+            <dd><code>{{ wa.template_name }}</code></dd>
+        {% endif %}
+        {% if wa.sender_name is defined and wa.sender_name %}
+            <dt>{{ 'dialoghsm.log.sender'|trans }}</dt>
+            <dd>{{ wa.sender_name }}</dd>
+        {% endif %}
+        {% if wa.phone_number is defined and wa.phone_number %}
+            <dt>{{ 'dialoghsm.log.phone'|trans }}</dt>
+            <dd>{{ wa.phone_number }}</dd>
+        {% endif %}
+        {% if wa.status is defined and wa.status %}
+            <dt>{{ 'dialoghsm.log.status'|trans }}</dt>
+            <dd>{{ ('dialoghsm.log.status.' ~ wa.status)|trans }}</dd>
+        {% endif %}
+        {% if wa.date_sent is defined and wa.date_sent %}
+            <dt>{{ 'dialoghsm.log.date_sent'|trans }}</dt>
+            <dd>{{ wa.date_sent|date('d/m/Y H:i') }}</dd>
+        {% endif %}
+        {% if wa.wamid is defined and wa.wamid %}
+            <dt>WAMID</dt>
+            <dd><small class="text-muted">{{ wa.wamid }}</small></dd>
+        {% endif %}
+        {% if wa.error_message is defined and wa.error_message %}
+            <dt>{{ 'dialoghsm.log.error'|trans }}</dt>
+            <dd class="text-danger small">{{ wa.error_message }}</dd>
+        {% endif %}
+    </dl>
+{% endif %}
+</div>

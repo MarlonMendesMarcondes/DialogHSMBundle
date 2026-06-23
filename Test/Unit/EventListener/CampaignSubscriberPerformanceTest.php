@@ -14,6 +14,7 @@ use MauticPlugin\DialogHSMBundle\Service\OptimalTimeResolver;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
 use MauticPlugin\DialogHSMBundle\EventListener\CampaignSubscriber;
+use MauticPlugin\DialogHSMBundle\Service\LeadEventLogWriter;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppDirectBatchMessage;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppDirectBatchMessageHandler;
@@ -79,6 +80,7 @@ class CampaignSubscriberPerformanceTest extends TestCase
             $repo,
             $this->createMock(OptimalTimeResolver::class),
             $this->createMock(EventScheduler::class),
+            $this->createMock(LeadEventLogWriter::class),
             $directTransportDsn,
         );
     }

@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace MauticPlugin\DialogHSMBundle\EventListener;
 
+use Doctrine\DBAL\ArrayParameterType;
+use Doctrine\ORM\EntityManagerInterface;
+use Mautic\LeadBundle\Entity\LeadEventLog;
 use Mautic\LeadBundle\Event\LeadTimelineEvent;
 use Mautic\LeadBundle\LeadEvents;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
-use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
+use MauticPlugin\DialogHSMBundle\Service\LeadEventLogWriter;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Contracts\Translation\TranslatorInterface;
 
@@ -23,8 +26,8 @@ class LeadTimelineSubscriber implements EventSubscriberInterface
     ];
 
     public function __construct(
-        private MessageLogRepository $repository,
-        private TranslatorInterface $translator,
+        private readonly EntityManagerInterface $em,
+        private readonly TranslatorInterface $translator,
     ) {
     }
 
@@ -37,7 +40,6 @@ class LeadTimelineSubscriber implements EventSubscriberInterface
 
     public function onTimelineGenerate(LeadTimelineEvent $event): void
     {
-        // Registrar todos os tipos antes de verificar aplicabilidade
         foreach (self::STATUS_CONFIG as $status => $cfg) {
             $event->addEventType('dialoghsm.'.$status, $this->translator->trans('dialoghsm.log.status.'.$status));
         }
@@ -56,13 +58,29 @@ class LeadTimelineSubscriber implements EventSubscriberInterface
             return;
         }
 
-        // Uma única query para todos os status aplicáveis
-        $allStats = $this->repository->getAllLogsForTimeline($leadId, $event->getQueryOptions());
+        $allRows = $this->queryEventLog($leadId, $event->getQueryOptions());
+
+        // Agrupar por action e paginar
+        $options     = $event->getQueryOptions();
+        $limit       = !empty($options['limit']) ? (int) $options['limit'] : null;
+        $start       = !empty($options['start']) ? (int) $options['start'] : 0;
+        $isPaginated = !empty($options['paginated']);
+
+        $grouped = [];
+        foreach ($allRows as $row) {
+            $grouped[$row['action']][] = $row;
+        }
 
         foreach (self::STATUS_CONFIG as $status => $cfg) {
             $eventTypeKey  = 'dialoghsm.'.$status;
             $eventTypeName = $this->translator->trans('dialoghsm.log.status.'.$status);
-            $stats         = $allStats[$status] ?? ['total' => 0, 'results' => []];
+            $rows          = $grouped[$status] ?? [];
+
+            $total  = count($rows);
+            $sliced = $limit !== null ? array_slice($rows, $start, $limit) : array_slice($rows, $start);
+            $stats  = $isPaginated
+                ? ['total' => $total, 'results' => $sliced]
+                : ['total' => $total, 'results' => $rows];
 
             $event->addToCounter($eventTypeKey, $stats);
 
@@ -71,24 +89,66 @@ class LeadTimelineSubscriber implements EventSubscriberInterface
             }
 
             foreach ($stats['results'] as $row) {
-                $timestamp = match ($status) {
-                    MessageLog::STATUS_DELIVERED => $row['date_delivered'] ?? $row['date_sent'],
-                    MessageLog::STATUS_READ      => $row['date_read']      ?? $row['date_sent'],
-                    default                      => $row['date_sent'],
-                };
+                $props     = $row['properties'];
+                $timestamp = \DateTime::createFromFormat('Y-m-d H:i:s', $row['date_added']) ?: new \DateTime($row['date_added']);
 
                 $event->addEvent([
                     'event'           => $eventTypeKey,
                     'eventId'         => $eventTypeKey.$row['id'],
-                    'eventLabel'      => $row['template_name'] ? $eventTypeName.' — '.$row['template_name'] : $eventTypeName,
+                    'eventLabel'      => !empty($props['template_name']) ? $eventTypeName.' — '.$props['template_name'] : $eventTypeName,
                     'eventType'       => $eventTypeName,
                     'timestamp'       => $timestamp,
-                    'extra'           => $row,
+                    'extra'           => $props,
                     'contentTemplate' => '@DialogHSM/Timeline/whatsapp_message.html.twig',
                     'icon'            => $cfg['icon'],
                     'contactId'       => $leadId,
                 ]);
             }
         }
+    }
+
+    /**
+     * @param array<string, mixed> $options
+     *
+     * @return array<int, array{id: string, action: string, date_added: string, properties: array<string, mixed>}>
+     */
+    private function queryEventLog(int $leadId, array $options): array
+    {
+        $conn  = $this->em->getConnection();
+        $table = $this->em->getClassMetadata(LeadEventLog::class)->getTableName();
+
+        $qb = $conn->createQueryBuilder()
+            ->select('el.id, el.action, el.date_added, el.properties')
+            ->from($table, 'el')
+            ->where('el.lead_id = :leadId')
+            ->andWhere('el.bundle = :bundle')
+            ->andWhere('el.object = :object')
+            ->andWhere('el.action IN (:actions)')
+            ->setParameter('leadId', $leadId)
+            ->setParameter('bundle', LeadEventLogWriter::BUNDLE)
+            ->setParameter('object', LeadEventLogWriter::OBJECT)
+            ->setParameter('actions', array_keys(self::STATUS_CONFIG), ArrayParameterType::STRING)
+            ->orderBy('el.date_added', 'DESC');
+
+        if (!empty($options['fromDate'])) {
+            $qb->andWhere('el.date_added >= :dateFrom')
+               ->setParameter('dateFrom', $options['fromDate']->format('Y-m-d H:i:s'));
+        }
+        if (!empty($options['toDate'])) {
+            $qb->andWhere('el.date_added <= :dateTo')
+               ->setParameter('dateTo', $options['toDate']->format('Y-m-d H:i:s'));
+        }
+
+        $rows = $qb->executeQuery()->fetchAllAssociative();
+
+        // Decodificar properties JSON
+        foreach ($rows as &$row) {
+            if (is_string($row['properties'])) {
+                $row['properties'] = json_decode($row['properties'], true) ?? [];
+            }
+        }
+        unset($row);
+
+        return $rows;
     }
 }
