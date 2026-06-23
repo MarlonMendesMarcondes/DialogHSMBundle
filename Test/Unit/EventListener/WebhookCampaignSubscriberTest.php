@@ -79,7 +79,7 @@ class WebhookCampaignSubscriberTest extends TestCase
         $this->connection->expects($this->once())
             ->method('executeStatement')
             ->with(
-                $this->stringContains('failed = 1'),
+                $this->stringContains('JSON_SET'),
                 $this->equalTo(['eventId' => 10, 'leadId' => 42])
             );
 
@@ -103,7 +103,13 @@ class WebhookCampaignSubscriberTest extends TestCase
 
         $this->connection->expects($this->once())
             ->method('executeStatement')
-            ->with($this->stringContains('failed = 0'));
+            ->with(
+                $this->logicalAnd(
+                    $this->stringContains('JSON_VALID'),
+                    $this->stringContains('JSON_EXTRACT'),
+                    $this->stringContains('$.failed')
+                )
+            );
 
         $this->subscriber->onMessageFailed(new WebhookMessageFailedEvent($log));
     }
