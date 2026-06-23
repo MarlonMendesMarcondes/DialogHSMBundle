@@ -16,6 +16,13 @@ use PHPUnit\Framework\TestCase;
  * Datas de referência (2026-06-01 = segunda-feira):
  *   2026-06-01 seg | 2026-06-02 ter | 2026-06-03 qua | 2026-06-04 qui
  *   2026-06-05 sex | 2026-06-06 sáb | 2026-06-07 dom | 2026-06-08 seg
+ *
+ * Janelas de fallback por perfil (sem restrict_business_hours):
+ *   B2B     (empresa preenchida ou domínio corporativo) → 9h–11h  seg–sex
+ *   B2C     (domínio de email gratuito)                 → 17h–19h seg–sex
+ *   Unknown (sem empresa e sem email identificável)     → 10h–11h seg–sex
+ *
+ * Todos os perfis usam apenas seg–sex: HSM é intrusivo, sem envio em fim de semana.
  */
 class OptimalTimeResolverTest extends TestCase
 {
@@ -34,11 +41,17 @@ class OptimalTimeResolverTest extends TestCase
 
     // ─── helpers ───────────────────────────────────────────────────────────────
 
-    private function makeContact(int $id = 1, ?string $timezone = null): Lead&MockObject
-    {
+    private function makeContact(
+        int $id = 1,
+        ?string $timezone = null,
+        ?string $company = null,
+        ?string $email = null,
+    ): Lead&MockObject {
         $mock = $this->createMock(Lead::class);
         $mock->method('getId')->willReturn($id);
         $mock->method('getTimezone')->willReturn($timezone);
+        $mock->method('getCompany')->willReturn($company);
+        $mock->method('getEmail')->willReturn($email);
 
         return $mock;
     }
@@ -61,73 +74,168 @@ class OptimalTimeResolverTest extends TestCase
     }
 
     // =========================================================================
-    // FALLBACK: sem dados suficientes (< 5 reads WA), restrictBusinessHours = false
-    // Janela: 9h–18h, qualquer dia; slot determinístico por contactId
+    // FALLBACK B2B: empresa preenchida → 9h–11h seg–sex
+    // contactId=1: 1%120=1min → slot 9:01
     // =========================================================================
 
-    public function testFallbackOpenBeforeWindowSchedulesTodayAt9h(): void
+    public function testFallbackB2BByCompanyBeforeWindowSchedulesToday(): void
     {
-        $this->stubReads([]);   // 0 reads → fallback
+        $this->stubReads([]);
+        $contact = $this->makeContact(id: 1, company: 'Acme Corp');
 
-        $result = $this->resolve($this->makeContact(), false, '2026-06-01 07:30:00'); // seg 07:30
+        $result = $this->resolve($contact, false, '2026-06-01 07:30:00'); // seg 07:30
 
         $this->assertSame('2026-06-01', $result->format('Y-m-d'), 'Deve ser hoje');
-        $this->assertSame('9', $result->format('G'),              'Deve ser às 9h');
+        $this->assertSame('9', $result->format('G'),               'Deve ser às 9h');
     }
 
-    public function testFallbackOpenInsideWindowSchedulesTomorrowAt9h(): void
+    public function testFallbackB2BByCompanyInsideWindowSchedulesNextDay(): void
     {
         $this->stubReads([]);
+        $contact = $this->makeContact(id: 1, company: 'Acme Corp');
 
-        // Dentro da janela (11h): 9h de hoje já passou → amanhã às 9h
-        $result = $this->resolve($this->makeContact(), false, '2026-06-01 11:00:00');
+        $result = $this->resolve($contact, false, '2026-06-01 10:00:00'); // seg 10h — dentro da janela 9–11
 
-        $this->assertSame('2026-06-02', $result->format('Y-m-d'), 'Deve ser amanhã (terça)');
-        $this->assertSame('9', $result->format('G'),              'Deve ser às 9h');
-    }
-
-    public function testFallbackOpenAfterWindowSchedulesTomorrowAt9h(): void
-    {
-        $this->stubReads([]);
-
-        $result = $this->resolve($this->makeContact(), false, '2026-06-01 20:00:00'); // seg 20h
-
-        $this->assertSame('2026-06-02', $result->format('Y-m-d'), 'Deve ser amanhã (terça)');
-        $this->assertSame('9', $result->format('G'),              'Deve ser às 9h');
-    }
-
-    public function testFallbackOpenWorksOnWeekend(): void
-    {
-        $this->stubReads([]);
-
-        $result = $this->resolve($this->makeContact(), false, '2026-06-06 20:00:00'); // sáb 20h
-
-        // Sem restrict_business_hours: sábado é válido; avança só para domingo às 9h
-        $this->assertSame('2026-06-07', $result->format('Y-m-d'), 'Deve ser domingo');
+        $this->assertSame('2026-06-02', $result->format('Y-m-d'), 'Janela passou → amanhã (terça)');
         $this->assertSame('9', $result->format('G'));
     }
+
+    public function testFallbackB2BByCompanyOnWeekendSchedulesMonday(): void
+    {
+        $this->stubReads([]);
+        $contact = $this->makeContact(id: 1, company: 'Acme Corp');
+
+        $result = $this->resolve($contact, false, '2026-06-06 08:00:00'); // sáb 08h
+
+        $this->assertSame('2026-06-08', $result->format('Y-m-d'), 'Fim de semana → segunda');
+        $this->assertSame('1', $result->format('N'));
+        $this->assertSame('9', $result->format('G'));
+    }
+
+    public function testFallbackB2BByDomainCorporateEmail(): void
+    {
+        $this->stubReads([]);
+        // Sem empresa mas domínio corporativo → B2B
+        $contact = $this->makeContact(id: 1, email: 'joao@minhaempresa.com.br');
+
+        $result = $this->resolve($contact, false, '2026-06-01 07:00:00');
+
+        $this->assertSame('9', $result->format('G'), 'Domínio corporativo → janela B2B 9h');
+    }
+
+    // =========================================================================
+    // FALLBACK B2C: email gratuito → 17h–19h seg–sex
+    // contactId=1: 1%120=1min → slot 17:01
+    // =========================================================================
+
+    public function testFallbackB2CBeforeWindowSchedulesToday(): void
+    {
+        $this->stubReads([]);
+        $contact = $this->makeContact(id: 1, email: 'maria@gmail.com');
+
+        $result = $this->resolve($contact, false, '2026-06-01 16:00:00'); // seg 16h
+
+        $this->assertSame('2026-06-01', $result->format('Y-m-d'), 'Antes das 17h → hoje');
+        $this->assertSame('17', $result->format('G'),              'Deve ser às 17h');
+    }
+
+    public function testFallbackB2CInsideWindowSchedulesNextDay(): void
+    {
+        $this->stubReads([]);
+        $contact = $this->makeContact(id: 1, email: 'maria@hotmail.com');
+
+        $result = $this->resolve($contact, false, '2026-06-01 18:00:00'); // seg 18h — dentro da janela
+
+        $this->assertSame('2026-06-02', $result->format('Y-m-d'), 'Janela passou → amanhã (terça)');
+        $this->assertSame('17', $result->format('G'));
+    }
+
+    public function testFallbackB2COnWeekendSchedulesMonday(): void
+    {
+        $this->stubReads([]);
+        $contact = $this->makeContact(id: 1, email: 'pedro@uol.com.br');
+
+        $result = $this->resolve($contact, false, '2026-06-06 10:00:00'); // sáb 10h
+
+        $this->assertSame('2026-06-08', $result->format('Y-m-d'), 'Fim de semana → segunda');
+        $this->assertSame('17', $result->format('G'));
+    }
+
+    public function testFallbackB2CFreeEmailDomainsRecognized(): void
+    {
+        $this->stubReads([]);
+
+        $domains = ['gmail.com', 'hotmail.com', 'outlook.com', 'yahoo.com.br', 'bol.com.br', 'uol.com.br'];
+        foreach ($domains as $domain) {
+            $contact = $this->makeContact(id: 1, email: "user@{$domain}");
+            $result  = $this->resolve($contact, false, '2026-06-01 07:00:00');
+            $this->assertSame('17', $result->format('G'), "Domínio {$domain} deve ser B2C → 17h");
+        }
+    }
+
+    // =========================================================================
+    // FALLBACK Unknown: sem empresa, sem email identificável → 10h–11h seg–sex
+    // contactId=1: 1%60=1min → slot 10:01
+    // =========================================================================
+
+    public function testFallbackUnknownNoCompanyNoEmailBeforeWindow(): void
+    {
+        $this->stubReads([]);
+        $contact = $this->makeContact(id: 1); // sem company, sem email
+
+        $result = $this->resolve($contact, false, '2026-06-01 09:00:00'); // seg 09h
+
+        $this->assertSame('2026-06-01', $result->format('Y-m-d'), 'Antes das 10h → hoje');
+        $this->assertSame('10', $result->format('G'),              'Deve ser às 10h');
+    }
+
+    public function testFallbackUnknownInsideWindowSchedulesNextDay(): void
+    {
+        $this->stubReads([]);
+        $contact = $this->makeContact(id: 1);
+
+        $result = $this->resolve($contact, false, '2026-06-01 11:00:00'); // seg 11h — passou
+
+        $this->assertSame('2026-06-02', $result->format('Y-m-d'), 'Janela passou → amanhã (terça)');
+        $this->assertSame('10', $result->format('G'));
+    }
+
+    public function testFallbackUnknownOnWeekendSchedulesMonday(): void
+    {
+        $this->stubReads([]);
+        $contact = $this->makeContact(id: 1);
+
+        $result = $this->resolve($contact, false, '2026-06-06 08:00:00'); // sáb
+
+        $this->assertSame('2026-06-08', $result->format('Y-m-d'), 'Fim de semana → segunda');
+        $this->assertSame('10', $result->format('G'));
+    }
+
+    // =========================================================================
+    // Distribuição dentro da janela: sem thundering herd
+    // Usando perfil B2B (janela 120min) para verificar dispersão
+    // id=1 → 9:01 | id=100 → 10:40 | id=121 → 121%120=1 → 9:01 (mesmo que id=1)
+    // =========================================================================
 
     public function testFallbackSlotsAreDifferentPerContact(): void
     {
         $this->stubReads([]);
 
-        // Contatos com IDs diferentes devem receber slots distintos (sem thundering herd)
-        $contact1 = $this->makeContact(1);
-        $contact2 = $this->makeContact(100);
-        $contact3 = $this->makeContact(541); // 541 % 540 = 1 → mesmo slot que contactId=1
+        $now      = '2026-06-01 07:00:00';
+        $contact1 = $this->makeContact(id: 1,   company: 'Corp');
+        $contact2 = $this->makeContact(id: 100,  company: 'Corp');
+        $contact3 = $this->makeContact(id: 121,  company: 'Corp'); // 121%120=1 → mesmo slot de id=1
 
-        $now = '2026-06-01 07:00:00';
-        $r1  = $this->resolve($contact1, false, $now);
-        $r2  = $this->resolve($contact2, false, $now);
-        $r3  = $this->resolve($contact3, false, $now);
+        $r1 = $this->resolve($contact1, false, $now);
+        $r2 = $this->resolve($contact2, false, $now);
+        $r3 = $this->resolve($contact3, false, $now);
 
-        $this->assertNotSame($r1->format('H:i'), $r2->format('H:i'), 'Contatos 1 e 100 devem ter slots diferentes');
-        $this->assertSame($r1->format('H:i'), $r3->format('H:i'),    'Contatos 1 e 541 devem ter o mesmo slot (541%540=1)');
+        $this->assertNotSame($r1->format('H:i'), $r2->format('H:i'), 'id=1 e id=100 devem ter slots diferentes');
+        $this->assertSame($r1->format('H:i'),    $r3->format('H:i'), 'id=1 e id=121 devem ter o mesmo slot (121%120=1)');
     }
 
     // =========================================================================
-    // FALLBACK: sem dados suficientes, restrictBusinessHours = true
-    // Janela: 8h–12h, seg–sex; slot determinístico por contactId
+    // FALLBACK: restrict_business_hours = true → 8h–12h seg–sex (independe do perfil)
     // =========================================================================
 
     public function testFallbackBHWeekdayBeforeWindowSchedulesTodayAt8h(): void
@@ -189,6 +297,17 @@ class OptimalTimeResolverTest extends TestCase
 
         $this->assertSame('2026-06-08', $result->format('Y-m-d'), 'Sex tarde → próxima segunda');
         $this->assertSame('8', $result->format('G'));
+    }
+
+    public function testFallbackBHIgnoresProfileSegmentation(): void
+    {
+        $this->stubReads([]);
+
+        // B2C com restrict_business_hours → deve usar 8h (BH), não 17h (B2C)
+        $contact = $this->makeContact(id: 1, email: 'joao@gmail.com');
+        $result  = $this->resolve($contact, true, '2026-06-01 07:00:00');
+
+        $this->assertSame('8', $result->format('G'), 'restrict_business_hours sobrescreve segmentação de perfil');
     }
 
     // =========================================================================
@@ -293,11 +412,12 @@ class OptimalTimeResolverTest extends TestCase
     {
         $this->stubReads($this->makeReads(4, '2026-05-27 12:00:00'));
 
-        // 4 reads WA → fallback (email/page/form não influenciam o cálculo)
+        // 4 reads WA → fallback unknown (sem company/email) → 10h
+        // now = seg 20h → 10h passou → amanhã (terça)
         $result = $this->resolve($this->makeContact(), false, '2026-06-01 20:00:00');
 
-        $this->assertSame('9', $result->format('G'), 'Com 4 reads WA: deve usar fallback distribuído');
-        $this->assertSame('2026-06-02', $result->format('Y-m-d'));
+        $this->assertSame('10', $result->format('G'),              'Com 4 reads WA: deve usar fallback unknown (10h)');
+        $this->assertSame('2026-06-02', $result->format('Y-m-d'), 'Deve ser amanhã (terça)');
     }
 
     public function testFiveReadsUsesData(): void
@@ -318,18 +438,18 @@ class OptimalTimeResolverTest extends TestCase
     {
         $this->stubReads([]);
 
-        // Contato em America/Sao_Paulo (UTC-3)
-        // now em UTC = 11:00 → em Sao_Paulo = 08:00 → antes das 9h → agenda às 9h SP
+        // Contato em America/Sao_Paulo (UTC-3), perfil unknown → janela 10h–11h
+        // now em UTC = 11:00 → em Sao_Paulo = 08:00 → antes das 10h → agenda às 10h SP hoje
         $params = $this->createMock(CoreParametersHelper::class);
         $params->method('get')->willReturn('UTC');
         $resolver = new OptimalTimeResolver($this->repo, $params);
 
-        $contact = $this->makeContact(1, 'America/Sao_Paulo');
+        $contact = $this->makeContact(id: 1, timezone: 'America/Sao_Paulo');
         $nowUtc  = new \DateTime('2026-06-01 11:00:00', new \DateTimeZone('UTC')); // 08h SP
 
         $result = $resolver->resolve($contact, false, $nowUtc);
 
         $this->assertSame('America/Sao_Paulo', $result->getTimezone()->getName());
-        $this->assertSame('9', $result->format('G'), 'Deve agendar às 9h no fuso do contato');
+        $this->assertSame('10', $result->format('G'), 'Deve agendar às 10h no fuso do contato');
     }
 }
