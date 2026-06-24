@@ -42,12 +42,9 @@
         {% endif %}
         {% if wa.date_sent is defined and wa.date_sent %}
             <dt>{{ 'dialoghsm.log.date_sent'|trans }}</dt>
-            <dd>{{ wa.date_sent|date('d/m/Y H:i') }}</dd>
+            <dd>{{ (wa.date_sent ~ ' UTC')|date('d/m/Y H:i') }}</dd>
         {% endif %}
-        {% if wa.wamid is defined and wa.wamid %}
-            <dt>WAMID</dt>
-            <dd><small class="text-muted">{{ wa.wamid }}</small></dd>
-        {% endif %}
+
         {% if wa.error_message is defined and wa.error_message %}
             <dt>{{ 'dialoghsm.log.error'|trans }}</dt>
             <dd class="text-danger small">{{ wa.error_message }}</dd>
