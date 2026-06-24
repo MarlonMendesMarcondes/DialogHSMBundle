@@ -69,8 +69,20 @@ return [
     'menu' => [
         'main' => [
             'items' => [
+                // Dashboard → peer de Relatórios (mautic.report.reports = priority 20)
                 'dialoghsm.menu.dashboard' => [
-                    'route'    => 'mautic_dialoghsm_dashboard',
+                    'route'     => 'mautic_dialoghsm_dashboard',
+                    'iconClass' => 'ri-bar-chart-2-fill',
+                    'priority'  => 15,
+                    'checks'    => [
+                        'integration' => [
+                            'DialogHSM' => ['enabled' => true],
+                        ],
+                    ],
+                ],
+                // Messages → Canais (junto com Email para configurar disparos)
+                'dialoghsm.menu.messages' => [
+                    'route'    => 'mautic_dialoghsm_message_index',
                     'parent'   => 'mautic.core.channels',
                     'priority' => 0,
                     'checks'   => [
@@ -79,10 +91,16 @@ return [
                         ],
                     ],
                 ],
+                // Grupo WhatsApp → Numbers + Logs
+                'dialoghsm.menu.whatsapp' => [
+                    'id'        => 'mautic_dialoghsm_whatsapp_root',
+                    'iconClass' => 'ri-whatsapp-fill',
+                    'priority'  => 35,
+                ],
                 'dialoghsm.menu.numbers' => [
                     'route'    => 'mautic_dialoghsm_number_index',
-                    'parent'   => 'mautic.core.channels',
-                    'priority' => -1,
+                    'parent'   => 'dialoghsm.menu.whatsapp',
+                    'priority' => 0,
                     'checks'   => [
                         'integration' => [
                             'DialogHSM' => ['enabled' => true],
@@ -91,8 +109,8 @@ return [
                 ],
                 'dialoghsm.menu.logs' => [
                     'route'    => 'mautic_dialoghsm_log_index',
-                    'parent'   => 'mautic.core.channels',
-                    'priority' => -2,
+                    'parent'   => 'dialoghsm.menu.whatsapp',
+                    'priority' => -1,
                     'checks'   => [
                         'integration' => [
                             'DialogHSM' => ['enabled' => true],
