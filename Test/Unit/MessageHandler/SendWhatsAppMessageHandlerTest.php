@@ -6,6 +6,7 @@ use Mautic\IntegrationsBundle\Helper\IntegrationsHelper;
 use Mautic\LeadBundle\Entity\Lead;
 use Mautic\LeadBundle\Model\LeadModel;
 use MauticPlugin\DialogHSMBundle\Api\DialogHSMApi;
+use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Exception\TransientApiException;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
@@ -63,6 +64,29 @@ class SendWhatsAppMessageHandlerTest extends TestCase
             templateName:       'nome_template',
             whatsAppNumberName: $whatsAppNumberName,
         );
+    }
+
+    private function makeMessageWithCampaign(int $leadId = 1, int $campaignEventId = 42): SendWhatsAppMessage
+    {
+        return new SendWhatsAppMessage(
+            leadId:           $leadId,
+            phone:            '11999999999',
+            apiKey:           'API_KEY',
+            baseUrl:          'https://api.360dialog.com/v1/messages',
+            payloadData:      ['content' => 'nome_template', 'language' => 'pt_BR'],
+            templateName:     'nome_template',
+            campaignId:       10,
+            campaignEventId:  $campaignEventId,
+        );
+    }
+
+    private function makeExistingLog(string $status, string $wamid = 'wamid.abc123'): MessageLog
+    {
+        $log = new MessageLog();
+        $log->setStatus($status);
+        $log->setWamid($wamid);
+
+        return $log;
     }
 
     // -------------------------------------------------------------------------
@@ -443,6 +467,123 @@ class SendWhatsAppMessageHandlerTest extends TestCase
             'forbidden (403)'     => [403],
             'not found (404)'     => [404],
         ];
+    }
+
+    // -------------------------------------------------------------------------
+    // Testes: idempotência — guard contra reentrega de batch (worker crash)
+    // -------------------------------------------------------------------------
+
+    /**
+     * @dataProvider successStatusProvider
+     */
+    public function testApiNotCalledWhenSuccessfulLogExistsForCampaignEvent(string $existingStatus): void
+    {
+        $this->mockMessageLogRepository
+            ->method('findByCampaignEventAndLead')
+            ->with(42, 1)
+            ->willReturn($this->makeExistingLog($existingStatus));
+
+        $this->mockApi->expects($this->never())->method('sendMessage');
+        $this->mockEntityManager->expects($this->never())->method('persist');
+
+        $result = ($this->handler)($this->makeMessageWithCampaign(leadId: 1, campaignEventId: 42));
+
+        $this->assertTrue($result['success']);
+    }
+
+    /**
+     * @return array<string, array{string}>
+     */
+    public static function successStatusProvider(): array
+    {
+        return [
+            'pending_webhook' => [MessageLog::STATUS_PENDING_WEBHOOK],
+            'sent'            => [MessageLog::STATUS_SENT],
+            'delivered'       => [MessageLog::STATUS_DELIVERED],
+            'read'            => [MessageLog::STATUS_READ],
+        ];
+    }
+
+    /**
+     * @dataProvider retryableStatusProvider
+     */
+    public function testApiIsCalledWhenExistingLogIsRetryable(string $existingStatus): void
+    {
+        $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
+
+        $this->mockMessageLogRepository
+            ->method('findByCampaignEventAndLead')
+            ->with(42, 1)
+            ->willReturn($this->makeExistingLog($existingStatus));
+
+        $this->mockApi
+            ->expects($this->once())
+            ->method('sendMessage')
+            ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200, 'retryable' => false]);
+
+        ($this->handler)($this->makeMessageWithCampaign(leadId: 1, campaignEventId: 42));
+    }
+
+    /**
+     * @return array<string, array{string}>
+     */
+    public static function retryableStatusProvider(): array
+    {
+        return [
+            'queued'  => [MessageLog::STATUS_QUEUED],
+            'failed'  => [MessageLog::STATUS_FAILED],
+            'dlq'     => [MessageLog::STATUS_DLQ],
+        ];
+    }
+
+    public function testApiIsCalledWhenNoExistingLogForCampaignEvent(): void
+    {
+        $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
+
+        $this->mockMessageLogRepository
+            ->method('findByCampaignEventAndLead')
+            ->willReturn(null);
+
+        $this->mockApi
+            ->expects($this->once())
+            ->method('sendMessage')
+            ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200, 'retryable' => false]);
+
+        ($this->handler)($this->makeMessageWithCampaign());
+    }
+
+    public function testIdempotencyGuardSkippedWhenNoCampaignEventId(): void
+    {
+        $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
+
+        // Sem campaignEventId: findByCampaignEventAndLead nunca deve ser chamado
+        $this->mockMessageLogRepository
+            ->expects($this->never())
+            ->method('findByCampaignEventAndLead');
+
+        $this->mockApi
+            ->expects($this->once())
+            ->method('sendMessage')
+            ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200, 'retryable' => false]);
+
+        ($this->handler)($this->makeMessage());
+    }
+
+    public function testIdempotencyGuardLogsInfoWhenSkipping(): void
+    {
+        $this->mockMessageLogRepository
+            ->method('findByCampaignEventAndLead')
+            ->willReturn($this->makeExistingLog(MessageLog::STATUS_PENDING_WEBHOOK, 'wamid.original'));
+
+        $this->mockLogger
+            ->expects($this->once())
+            ->method('info')
+            ->with(
+                $this->stringContains('envio ignorado'),
+                $this->arrayHasKey('existing_wamid')
+            );
+
+        ($this->handler)($this->makeMessageWithCampaign());
     }
 
     public function testSkipRetryPreventsExceptionForTransientError(): void

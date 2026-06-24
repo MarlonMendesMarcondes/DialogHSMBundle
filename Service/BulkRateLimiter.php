@@ -97,9 +97,7 @@ class BulkRateLimiter
                 $key    = 'dialoghsm:rate:' . $namespace . ':' . $ns . ':' . $second;
 
                 $count = $redis->incr($key);
-                if (1 === $count) {
-                    $redis->expire($key, 2); // TTL = 2s (janela atual + folga)
-                }
+                $redis->expire($key, 2); // TTL = 2s (janela atual + folga)
 
                 if ($count <= $ratePerSecond) {
                     return; // slot adquirido — sem bloqueio

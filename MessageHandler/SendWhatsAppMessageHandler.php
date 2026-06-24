@@ -56,6 +56,29 @@ class SendWhatsAppMessageHandler implements MessageHandlerInterface
      */
     public function __invoke(SendWhatsAppMessage $message, bool $skipHousekeeping = false, bool $skipRateLimit = false, bool $skipRetry = false): array
     {
+        // Idempotency guard: se já existe log de envio bem-sucedido para este evento de campanha,
+        // não reenvia. Protege contra reentrega de batch (worker crash → batch reenviado do zero).
+        // Só aplica quando campaignEventId está presente; envios manuais/diretos sem contexto de
+        // campanha não têm como identificar duplicatas e passam normalmente.
+        if ($message->campaignEventId !== null) {
+            $existing = $this->messageLogRepository->findByCampaignEventAndLead($message->campaignEventId, $message->leadId);
+            if ($existing !== null && in_array($existing->getStatus(), [
+                MessageLog::STATUS_PENDING_WEBHOOK,
+                MessageLog::STATUS_SENT,
+                MessageLog::STATUS_DELIVERED,
+                MessageLog::STATUS_READ,
+            ], true)) {
+                $this->logger->info('DialogHSM: envio ignorado — mensagem já processada para este evento de campanha', [
+                    'lead_id'           => $message->leadId,
+                    'campaign_event_id' => $message->campaignEventId,
+                    'existing_status'   => $existing->getStatus(),
+                    'existing_wamid'    => $existing->getWamid(),
+                ]);
+
+                return ['success' => true, 'response' => null, 'error' => null, 'http_status' => null, 'retryable' => false];
+            }
+        }
+
         if (!$skipRateLimit) {
             if ($message->isBatch) {
                 // Rate controlado por batch_rate_per_minute nas configurações do plugin

@@ -147,7 +147,16 @@ class WebhookSentFlowTest extends TestCase
         $logRepo = $this->createMock(MessageLogRepository::class);
         $logRepo->method('findByWamid')->willReturn($sharedLog);
 
-        $em         = $this->createMock(EntityManagerInterface::class);
+        $meta = $this->createMock(\Doctrine\ORM\Mapping\ClassMetadata::class);
+        $meta->method('getTableName')->willReturn('campaign_lead_event_log');
+
+        $connection = $this->createMock(\Doctrine\DBAL\Connection::class);
+        $connection->method('fetchOne')->willReturn(false);
+
+        $em = $this->createMock(EntityManagerInterface::class);
+        $em->method('getClassMetadata')->willReturn($meta);
+        $em->method('getConnection')->willReturn($connection);
+
         $dispatcher = $this->createMock(EventDispatcherInterface::class);
 
         $leadModel      = $this->createMock(LeadModel::class);
