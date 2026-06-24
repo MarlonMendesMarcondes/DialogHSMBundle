@@ -89,7 +89,9 @@ class LeadTimelineSubscriber implements EventSubscriberInterface
 
             foreach ($stats['results'] as $row) {
                 $props     = $row['properties'];
-                $timestamp = \DateTime::createFromFormat('Y-m-d H:i:s', $row['date_added']) ?: new \DateTime($row['date_added']);
+                $utcZone   = new \DateTimeZone('UTC');
+                $timestamp = \DateTime::createFromFormat('Y-m-d H:i:s', $row['date_added'], $utcZone)
+                    ?: new \DateTime($row['date_added'], $utcZone);
 
                 $event->addEvent([
                     'event'           => $eventTypeKey,

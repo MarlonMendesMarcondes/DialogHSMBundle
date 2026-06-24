@@ -80,11 +80,14 @@ class SendWhatsAppMessageHandlerTest extends TestCase
         );
     }
 
-    private function makeExistingLog(string $status, string $wamid = 'wamid.abc123'): MessageLog
+    private function makeExistingLog(string $status, string $wamid = 'wamid.abc123', ?\DateTimeInterface $dateSent = null): MessageLog
     {
         $log = new MessageLog();
         $log->setStatus($status);
         $log->setWamid($wamid);
+        if ($dateSent !== null) {
+            $log->setDateSent($dateSent);
+        }
 
         return $log;
     }
@@ -584,6 +587,52 @@ class SendWhatsAppMessageHandlerTest extends TestCase
             );
 
         ($this->handler)($this->makeMessageWithCampaign());
+    }
+
+    public function testGuardBlocksWhenLogIsWithinOneHour(): void
+    {
+        $recentDate = new \DateTime('-30 minutes');
+
+        $this->mockMessageLogRepository
+            ->method('findByCampaignEventAndLead')
+            ->willReturn($this->makeExistingLog(MessageLog::STATUS_PENDING_WEBHOOK, 'wamid.recent', $recentDate));
+
+        $this->mockApi->expects($this->never())->method('sendMessage');
+
+        $result = ($this->handler)($this->makeMessageWithCampaign());
+
+        $this->assertTrue($result['success']);
+    }
+
+    public function testGuardPassesWhenLogIsOlderThanOneHour(): void
+    {
+        $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
+        $oldDate = new \DateTime('-2 hours');
+
+        $this->mockMessageLogRepository
+            ->method('findByCampaignEventAndLead')
+            ->willReturn($this->makeExistingLog(MessageLog::STATUS_PENDING_WEBHOOK, 'wamid.old', $oldDate));
+
+        $this->mockApi
+            ->expects($this->once())
+            ->method('sendMessage')
+            ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200, 'retryable' => false]);
+
+        ($this->handler)($this->makeMessageWithCampaign());
+    }
+
+    public function testGuardBlocksWhenDateSentIsNull(): void
+    {
+        // dateSent=null → age=0 → trata como recente → bloqueia
+        $this->mockMessageLogRepository
+            ->method('findByCampaignEventAndLead')
+            ->willReturn($this->makeExistingLog(MessageLog::STATUS_PENDING_WEBHOOK));
+
+        $this->mockApi->expects($this->never())->method('sendMessage');
+
+        $result = ($this->handler)($this->makeMessageWithCampaign());
+
+        $this->assertTrue($result['success']);
     }
 
     public function testSkipRetryPreventsExceptionForTransientError(): void

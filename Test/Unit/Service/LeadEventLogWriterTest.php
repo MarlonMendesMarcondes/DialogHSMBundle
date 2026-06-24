@@ -5,7 +5,6 @@ declare(strict_types=1);
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\Mapping\ClassMetadata;
-use Mautic\CoreBundle\Helper\CoreParametersHelper;
 use Mautic\LeadBundle\Entity\Lead;
 use Mautic\LeadBundle\Entity\LeadEventLog;
 use Mautic\LeadBundle\Entity\LeadEventLogRepository;
@@ -19,16 +18,13 @@ class LeadEventLogWriterTest extends TestCase
     private EntityManagerInterface&MockObject $em;
     private LeadEventLogRepository&MockObject $eventLogRepo;
     private Connection&MockObject             $connection;
-    private CoreParametersHelper&MockObject   $coreParameters;
     private LeadEventLogWriter                $writer;
 
     protected function setUp(): void
     {
-        $this->em             = $this->createMock(EntityManagerInterface::class);
-        $this->eventLogRepo   = $this->createMock(LeadEventLogRepository::class);
-        $this->connection     = $this->createMock(Connection::class);
-        $this->coreParameters = $this->createMock(CoreParametersHelper::class);
-        $this->coreParameters->method('get')->with('default_timezone')->willReturn('America/Sao_Paulo');
+        $this->em           = $this->createMock(EntityManagerInterface::class);
+        $this->eventLogRepo = $this->createMock(LeadEventLogRepository::class);
+        $this->connection   = $this->createMock(Connection::class);
 
         $meta = $this->createMock(ClassMetadata::class);
         $meta->method('getTableName')->willReturn('lead_event_log');
@@ -40,7 +36,7 @@ class LeadEventLogWriterTest extends TestCase
             fn (string $class, int $id) => $this->createMock(Lead::class)
         );
 
-        $this->writer = new LeadEventLogWriter($this->em, $this->coreParameters);
+        $this->writer = new LeadEventLogWriter($this->em);
     }
 
     private function makeLog(int $id = 1, int $leadId = 99): MessageLog
@@ -159,11 +155,29 @@ class LeadEventLogWriterTest extends TestCase
         $this->assertSame(42, $captured->getObjectId());
     }
 
-    public function testWriteSetsDateAddedConvertedToMauticTimezone(): void
+    public function testWriteSetsDateAddedNormalizedToUtc(): void
     {
         $this->connection->method('fetchOne')->willReturn(false);
 
-        // UTC 13:00 → America/Sao_Paulo (UTC-3) = 10:00
+        // Entrada em Am/SP (10:00 local = 13:00 UTC): deve ser normalizada para UTC
+        $localDate = new \DateTime('2025-01-15 10:00:00', new \DateTimeZone('America/Sao_Paulo'));
+        $captured  = null;
+        $this->eventLogRepo->method('saveEntity')
+            ->willReturnCallback(function (LeadEventLog $entry) use (&$captured): void {
+                $captured = $entry;
+            });
+
+        $this->writer->write($this->makeLog(), MessageLog::STATUS_SENT, $localDate);
+
+        $stored = $captured->getDateAdded();
+        $this->assertSame('UTC', $stored->getTimezone()->getName());
+        $this->assertSame('2025-01-15 13:00:00', $stored->format('Y-m-d H:i:s'));
+    }
+
+    public function testWriteSetsDateAddedKeepsUtcUnchanged(): void
+    {
+        $this->connection->method('fetchOne')->willReturn(false);
+
         $utcDate  = new \DateTime('2025-01-15 13:00:00', new \DateTimeZone('UTC'));
         $captured = null;
         $this->eventLogRepo->method('saveEntity')
@@ -174,8 +188,8 @@ class LeadEventLogWriterTest extends TestCase
         $this->writer->write($this->makeLog(), MessageLog::STATUS_SENT, $utcDate);
 
         $stored = $captured->getDateAdded();
-        $this->assertSame('America/Sao_Paulo', $stored->getTimezone()->getName());
-        $this->assertSame('2025-01-15 10:00:00', $stored->format('Y-m-d H:i:s'));
+        $this->assertSame('UTC', $stored->getTimezone()->getName());
+        $this->assertSame('2025-01-15 13:00:00', $stored->format('Y-m-d H:i:s'));
     }
 
     public function testWriteSetsPropertiesWithTemplateAndPhone(): void
