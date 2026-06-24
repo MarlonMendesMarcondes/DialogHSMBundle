@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MauticPlugin\DialogHSMBundle\Service;
 
 use Doctrine\ORM\EntityManagerInterface;
-use Mautic\CoreBundle\Helper\CoreParametersHelper;
 use Mautic\LeadBundle\Entity\Lead;
 use Mautic\LeadBundle\Entity\LeadEventLog;
 use Mautic\LeadBundle\Entity\LeadEventLogRepository;
@@ -20,7 +19,6 @@ class LeadEventLogWriter
 
     public function __construct(
         private readonly EntityManagerInterface $em,
-        private readonly CoreParametersHelper $coreParametersHelper,
     ) {
         /** @var LeadEventLogRepository $repo */
         $repo                     = $em->getRepository(LeadEventLog::class);
@@ -46,7 +44,7 @@ class LeadEventLogWriter
             ->setObject(self::OBJECT)
             ->setObjectId((int) $log->getId())
             ->setAction($action)
-            ->setDateAdded($this->toMauticTimezone($date))
+            ->setDateAdded($this->normalizeToUtc($date))
             ->setProperties($this->buildProperties($log));
 
         $this->eventLogRepository->saveEntity($entry);
@@ -78,13 +76,12 @@ class LeadEventLogWriter
         ], static fn ($v) => $v !== null && $v !== '');
     }
 
-    private function toMauticTimezone(\DateTimeInterface $date): \DateTime
+    private function normalizeToUtc(\DateTimeInterface $date): \DateTime
     {
-        $tzName = $this->coreParametersHelper->get('default_timezone') ?: 'UTC';
-        $local  = \DateTime::createFromInterface($date);
-        $local->setTimezone(new \DateTimeZone($tzName));
+        $utc = \DateTime::createFromInterface($date);
+        $utc->setTimezone(new \DateTimeZone('UTC'));
 
-        return $local;
+        return $utc;
     }
 
     private function exists(int $objectId, string $action): bool

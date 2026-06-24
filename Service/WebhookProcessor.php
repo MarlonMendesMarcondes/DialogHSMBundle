@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MauticPlugin\DialogHSMBundle\Service;
 
 use Doctrine\ORM\EntityManagerInterface;
-use Mautic\CampaignBundle\Entity\LeadEventLog as CampaignLeadEventLog;
 use Mautic\LeadBundle\Model\LeadModel;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
@@ -94,11 +93,11 @@ class WebhookProcessor
         $eventDate = match ($status) {
             MessageLog::STATUS_DELIVERED => $log->getDateDelivered() ?? $now,
             MessageLog::STATUS_READ      => $log->getDateRead()      ?? $now,
-            // Para "sent": usa date_triggered da campanha para alinhar com a ação no timeline.
-            // O webhook sempre chega após o batch terminar, então date_triggered já existe.
-            // Fallback para date_sent caso a mensagem não tenha sido disparada por campanha.
-            MessageLog::STATUS_SENT      => $this->getCampaignTriggeredAt($log) ?? $log->getDateSent() ?? $now,
-            default                      => $log->getDateSent()      ?? $now,
+            // Para "sent": usa date_sent gravado pelo worker no momento exato do API call.
+            // Garante que "Enviada" sempre precede "Entregue" no timeline, independente de
+            // quando o campaign_lead_event_log.date_triggered foi commitado.
+            MessageLog::STATUS_SENT      => $log->getDateSent() ?? $now,
+            default                      => $log->getDateSent() ?? $now,
         };
 
         try {
@@ -148,26 +147,6 @@ class WebhookProcessor
         } catch (\Throwable) {
             // falha silenciosa — não interrompe o fluxo do webhook
         }
-    }
-
-    private function getCampaignTriggeredAt(MessageLog $log): ?\DateTimeInterface
-    {
-        $eventId = $log->getCampaignEventId();
-        $leadId  = $log->getLeadId();
-
-        if (!$eventId || !$leadId) {
-            return null;
-        }
-
-        $conn  = $this->em->getConnection();
-        $table = $this->em->getClassMetadata(CampaignLeadEventLog::class)->getTableName();
-
-        $triggered = $conn->fetchOne(
-            "SELECT date_triggered FROM {$table} WHERE event_id = :eventId AND lead_id = :leadId ORDER BY id DESC LIMIT 1",
-            ['eventId' => $eventId, 'leadId' => $leadId]
-        );
-
-        return $triggered ? new \DateTime((string) $triggered) : null;
     }
 
     private function isValidTransition(?string $current, string $new): bool
