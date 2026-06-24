@@ -24,11 +24,11 @@
     {% endif %}
     {% if item.date_delivered is defined and item.date_delivered %}
         <dt>{{ 'dialoghsm.log.date_delivered'|trans }}</dt>
-        <dd>{{ item.date_delivered|date('d/m/Y H:i') }}</dd>
+        <dd>{{ (item.date_delivered ~ ' UTC')|date('d/m/Y H:i') }}</dd>
     {% endif %}
     {% if item.date_read is defined and item.date_read %}
         <dt>{{ 'dialoghsm.log.date_read'|trans }}</dt>
-        <dd>{{ item.date_read|date('d/m/Y H:i') }}</dd>
+        <dd>{{ (item.date_read ~ ' UTC')|date('d/m/Y H:i') }}</dd>
     {% endif %}
     {% if item.error_message is defined and item.error_message %}
         <dt>{{ 'dialoghsm.log.error'|trans }}</dt>

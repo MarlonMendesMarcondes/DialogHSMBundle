@@ -60,7 +60,8 @@ class LeadEventLogWriter
      */
     private function buildProperties(MessageLog $log): array
     {
-        $fmt = static fn (?\DateTimeInterface $dt): ?string => $dt?->format('Y-m-d H:i:s');
+        $fmt = static fn (?\DateTimeInterface $dt): ?string => $dt === null ? null :
+            \DateTime::createFromInterface($dt)->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s');
 
         return array_filter([
             'template_name'      => $log->getTemplateName(),

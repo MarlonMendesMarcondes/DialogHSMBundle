@@ -382,13 +382,16 @@ class CampaignSubscriber implements EventSubscriberInterface
      */
     private function buildWhatsAppMetadata(MessageLog $log): array
     {
+        $fmtUtc = static fn (?\DateTimeInterface $dt): ?string => $dt === null ? null :
+            \DateTime::createFromInterface($dt)->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+
         return array_filter([
             'template_name' => $log->getTemplateName(),
             'sender_name'   => $log->getSenderName(),
             'phone_number'  => $log->getPhoneNumber(),
             'wamid'         => $log->getWamid(),
             'status'        => $log->getStatus(),
-            'date_sent'     => $log->getDateSent()?->format('Y-m-d H:i:s'),
+            'date_sent'     => $fmtUtc($log->getDateSent()),
             'error_message' => $log->getErrorMessage(),
         ], static fn ($v) => $v !== null && $v !== '');
     }
