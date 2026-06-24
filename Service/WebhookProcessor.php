@@ -106,6 +106,7 @@ class WebhookProcessor
             // falha silenciosa — não interrompe o fluxo do webhook
         }
 
+        $this->updateCampaignActionMetadata($log);
         $this->updateLeadStatus($log, $status);
 
         if (MessageLog::STATUS_FAILED === $status) {
@@ -144,6 +145,41 @@ class WebhookProcessor
             }
 
             $this->leadModel->saveEntity($lead);
+        } catch (\Throwable) {
+            // falha silenciosa — não interrompe o fluxo do webhook
+        }
+    }
+
+    private function updateCampaignActionMetadata(MessageLog $log): void
+    {
+        if ($log->getCampaignEventId() === null || $log->getLeadId() === null) {
+            return;
+        }
+
+        try {
+            $conn = $this->em->getConnection();
+            $row  = $conn->fetchAssociative(
+                'SELECT id, metadata FROM campaign_lead_event_log WHERE event_id = :eventId AND lead_id = :leadId AND is_scheduled = 1 LIMIT 1',
+                ['eventId' => $log->getCampaignEventId(), 'leadId' => $log->getLeadId()]
+            );
+
+            if (!$row) {
+                return;
+            }
+
+            $fmtUtc   = static fn (?\DateTimeInterface $dt): ?string => $dt === null ? null :
+                \DateTime::createFromInterface($dt)->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+            $existing = json_decode($row['metadata'] ?? '[]', true) ?? [];
+            $existing['whatsapp'] = array_filter([
+                'template_name' => $log->getTemplateName(),
+                'sender_name'   => $log->getSenderName(),
+                'phone_number'  => $log->getPhoneNumber(),
+                'status'        => $log->getStatus(),
+                'date_sent'     => $fmtUtc($log->getDateSent()),
+                'error_message' => $log->getErrorMessage(),
+            ], static fn ($v) => $v !== null && $v !== '');
+
+            $conn->update('campaign_lead_event_log', ['metadata' => json_encode($existing)], ['id' => $row['id']]);
         } catch (\Throwable) {
             // falha silenciosa — não interrompe o fluxo do webhook
         }
