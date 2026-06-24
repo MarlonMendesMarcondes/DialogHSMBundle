@@ -286,12 +286,14 @@ class BulkRateLimiterTest extends TestCase
     // expire só é chamado quando count === 1 (slot criado pela primeira vez)
     // -------------------------------------------------------------------------
 
-    public function testExpireIsCalledOnlyWhenCountIsOne(): void
+    public function testExpireIsAlwaysCalledRegardlessOfCount(): void
     {
         $limiter = $this->makeLimiter(120); // ratePerSecond = 2
 
-        $this->redis->method('incr')->willReturn(2); // count=2 ≤ ratePerSecond=2 → slot ok, mas expire não
-        $this->redis->expects($this->never())->method('expire');
+        // count=2: dentro do rate, sem DECR — expire deve ser chamado mesmo assim
+        // (garante TTL em toda operação, evitando memory leak por INCR sem EXPIRE)
+        $this->redis->method('incr')->willReturn(2);
+        $this->redis->expects($this->once())->method('expire');
         $this->redis->expects($this->never())->method('decr');
 
         $limiter->throttle();
