@@ -24,6 +24,7 @@ use MauticPlugin\DialogHSMBundle\Service\WebhookProcessor;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
+use Mautic\PointBundle\Model\PointModel;
 use Symfony\Component\Messenger\MessageBusInterface;
 use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
@@ -158,7 +159,7 @@ class WebhookSentFlowTest extends TestCase
         $leadModel      = $this->createMock(LeadModel::class);
         $eventLogWriter = $this->createMock(LeadEventLogWriter::class);
 
-        return new WebhookProcessor($numberRepo, $logRepo, $em, $dispatcher, $leadModel, $eventLogWriter);
+        return new WebhookProcessor($numberRepo, $logRepo, $em, $dispatcher, $leadModel, $eventLogWriter, $this->createMock(PointModel::class));
     }
 
     private function makeWebhookPayload(string $wamid, string $status, array $errors = []): array
@@ -295,7 +296,7 @@ class WebhookSentFlowTest extends TestCase
 
         $leadModel      = $this->createMock(LeadModel::class);
         $eventLogWriter = $this->createMock(LeadEventLogWriter::class);
-        $processor      = new WebhookProcessor($numberRepo, $logRepo, $em, $dispatcher, $leadModel, $eventLogWriter);
+        $processor      = new WebhookProcessor($numberRepo, $logRepo, $em, $dispatcher, $leadModel, $eventLogWriter, $this->createMock(PointModel::class));
         $processor->process('+5511999999999', $this->makeWebhookPayload($wamid, 'failed', $errors));
 
         $this->assertSame(MessageLog::STATUS_FAILED, $sharedLog->getStatus(),

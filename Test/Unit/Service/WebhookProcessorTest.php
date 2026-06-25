@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Doctrine\ORM\EntityManagerInterface;
 use Mautic\LeadBundle\Entity\Lead;
 use Mautic\LeadBundle\Model\LeadModel;
+use Mautic\PointBundle\Model\PointModel;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
@@ -25,6 +26,7 @@ class WebhookProcessorTest extends TestCase
     private EventDispatcherInterface&MockObject $dispatcher;
     private LeadModel&MockObject $leadModel;
     private LeadEventLogWriter&MockObject $eventLogWriter;
+    private PointModel&MockObject $pointModel;
     private WebhookProcessor $processor;
 
     protected function setUp(): void
@@ -39,6 +41,7 @@ class WebhookProcessorTest extends TestCase
         $this->dispatcher     = $this->createMock(EventDispatcherInterface::class);
         $this->leadModel      = $this->createMock(LeadModel::class);
         $this->eventLogWriter = $this->createMock(LeadEventLogWriter::class);
+        $this->pointModel     = $this->createMock(PointModel::class);
         $this->processor      = new WebhookProcessor(
             $this->numberRepository,
             $this->logRepository,
@@ -46,6 +49,7 @@ class WebhookProcessorTest extends TestCase
             $this->dispatcher,
             $this->leadModel,
             $this->eventLogWriter,
+            $this->pointModel,
         );
     }
 
@@ -1012,5 +1016,153 @@ class WebhookProcessorTest extends TestCase
 
         $this->assertSame(200, $result);
         $this->assertSame(MessageLog::STATUS_DELIVERED, $log->getStatus());
+    }
+
+    // =========================================================================
+    // Sistema de pontos — triggerPointAction
+    // =========================================================================
+
+    public function testReadStatusTriggersPointAction(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_DELIVERED);
+        $log->setLeadId(42);
+
+        $lead = $this->createMock(Lead::class);
+        $this->leadModel->method('getEntity')->with(42)->willReturn($lead);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+        $this->em->method('flush');
+
+        $this->pointModel->expects($this->once())
+            ->method('triggerAction')
+            ->with('dialoghsm.message_read', null, null, $lead, true);
+
+        $this->processor->process('+5511999999999', $this->makePayload([
+            $this->makeStatusEntry('wamid.abc', 'read'),
+        ]));
+    }
+
+    public function testDeliveredStatusDoesNotTriggerPointAction(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_SENT);
+        $log->setLeadId(42);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+        $this->em->method('flush');
+
+        $this->pointModel->expects($this->never())->method('triggerAction');
+
+        $this->processor->process('+5511999999999', $this->makePayload([
+            $this->makeStatusEntry('wamid.abc', 'delivered'),
+        ]));
+    }
+
+    public function testSentStatusDoesNotTriggerPointAction(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_PENDING_WEBHOOK);
+        $log->setLeadId(42);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+        $this->em->method('flush');
+
+        $this->pointModel->expects($this->never())->method('triggerAction');
+
+        $this->processor->process('+5511999999999', $this->makePayload([
+            $this->makeStatusEntry('wamid.abc', 'sent'),
+        ]));
+    }
+
+    public function testFailedStatusDoesNotTriggerPointAction(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_SENT);
+        $log->setLeadId(42);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+        $this->em->method('flush');
+
+        $this->pointModel->expects($this->never())->method('triggerAction');
+
+        $this->processor->process('+5511999999999', $this->makePayload([[
+            'id'     => 'wamid.abc',
+            'status' => 'failed',
+            'errors' => [['code' => 131047, 'title' => 'Re-engagement message']],
+        ]]));
+    }
+
+    public function testReadWithoutLeadIdDoesNotTriggerPointAction(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_DELIVERED);
+        // leadId não definido — log sem lead
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+        $this->em->method('flush');
+
+        $this->pointModel->expects($this->never())->method('triggerAction');
+
+        $this->processor->process('+5511999999999', $this->makePayload([
+            $this->makeStatusEntry('wamid.abc', 'read'),
+        ]));
+    }
+
+    public function testReadWithLeadNotFoundDoesNotTriggerPointAction(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_DELIVERED);
+        $log->setLeadId(99);
+
+        $this->leadModel->method('getEntity')->with(99)->willReturn(null);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+        $this->em->method('flush');
+
+        $this->pointModel->expects($this->never())->method('triggerAction');
+
+        $this->processor->process('+5511999999999', $this->makePayload([
+            $this->makeStatusEntry('wamid.abc', 'read'),
+        ]));
+    }
+
+    public function testPointActionExceptionDoesNotBreakWebhookFlow(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_DELIVERED);
+        $log->setLeadId(42);
+
+        $lead = $this->createMock(Lead::class);
+        $this->leadModel->method('getEntity')->with(42)->willReturn($lead);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+        $this->em->method('flush');
+
+        $this->pointModel->method('triggerAction')->willThrowException(new \RuntimeException('points error'));
+
+        $result = $this->processor->process('+5511999999999', $this->makePayload([
+            $this->makeStatusEntry('wamid.abc', 'read'),
+        ]));
+
+        $this->assertSame(200, $result);
+        $this->assertSame(MessageLog::STATUS_READ, $log->getStatus());
+    }
+
+    public function testInvalidTransitionFromReadDoesNotTriggerPointAction(): void
+    {
+        // status já é READ — transição inválida, não deve persistir nem pontuar
+        $log = $this->makeLog(MessageLog::STATUS_READ);
+        $log->setLeadId(42);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+        $this->em->expects($this->never())->method('flush');
+
+        $this->pointModel->expects($this->never())->method('triggerAction');
+
+        $this->processor->process('+5511999999999', $this->makePayload([
+            $this->makeStatusEntry('wamid.abc', 'read'),
+        ]));
     }
 }

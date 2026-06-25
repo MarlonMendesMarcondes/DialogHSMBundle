@@ -6,6 +6,7 @@ namespace MauticPlugin\DialogHSMBundle\Service;
 
 use Doctrine\ORM\EntityManagerInterface;
 use Mautic\LeadBundle\Model\LeadModel;
+use Mautic\PointBundle\Model\PointModel;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumberRepository;
@@ -21,6 +22,7 @@ class WebhookProcessor
         private readonly EventDispatcherInterface $dispatcher,
         private readonly LeadModel $leadModel,
         private readonly LeadEventLogWriter $eventLogWriter,
+        private readonly PointModel $pointModel,
     ) {}
 
     /**
@@ -108,6 +110,7 @@ class WebhookProcessor
 
         $this->updateCampaignActionMetadata($log);
         $this->updateLeadStatus($log, $status);
+        $this->triggerPointAction($log, $status);
 
         if (MessageLog::STATUS_FAILED === $status) {
             $this->dispatcher->dispatch(new WebhookMessageFailedEvent($log));
@@ -180,6 +183,34 @@ class WebhookProcessor
             ], static fn ($v) => $v !== null && $v !== '');
 
             $conn->update('campaign_lead_event_log', ['metadata' => json_encode($existing)], ['id' => $row['id']]);
+        } catch (\Throwable) {
+            // falha silenciosa — não interrompe o fluxo do webhook
+        }
+    }
+
+    private function triggerPointAction(MessageLog $log, string $status): void
+    {
+        $actionMap = [
+            MessageLog::STATUS_READ => 'dialoghsm.message_read',
+        ];
+
+        $pointAction = $actionMap[$status] ?? null;
+        if (null === $pointAction) {
+            return;
+        }
+
+        $leadId = $log->getLeadId();
+        if (!$leadId) {
+            return;
+        }
+
+        try {
+            $lead = $this->leadModel->getEntity($leadId);
+            if (null === $lead) {
+                return;
+            }
+
+            $this->pointModel->triggerAction($pointAction, null, null, $lead, true);
         } catch (\Throwable) {
             // falha silenciosa — não interrompe o fluxo do webhook
         }
