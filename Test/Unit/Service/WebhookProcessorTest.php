@@ -17,6 +17,7 @@ use MauticPlugin\DialogHSMBundle\Service\RedisContactCache;
 use MauticPlugin\DialogHSMBundle\Service\WebhookProcessor;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\LoggerInterface;
 use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
 class WebhookProcessorTest extends TestCase
@@ -30,6 +31,7 @@ class WebhookProcessorTest extends TestCase
     private LeadEventLogWriter&MockObject $eventLogWriter;
     private PointModel&MockObject $pointModel;
     private RedisContactCache&MockObject $contactCache;
+    private LoggerInterface&MockObject $logger;
     private WebhookProcessor $processor;
 
     protected function setUp(): void
@@ -46,6 +48,7 @@ class WebhookProcessorTest extends TestCase
         $this->eventLogWriter = $this->createMock(LeadEventLogWriter::class);
         $this->pointModel     = $this->createMock(PointModel::class);
         $this->contactCache   = $this->createMock(RedisContactCache::class);
+        $this->logger         = $this->createMock(LoggerInterface::class);
         $this->processor      = new WebhookProcessor(
             $this->numberRepository,
             $this->logRepository,
@@ -55,6 +58,7 @@ class WebhookProcessorTest extends TestCase
             $this->eventLogWriter,
             $this->pointModel,
             $this->contactCache,
+            $this->logger,
         );
     }
 
@@ -1449,6 +1453,7 @@ class WebhookProcessorTest extends TestCase
             $this->eventLogWriter,
             $this->pointModel,
             $this->contactCache,
+            $this->logger,
             '',
             $redis,
         );
@@ -1560,6 +1565,7 @@ class WebhookProcessorTest extends TestCase
             $this->eventLogWriter,
             $this->pointModel,
             $this->contactCache,
+            $this->logger,
             '',
             $redis,
         ))->process('+5511999999999', $this->makeInboundPayload('5511888888888'));
@@ -1818,10 +1824,10 @@ class WebhookProcessorTest extends TestCase
             }
         );
 
-        // markReplied agora usa contactCache Hash (hSet), não redis->setEx
-        $this->contactCache->expects($this->once())
-            ->method('markReplied')
-            ->with('5511888888888');
+        // Fallback DB: markReplied chamado para todos os candidatos BR (normalização 9º dígito)
+        // Para '5511888888888' (13 dígitos): ['5511888888888', '+5511888888888', '551188888888', '+551188888888']
+        $this->contactCache->expects($this->atLeastOnce())
+            ->method('markReplied');
 
         $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
         $this->em->method('getRepository')->willReturn($repo);
@@ -1853,5 +1859,140 @@ class WebhookProcessorTest extends TestCase
 
         $processor = $this->makeProcessorWithRedis($redis);
         $processor->process('+5511999999999', $this->makeInboundPayload('5511888888888'));
+    }
+
+    // =========================================================================
+    // Normalização de telefone BR — 9º dígito (12 ↔ 13 dígitos)
+    // =========================================================================
+
+    /**
+     * Scenario B fast-path: 360dialog envia número no formato antigo (12 dígitos),
+     * mas o Redis tem a chave no formato novo (13 dígitos, com 9º dígito).
+     * getBRPhoneCandidates deve gerar o formato 13-dígitos e encontrar o wamid.
+     */
+    public function testScenarioBFastPathFindsWamidVia13DigitNormalizedFrom12Digit(): void
+    {
+        $lead   = $this->createMock(Lead::class);
+        $lead->method('getId')->willReturn(55);
+        $log    = $this->makeHsmLog(55);
+
+        // Redis tem o wamid registrado com o número no formato 13 dígitos
+        $this->contactCache->method('getLastWamid')
+            ->willReturnMap([
+                ['554499067833',   null],   // formato antigo (12 dígitos) — miss
+                ['+554499067833',  null],   // com + — miss
+                ['5544999067833',  'wamid.original'],  // formato novo (13 dígitos) — HIT
+                ['+5544999067833', null],
+            ]);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->leadModel->method('getEntity')->with(55)->willReturn($lead);
+        $this->logRepository->method('findByWamid')->with('wamid.original')->willReturn($log);
+        $this->em->method('persist');
+        $this->em->method('flush');
+
+        $this->pointModel->expects($this->once())
+            ->method('triggerAction')
+            ->with('dialoghsm.message_replied', null, null, $lead, true);
+
+        // 360dialog envia o número no formato antigo: 12 dígitos (sem o 9º)
+        $this->processor->process('+5511999999999', $this->makeInboundPayload('554499067833'));
+    }
+
+    /**
+     * Scenario B fallback DB: 360dialog envia 12 dígitos, lead está cadastrado
+     * com 13 dígitos no campo mobile. findLeadByMobile deve tentar ambos os formatos.
+     */
+    public function testScenarioBDBFallbackFindsLeadVia13DigitNormalized(): void
+    {
+        $lead = $this->createMock(Lead::class);
+        $lead->method('getId')->willReturn(88);
+        $log  = $this->makeHsmLog(88);
+
+        // Repositório retorna lead apenas para o número com 9º dígito
+        $repo = $this->getMockBuilder(LeadRepository::class)
+            ->disableOriginalConstructor()
+            ->onlyMethods(['getLeadsByFieldValue'])
+            ->getMock();
+
+        $repo->method('getLeadsByFieldValue')
+            ->willReturnCallback(function (string $field, string $phone) use ($lead): array {
+                return $phone === '5544999067833' || $phone === '+5544999067833' ? [$lead] : [];
+            });
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->em->method('getRepository')->willReturn($repo);
+        $this->em->method('persist');
+        $this->em->method('flush');
+        $this->logRepository->method('findMostRecentForLead')
+            ->with(88, $this->isInstanceOf(\DateTimeInterface::class))
+            ->willReturn($log);
+
+        $this->pointModel->expects($this->once())
+            ->method('triggerAction')
+            ->with('dialoghsm.message_replied', null, null, $lead, true);
+
+        // 360dialog envia 12 dígitos; Mautic tem 13 dígitos no banco
+        $this->processor->process('+5511999999999', $this->makeInboundPayload('554499067833'));
+    }
+
+    /**
+     * Scenario B fallback DB: após registrar o reply, markReplied é chamado para
+     * todos os candidatos (formatos 12 e 13 dígitos) para evitar duplicação futura.
+     */
+    public function testScenarioBDBFallbackCallsMarkRepliedForAllBRCandidates(): void
+    {
+        $lead = $this->createMock(Lead::class);
+        $lead->method('getId')->willReturn(99);
+        $log  = $this->makeHsmLog(99);
+
+        $repo = $this->makeLeadRepo([$lead]);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->em->method('getRepository')->willReturn($repo);
+        $this->em->method('persist');
+        $this->em->method('flush');
+        $this->logRepository->method('findMostRecentForLead')->willReturn($log);
+
+        // Coleta todos os telefones passados para markReplied
+        $markedPhones = [];
+        $this->contactCache->method('markReplied')
+            ->willReturnCallback(function (string $phone) use (&$markedPhones): void {
+                $markedPhones[] = $phone;
+            });
+
+        // Envia com número de 12 dígitos (formato antigo da 360dialog)
+        $this->processor->process('+5511999999999', $this->makeInboundPayload('554499067833'));
+
+        // Deve ter marcado pelo menos o formato original e o normalizado (13 dígitos)
+        $this->assertContains('554499067833',  $markedPhones, 'Deve marcar formato 12 dígitos');
+        $this->assertContains('5544999067833', $markedPhones, 'Deve marcar formato 13 dígitos (normalizado)');
+    }
+
+    /**
+     * Scenario A (direct): não usa getBRPhoneCandidates — lookup por wamid já é exato.
+     * Verifica que markReplied ainda é chamado (com o $from recebido) para bloquear Scenario B.
+     */
+    public function testScenarioADirectDoesNotRequirePhoneNormalization(): void
+    {
+        $lead   = $this->createMock(Lead::class);
+        $lead->method('getId')->willReturn(77);
+        $hsmLog = $this->makeHsmLog(77);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->leadModel->method('getEntity')->with(77)->willReturn($lead);
+        $this->logRepository->method('findByWamid')->with('wamid.original.hsm')->willReturn($hsmLog);
+        $this->em->method('persist');
+        $this->em->method('flush');
+
+        // markReplied deve ser chamado com o $from recebido (pode ser 12 ou 13 dígitos)
+        $this->contactCache->expects($this->once())
+            ->method('markReplied')
+            ->with('554499067833');
+
+        $this->processor->process(
+            '+5511999999999',
+            $this->makeInboundPayloadWithContext('554499067833', 'wamid.original.hsm')
+        );
     }
 }

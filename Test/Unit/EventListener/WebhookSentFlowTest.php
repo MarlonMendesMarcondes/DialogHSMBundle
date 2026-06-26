@@ -160,7 +160,7 @@ class WebhookSentFlowTest extends TestCase
         $leadModel      = $this->createMock(LeadModel::class);
         $eventLogWriter = $this->createMock(LeadEventLogWriter::class);
 
-        return new WebhookProcessor($numberRepo, $logRepo, $em, $dispatcher, $leadModel, $eventLogWriter, $this->createMock(PointModel::class), $this->createMock(RedisContactCache::class));
+        return new WebhookProcessor($numberRepo, $logRepo, $em, $dispatcher, $leadModel, $eventLogWriter, $this->createMock(PointModel::class), $this->createMock(RedisContactCache::class), $this->createMock(LoggerInterface::class));
     }
 
     private function makeWebhookPayload(string $wamid, string $status, array $errors = []): array
@@ -297,7 +297,7 @@ class WebhookSentFlowTest extends TestCase
 
         $leadModel      = $this->createMock(LeadModel::class);
         $eventLogWriter = $this->createMock(LeadEventLogWriter::class);
-        $processor      = new WebhookProcessor($numberRepo, $logRepo, $em, $dispatcher, $leadModel, $eventLogWriter, $this->createMock(PointModel::class), $this->createMock(RedisContactCache::class));
+        $processor      = new WebhookProcessor($numberRepo, $logRepo, $em, $dispatcher, $leadModel, $eventLogWriter, $this->createMock(PointModel::class), $this->createMock(RedisContactCache::class), $this->createMock(LoggerInterface::class));
         $processor->process('+5511999999999', $this->makeWebhookPayload($wamid, 'failed', $errors));
 
         $this->assertSame(MessageLog::STATUS_FAILED, $sharedLog->getStatus(),

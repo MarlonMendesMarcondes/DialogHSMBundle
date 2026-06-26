@@ -331,9 +331,24 @@ class LeadEventLogWriterTest extends TestCase
                 $captured = $e;
             });
 
+        // Número sem + deve ser normalizado para E.164 com +
         $this->writer->writeReply($this->makeLead(99), '5511888888888', new \DateTime(), $this->makeHsmLogMock(77));
 
-        $this->assertSame('5511888888888', $captured->getProperties()['phone_number']);
+        $this->assertSame('+5511888888888', $captured->getProperties()['phone_number']);
+    }
+
+    public function testWriteReplyPreservesExistingPlusPrefix(): void
+    {
+        $this->stubExistsReply(false);
+        $captured = null;
+        $this->eventLogRepo->method('saveEntity')
+            ->willReturnCallback(function (LeadEventLog $e) use (&$captured): void {
+                $captured = $e;
+            });
+
+        $this->writer->writeReply($this->makeLead(99), '+5511888888888', new \DateTime(), $this->makeHsmLogMock(77));
+
+        $this->assertSame('+5511888888888', $captured->getProperties()['phone_number']);
     }
 
     public function testWriteReplySetsTemplateNameInProperties(): void
@@ -390,6 +405,124 @@ class LeadEventLogWriterTest extends TestCase
         $this->eventLogRepo->method('saveEntity');
 
         $this->writer->writeReply($this->makeLead(99), '5511888888888', new \DateTime(), $this->makeHsmLogMock(77));
+    }
+
+    // =========================================================================
+    // writeReply — campos adicionais (sender_name, campaign_id, date_sent, date_replied)
+    // =========================================================================
+
+    private function makeHsmLogFull(int $id): MessageLog&\PHPUnit\Framework\MockObject\MockObject
+    {
+        $log = $this->createMock(MessageLog::class);
+        $log->method('getId')->willReturn($id);
+        $log->method('getTemplateName')->willReturn('template-abc');
+        $log->method('getWamid')->willReturn('wamid.full');
+        $log->method('getSenderName')->willReturn('Número Produção');
+        $log->method('getCampaignId')->willReturn(42);
+        $log->method('getDateSent')->willReturn(new \DateTime('2025-06-25 10:00:00', new \DateTimeZone('UTC')));
+
+        return $log;
+    }
+
+    public function testWriteReplySetsSenderNameInProperties(): void
+    {
+        $this->stubExistsReply(false);
+        $captured = null;
+        $this->eventLogRepo->method('saveEntity')
+            ->willReturnCallback(function (LeadEventLog $e) use (&$captured): void {
+                $captured = $e;
+            });
+
+        $this->writer->writeReply($this->makeLead(99), '5511888888888', new \DateTime(), $this->makeHsmLogFull(77));
+
+        $this->assertSame('Número Produção', $captured->getProperties()['sender_name']);
+    }
+
+    public function testWriteReplySetsCampaignIdInProperties(): void
+    {
+        $this->stubExistsReply(false);
+        $captured = null;
+        $this->eventLogRepo->method('saveEntity')
+            ->willReturnCallback(function (LeadEventLog $e) use (&$captured): void {
+                $captured = $e;
+            });
+
+        $this->writer->writeReply($this->makeLead(99), '5511888888888', new \DateTime(), $this->makeHsmLogFull(77));
+
+        $this->assertSame(42, $captured->getProperties()['campaign_id']);
+    }
+
+    public function testWriteReplySetsSentDateFormattedUtc(): void
+    {
+        $this->stubExistsReply(false);
+        $captured = null;
+        $this->eventLogRepo->method('saveEntity')
+            ->willReturnCallback(function (LeadEventLog $e) use (&$captured): void {
+                $captured = $e;
+            });
+
+        $this->writer->writeReply($this->makeLead(99), '5511888888888', new \DateTime(), $this->makeHsmLogFull(77));
+
+        $this->assertSame('2025-06-25 10:00:00', $captured->getProperties()['date_sent']);
+    }
+
+    public function testWriteReplySetsDateRepliedFromDateParameter(): void
+    {
+        $this->stubExistsReply(false);
+        $captured    = null;
+        $repliedAt   = new \DateTime('2025-06-26 14:30:00', new \DateTimeZone('America/Sao_Paulo'));
+        $this->eventLogRepo->method('saveEntity')
+            ->willReturnCallback(function (LeadEventLog $e) use (&$captured): void {
+                $captured = $e;
+            });
+
+        $this->writer->writeReply($this->makeLead(99), '5511888888888', $repliedAt, $this->makeHsmLogFull(77));
+
+        // 14:30 BRT (UTC-3) = 17:30 UTC
+        $this->assertSame('2025-06-26 17:30:00', $captured->getProperties()['date_replied']);
+    }
+
+    public function testWriteReplyOmitsSenderNameWhenNull(): void
+    {
+        $this->stubExistsReply(false);
+        $captured = null;
+        $this->eventLogRepo->method('saveEntity')
+            ->willReturnCallback(function (LeadEventLog $e) use (&$captured): void {
+                $captured = $e;
+            });
+
+        // makeHsmLogMock não configura getSenderName — retorna null por padrão
+        $this->writer->writeReply($this->makeLead(99), '5511888888888', new \DateTime(), $this->makeHsmLogMock(77));
+
+        $this->assertArrayNotHasKey('sender_name', $captured->getProperties());
+    }
+
+    public function testWriteReplyOmitsCampaignIdWhenNull(): void
+    {
+        $this->stubExistsReply(false);
+        $captured = null;
+        $this->eventLogRepo->method('saveEntity')
+            ->willReturnCallback(function (LeadEventLog $e) use (&$captured): void {
+                $captured = $e;
+            });
+
+        $this->writer->writeReply($this->makeLead(99), '5511888888888', new \DateTime(), $this->makeHsmLogMock(77));
+
+        $this->assertArrayNotHasKey('campaign_id', $captured->getProperties());
+    }
+
+    public function testWriteReplyOmitsDateSentWhenNull(): void
+    {
+        $this->stubExistsReply(false);
+        $captured = null;
+        $this->eventLogRepo->method('saveEntity')
+            ->willReturnCallback(function (LeadEventLog $e) use (&$captured): void {
+                $captured = $e;
+            });
+
+        $this->writer->writeReply($this->makeLead(99), '5511888888888', new \DateTime(), $this->makeHsmLogMock(77));
+
+        $this->assertArrayNotHasKey('date_sent', $captured->getProperties());
     }
 
 }
