@@ -99,22 +99,6 @@ class LeadEventLogWriter
         ], static fn ($v) => $v !== null && $v !== '');
     }
 
-    public function countReplied(\DateTime $since): int
-    {
-        $conn  = $this->em->getConnection();
-        $table = $this->em->getClassMetadata(LeadEventLog::class)->getTableName();
-
-        return (int) $conn->fetchOne(
-            "SELECT COUNT(*) FROM {$table} WHERE bundle = :bundle AND object = :object AND action = :action AND date_added >= :since",
-            [
-                'bundle' => self::BUNDLE,
-                'object' => self::OBJECT,
-                'action' => self::ACTION_REPLIED,
-                'since'  => $since->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s'),
-            ]
-        );
-    }
-
     private function normalizeToUtc(\DateTimeInterface $date): \DateTime
     {
         $utc = \DateTime::createFromInterface($date);

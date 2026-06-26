@@ -10,7 +10,6 @@ use Mautic\IntegrationsBundle\Helper\IntegrationsHelper;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Integration\DialogHSMIntegration;
-use MauticPlugin\DialogHSMBundle\Service\LeadEventLogWriter;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -53,7 +52,7 @@ class MessageLogController extends FormController
         }
     }
 
-    public function dashboardAction(Request $request, MessageLogRepository $messageLogRepository, LeadEventLogWriter $eventLogWriter): Response
+    public function dashboardAction(Request $request, MessageLogRepository $messageLogRepository): Response
     {
         $allowedDays = [7, 14, 30];
         $chartDays   = in_array((int) $request->query->get('days', 7), $allowedDays, true)
@@ -71,7 +70,7 @@ class MessageLogController extends FormController
 
         $dashboardData = $this->cache->get(
             "dialoghsm.dashboard.all.{$chartDays}.{$hourSlot}",
-            function (ItemInterface $item) use ($messageLogRepository, $eventLogWriter, $from24h, $from7d, $chartDays, $timezone): array {
+            function (ItemInterface $item) use ($messageLogRepository, $from24h, $from7d, $chartDays, $timezone): array {
                 $item->expiresAfter(self::DASHBOARD_CACHE_TTL);
 
                 return [
@@ -79,8 +78,8 @@ class MessageLogController extends FormController
                     'stats7d'     => $messageLogRepository->getStatsByPeriod($from7d),
                     'chartRaw'    => $messageLogRepository->getChartData($chartDays, $timezone),
                     'dispatches'  => $messageLogRepository->getGroupedDispatches(),
-                    'replied24h'  => $eventLogWriter->countReplied($from24h),
-                    'replied7d'   => $eventLogWriter->countReplied($from7d),
+                    'replied24h'  => $messageLogRepository->countReplied($from24h),
+                    'replied7d'   => $messageLogRepository->countReplied($from7d),
                 ];
             }
         );

@@ -338,41 +338,4 @@ class LeadEventLogWriterTest extends TestCase
         $this->writer->writeReply($this->makeLead(99), '5511888888888', new \DateTime());
     }
 
-    // =========================================================================
-    // countReplied
-    // =========================================================================
-
-    public function testCountRepliedReturnsInteger(): void
-    {
-        $this->connection->method('fetchOne')->willReturn('3');
-
-        $result = $this->writer->countReplied(new \DateTime('-24 hours'));
-
-        $this->assertSame(3, $result);
-    }
-
-    public function testCountRepliedReturnsZeroWhenNone(): void
-    {
-        $this->connection->method('fetchOne')->willReturn('0');
-
-        $result = $this->writer->countReplied(new \DateTime('-7 days'));
-
-        $this->assertSame(0, $result);
-    }
-
-    public function testCountRepliedQueriesWithCorrectAction(): void
-    {
-        $capturedParams = null;
-        $this->connection->method('fetchOne')
-            ->willReturnCallback(function (string $sql, array $params) use (&$capturedParams) {
-                $capturedParams = $params;
-                return '0';
-            });
-
-        $this->writer->countReplied(new \DateTime('-24 hours'));
-
-        $this->assertSame(LeadEventLogWriter::ACTION_REPLIED, $capturedParams['action']);
-        $this->assertSame(LeadEventLogWriter::BUNDLE, $capturedParams['bundle']);
-        $this->assertSame(LeadEventLogWriter::OBJECT, $capturedParams['object']);
-    }
 }

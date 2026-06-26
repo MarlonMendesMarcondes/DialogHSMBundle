@@ -123,6 +123,9 @@
                             <th class="text-center">
                                 <i class="ri-eye-line" style="color:#0275d8"></i> {{ 'dialoghsm.dashboard.read'|trans }}
                             </th>
+                            <th class="text-center">
+                                <i class="ri-reply-line" style="color:#7952b3"></i> {{ 'dialoghsm.dashboard.replied'|trans }}
+                            </th>
                             <th class="text-center">{{ 'dialoghsm.dashboard.dispatches.rate'|trans }}</th>
                             <th class="text-center">{{ 'dialoghsm.dashboard.dispatches.date'|trans }}</th>
                         </tr>
@@ -133,6 +136,7 @@
                         {% set sentPlus      = row.sent_plus|default(0) %}
                         {% set deliveredPlus = row.delivered_plus|default(0) %}
                         {% set readCount     = row.read_count|default(0) %}
+                        {% set repliedCount  = row.replied_count|default(0) %}
                         {% set failed        = row.failed|default(0) %}
                         {% set dlq           = row.dlq|default(0) %}
                         {% set rate          = total > 0 ? (sentPlus / total * 100)|round(0) : 0 %}
@@ -158,6 +162,7 @@
                             <td class="text-center">{{ _self.pill(failed,        '#d9534f') }}</td>
                             <td class="text-center">{{ _self.pill(deliveredPlus, '#17a2b8') }}</td>
                             <td class="text-center">{{ _self.pill(readCount,     '#0275d8') }}</td>
+                            <td class="text-center">{{ _self.pill(repliedCount,  '#7952b3') }}</td>
                             <td class="text-center">{{ _self.pill(rate ~ '%', rateColor) }}</td>
                             <td class="text-center" style="white-space: nowrap; color: var(--text-helper); font-size: 12px;">
                                 <i class="ri-calendar-line"></i> {{ row.date }}

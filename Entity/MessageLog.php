@@ -34,6 +34,7 @@ class MessageLog
     private ?\DateTimeInterface $dateSent = null;
     private ?\DateTimeInterface $dateDelivered = null;
     private ?\DateTimeInterface $dateRead = null;
+    private ?\DateTimeInterface $dateReplied = null;
     private ?int $whatsappMessageId = null;
 
     /**
@@ -133,6 +134,12 @@ class MessageLog
         $builder
             ->createField('dateRead', Types::DATETIME_MUTABLE)
             ->columnName('date_read')
+            ->nullable()
+            ->build();
+
+        $builder
+            ->createField('dateReplied', Types::DATETIME_MUTABLE)
+            ->columnName('date_replied')
             ->nullable()
             ->build();
 
@@ -330,6 +337,18 @@ class MessageLog
     public function setDateRead(\DateTimeInterface $dateRead): self
     {
         $this->dateRead = $dateRead;
+
+        return $this;
+    }
+
+    public function getDateReplied(): ?\DateTimeInterface
+    {
+        return $this->dateReplied;
+    }
+
+    public function setDateReplied(\DateTimeInterface $dateReplied): self
+    {
+        $this->dateReplied = $dateReplied;
 
         return $this;
     }

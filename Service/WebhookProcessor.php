@@ -238,39 +238,98 @@ class WebhookProcessor
             return;
         }
 
+        $contextId = $messageData['context']['id'] ?? null;
+
         try {
-            // Level 1 — Redis (~0.1ms): skip imediato se já processado nas últimas 24h
-            $redis = $this->getRedis();
-            if ($redis !== null && false !== $redis->get(self::REPLIED_CACHE_PREFIX . $from)) {
-                return;
-            }
-
-            // Level 2 — DB: localiza lead pelo campo mobile
-            $lead = $this->findLeadByMobile($from);
-            if (null === $lead) {
-                return;
-            }
-
-            // Só pontua se o lead já recebeu algum HSM — descarta respostas de estranhos
-            if (!$this->logRepository->hasLogForLead((int) $lead->getId())) {
-                return;
-            }
-
-            $now = new \DateTime();
-
-            $this->pointModel->triggerAction('dialoghsm.message_replied', null, null, $lead, true);
-            $this->eventLogWriter->writeReply($lead, $from, $now);
-
-            $this->leadModel->setFieldValues($lead, ['dialoghsm_last_reply' => $now]);
-            $this->leadModel->saveEntity($lead);
-
-            // Guarda no Redis para bloquear reprocessamento por 24h
-            if ($redis !== null) {
-                $redis->setEx(self::REPLIED_CACHE_PREFIX . $from, self::REPLIED_CACHE_TTL, '1');
+            if ($contextId !== null) {
+                // Scenario A: resposta direta ao HSM — correlação precisa via wamid
+                $this->processInboundDirect($from, $contextId);
+            } else {
+                // Scenario B: texto livre — correlação por telefone + janela de 24h
+                $this->processInboundFreeText($from);
             }
         } catch (\Throwable) {
             // falha silenciosa — não interrompe o fluxo do webhook
         }
+    }
+
+    /**
+     * Scenario A: context.id presente — localiza o MessageLog exato pelo wamid do HSM original.
+     * Cache key usa o contextId para não bloquear respostas a outros HSMs do mesmo contato.
+     */
+    private function processInboundDirect(string $from, string $contextId): void
+    {
+        $redis    = $this->getRedis();
+        $cacheKey = self::REPLIED_CACHE_PREFIX . $contextId;
+
+        if ($redis !== null && false !== $redis->get($cacheKey)) {
+            return;
+        }
+
+        $log = $this->logRepository->findByWamid($contextId);
+        if (null === $log || null === $log->getLeadId()) {
+            return;
+        }
+
+        if ($log->getDateReplied() !== null) {
+            return; // idempotência via DB
+        }
+
+        $lead = $this->leadModel->getEntity($log->getLeadId());
+        if (null === $lead) {
+            return;
+        }
+
+        $now = new \DateTime();
+        $this->persistReply($log, $lead, $from, $now);
+
+        if ($redis !== null) {
+            $redis->setEx($cacheKey, self::REPLIED_CACHE_TTL, '1');
+        }
+    }
+
+    /**
+     * Scenario B: sem context.id — correlação aproximada pelo telefone + HSM mais recente (24h).
+     * Cache key usa o número do remetente para deduplicar dentro da janela.
+     */
+    private function processInboundFreeText(string $from): void
+    {
+        $redis    = $this->getRedis();
+        $cacheKey = self::REPLIED_CACHE_PREFIX . $from;
+
+        if ($redis !== null && false !== $redis->get($cacheKey)) {
+            return;
+        }
+
+        $lead = $this->findLeadByMobile($from);
+        if (null === $lead) {
+            return;
+        }
+
+        $since = (new \DateTime())->modify('-24 hours');
+        $log   = $this->logRepository->findMostRecentForLead((int) $lead->getId(), $since);
+        if (null === $log) {
+            return; // nenhum HSM enviado nas últimas 24h — descarta estranhos
+        }
+
+        $now = new \DateTime();
+        $this->persistReply($log, $lead, $from, $now);
+
+        if ($redis !== null) {
+            $redis->setEx($cacheKey, self::REPLIED_CACHE_TTL, '1');
+        }
+    }
+
+    private function persistReply(MessageLog $log, Lead $lead, string $from, \DateTime $now): void
+    {
+        $log->setDateReplied($now);
+        $this->em->persist($log);
+        $this->em->flush();
+
+        $this->pointModel->triggerAction('dialoghsm.message_replied', null, null, $lead, true);
+        $this->eventLogWriter->writeReply($lead, $from, $now);
+        $this->leadModel->setFieldValues($lead, ['dialoghsm_last_reply' => $now]);
+        $this->leadModel->saveEntity($lead);
     }
 
     private function getRedis(): ?\Redis

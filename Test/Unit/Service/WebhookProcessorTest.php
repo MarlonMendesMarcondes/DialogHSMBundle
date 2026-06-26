@@ -1189,6 +1189,34 @@ class WebhookProcessorTest extends TestCase
         ];
     }
 
+    private function makeInboundPayloadWithContext(string $from, string $contextWamid): array
+    {
+        return [
+            'entry' => [[
+                'changes' => [[
+                    'value' => [
+                        'messages' => [[
+                            'from'      => $from,
+                            'id'        => 'wamid.inbound.reply',
+                            'type'      => 'text',
+                            'timestamp' => '1700000001',
+                            'context'   => ['id' => $contextWamid],
+                        ]],
+                    ],
+                ]],
+            ]],
+        ];
+    }
+
+    private function makeHsmLog(int $leadId): MessageLog
+    {
+        $log = new MessageLog();
+        $log->setLeadId($leadId);
+        $log->setStatus(MessageLog::STATUS_READ);
+
+        return $log;
+    }
+
     private function makeLeadRepo(array $results): LeadRepository&MockObject
     {
         $repo = $this->getMockBuilder(LeadRepository::class)
@@ -1205,10 +1233,15 @@ class WebhookProcessorTest extends TestCase
         $lead = $this->createMock(Lead::class);
         $lead->method('getId')->willReturn(77);
         $repo = $this->makeLeadRepo([$lead]);
+        $log  = $this->makeHsmLog(77);
 
         $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
         $this->em->method('getRepository')->willReturn($repo);
-        $this->logRepository->method('hasLogForLead')->with(77)->willReturn(true);
+        $this->em->method('persist');
+        $this->em->method('flush');
+        $this->logRepository->method('findMostRecentForLead')
+            ->with(77, $this->isInstanceOf(\DateTimeInterface::class))
+            ->willReturn($log);
 
         $this->pointModel->expects($this->once())
             ->method('triggerAction')
@@ -1231,9 +1264,15 @@ class WebhookProcessorTest extends TestCase
         $repo->method('getLeadsByFieldValue')
             ->willReturnOnConsecutiveCalls([], [$lead]);
 
+        $log = $this->makeHsmLog(77);
+
         $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
         $this->em->method('getRepository')->willReturn($repo);
-        $this->logRepository->method('hasLogForLead')->with(77)->willReturn(true);
+        $this->em->method('persist');
+        $this->em->method('flush');
+        $this->logRepository->method('findMostRecentForLead')
+            ->with(77, $this->isInstanceOf(\DateTimeInterface::class))
+            ->willReturn($log);
 
         $this->pointModel->expects($this->once())
             ->method('triggerAction')
@@ -1295,10 +1334,15 @@ class WebhookProcessorTest extends TestCase
         $lead = $this->createMock(Lead::class);
         $lead->method('getId')->willReturn(77);
         $repo = $this->makeLeadRepo([$lead]);
+        $log  = $this->makeHsmLog(77);
 
         $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
         $this->em->method('getRepository')->willReturn($repo);
-        $this->logRepository->method('hasLogForLead')->willReturn(true);
+        $this->em->method('persist');
+        $this->em->method('flush');
+        $this->logRepository->method('findMostRecentForLead')
+            ->with(77, $this->isInstanceOf(\DateTimeInterface::class))
+            ->willReturn($log);
 
         $capturedFields = null;
         $this->leadModel
@@ -1315,15 +1359,37 @@ class WebhookProcessorTest extends TestCase
         $this->assertInstanceOf(\DateTimeInterface::class, $capturedFields['dialoghsm_last_reply']);
     }
 
+    public function testInboundSetsDateRepliedOnMessageLog(): void
+    {
+        $lead = $this->createMock(Lead::class);
+        $lead->method('getId')->willReturn(77);
+        $repo = $this->makeLeadRepo([$lead]);
+        $log  = $this->makeHsmLog(77);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->em->method('getRepository')->willReturn($repo);
+        $this->em->method('persist');
+        $this->em->method('flush');
+        $this->logRepository->method('findMostRecentForLead')->willReturn($log);
+
+        $this->processor->process('+5511999999999', $this->makeInboundPayload('5511888888888'));
+
+        $this->assertNotNull($log->getDateReplied());
+        $this->assertInstanceOf(\DateTimeInterface::class, $log->getDateReplied());
+    }
+
     public function testInboundWritesReplyToEventLog(): void
     {
         $lead = $this->createMock(Lead::class);
         $lead->method('getId')->willReturn(77);
         $repo = $this->makeLeadRepo([$lead]);
+        $log  = $this->makeHsmLog(77);
 
         $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
         $this->em->method('getRepository')->willReturn($repo);
-        $this->logRepository->method('hasLogForLead')->willReturn(true);
+        $this->em->method('persist');
+        $this->em->method('flush');
+        $this->logRepository->method('findMostRecentForLead')->willReturn($log);
 
         $this->eventLogWriter->expects($this->once())
             ->method('writeReply')
@@ -1340,7 +1406,7 @@ class WebhookProcessorTest extends TestCase
 
         $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
         $this->em->method('getRepository')->willReturn($repo);
-        $this->logRepository->method('hasLogForLead')->willReturn(false);
+        $this->logRepository->method('findMostRecentForLead')->willReturn(null);
 
         $this->eventLogWriter->expects($this->never())->method('writeReply');
 
@@ -1355,7 +1421,9 @@ class WebhookProcessorTest extends TestCase
 
         $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
         $this->em->method('getRepository')->willReturn($repo);
-        $this->logRepository->method('hasLogForLead')->with(55)->willReturn(false);
+        $this->logRepository->method('findMostRecentForLead')
+            ->with(55, $this->isInstanceOf(\DateTimeInterface::class))
+            ->willReturn(null);
 
         $this->pointModel->expects($this->never())->method('triggerAction');
 
@@ -1399,6 +1467,7 @@ class WebhookProcessorTest extends TestCase
         $lead = $this->createMock(Lead::class);
         $lead->method('getId')->willReturn(77);
         $repo = $this->makeLeadRepo([$lead]);
+        $log  = $this->makeHsmLog(77);
 
         $redis = $this->createMock(\Redis::class);
         $redis->method('get')->with('dialoghsm:replied:5511888888888')->willReturn(false);
@@ -1408,7 +1477,9 @@ class WebhookProcessorTest extends TestCase
 
         $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
         $this->em->method('getRepository')->willReturn($repo);
-        $this->logRepository->method('hasLogForLead')->with(77)->willReturn(true);
+        $this->em->method('persist');
+        $this->em->method('flush');
+        $this->logRepository->method('findMostRecentForLead')->with(77, $this->isInstanceOf(\DateTimeInterface::class))->willReturn($log);
 
         $this->pointModel->expects($this->once())
             ->method('triggerAction')
@@ -1430,7 +1501,7 @@ class WebhookProcessorTest extends TestCase
 
         $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
         $this->em->method('getRepository')->willReturn($repo);
-        $this->logRepository->method('hasLogForLead')->with(77)->willReturn(false);
+        $this->logRepository->method('findMostRecentForLead')->willReturn(null);
 
         $this->pointModel->expects($this->never())->method('triggerAction');
 
@@ -1443,11 +1514,14 @@ class WebhookProcessorTest extends TestCase
         $lead = $this->createMock(Lead::class);
         $lead->method('getId')->willReturn(77);
         $repo = $this->makeLeadRepo([$lead]);
+        $log  = $this->makeHsmLog(77);
 
         // sem redis override → redisDsn = '' → getRedis() retorna null → DB path normal
         $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
         $this->em->method('getRepository')->willReturn($repo);
-        $this->logRepository->method('hasLogForLead')->with(77)->willReturn(true);
+        $this->em->method('persist');
+        $this->em->method('flush');
+        $this->logRepository->method('findMostRecentForLead')->with(77, $this->isInstanceOf(\DateTimeInterface::class))->willReturn($log);
 
         $this->pointModel->expects($this->once())
             ->method('triggerAction')
@@ -1485,12 +1559,14 @@ class WebhookProcessorTest extends TestCase
         $repo    = $this->makeLeadRepo([$lead]);
         $log     = $this->makeLog(MessageLog::STATUS_DELIVERED);
         $log->setLeadId(42);
+        $hsmLog  = $this->makeHsmLog(77);
 
         $this->leadModel->method('getEntity')->willReturn($lead);
         $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
         $this->logRepository->method('findByWamid')->willReturn($log);
-        $this->logRepository->method('hasLogForLead')->with(77)->willReturn(true);
+        $this->logRepository->method('findMostRecentForLead')->willReturn($hsmLog);
         $this->em->method('flush');
+        $this->em->method('persist');
         $this->em->method('getRepository')->willReturn($repo);
 
         // espera dois triggerAction: um para 'read' (status) e um para 'replied' (inbound)
@@ -1512,5 +1588,126 @@ class WebhookProcessorTest extends TestCase
         ];
 
         $this->processor->process('+5511999999999', $payload);
+    }
+
+    // =========================================================================
+    // processInbound — Scenario A: context.id (resposta direta ao HSM)
+    // =========================================================================
+
+    public function testInboundWithContextIdUsesWamidLookup(): void
+    {
+        $lead   = $this->createMock(Lead::class);
+        $lead->method('getId')->willReturn(77);
+        $hsmLog = $this->makeHsmLog(77);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->leadModel->method('getEntity')->with(77)->willReturn($lead);
+        $this->logRepository->expects($this->once())
+            ->method('findByWamid')
+            ->with('wamid.original.hsm')
+            ->willReturn($hsmLog);
+        $this->em->method('persist');
+        $this->em->method('flush');
+
+        $this->pointModel->expects($this->once())
+            ->method('triggerAction')
+            ->with('dialoghsm.message_replied', null, null, $lead, true);
+
+        $this->processor->process(
+            '+5511999999999',
+            $this->makeInboundPayloadWithContext('5511888888888', 'wamid.original.hsm')
+        );
+    }
+
+    public function testInboundContextIdSetsDateRepliedOnExactLog(): void
+    {
+        $lead   = $this->createMock(Lead::class);
+        $lead->method('getId')->willReturn(77);
+        $hsmLog = $this->makeHsmLog(77);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->leadModel->method('getEntity')->willReturn($lead);
+        $this->logRepository->method('findByWamid')->willReturn($hsmLog);
+        $this->em->method('persist');
+        $this->em->method('flush');
+
+        $this->processor->process(
+            '+5511999999999',
+            $this->makeInboundPayloadWithContext('5511888888888', 'wamid.original.hsm')
+        );
+
+        $this->assertNotNull($hsmLog->getDateReplied());
+    }
+
+    public function testInboundContextIdNotFoundInRepoIsSkipped(): void
+    {
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->with('wamid.unknown')->willReturn(null);
+
+        $this->pointModel->expects($this->never())->method('triggerAction');
+
+        $this->processor->process(
+            '+5511999999999',
+            $this->makeInboundPayloadWithContext('5511888888888', 'wamid.unknown')
+        );
+    }
+
+    public function testInboundContextIdAlreadyRepliedIsSkipped(): void
+    {
+        $lead   = $this->createMock(Lead::class);
+        $hsmLog = $this->makeHsmLog(77);
+        $hsmLog->setDateReplied(new \DateTime('-1 hour'));
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($hsmLog);
+
+        $this->pointModel->expects($this->never())->method('triggerAction');
+        $this->em->expects($this->never())->method('flush');
+
+        $this->processor->process(
+            '+5511999999999',
+            $this->makeInboundPayloadWithContext('5511888888888', 'wamid.original.hsm')
+        );
+    }
+
+    public function testInboundContextIdUsesContextIdAsCacheKey(): void
+    {
+        $lead   = $this->createMock(Lead::class);
+        $lead->method('getId')->willReturn(77);
+        $hsmLog = $this->makeHsmLog(77);
+
+        $redis = $this->createMock(\Redis::class);
+        $redis->method('get')->with('dialoghsm:replied:wamid.original.hsm')->willReturn(false);
+        $redis->expects($this->once())
+            ->method('setEx')
+            ->with('dialoghsm:replied:wamid.original.hsm', 86400, '1');
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->leadModel->method('getEntity')->willReturn($lead);
+        $this->logRepository->method('findByWamid')->willReturn($hsmLog);
+        $this->em->method('persist');
+        $this->em->method('flush');
+
+        $processor = $this->makeProcessorWithRedis($redis);
+        $processor->process(
+            '+5511999999999',
+            $this->makeInboundPayloadWithContext('5511888888888', 'wamid.original.hsm')
+        );
+    }
+
+    public function testInboundContextIdRedisCacheHitSkipsProcessing(): void
+    {
+        $redis = $this->createMock(\Redis::class);
+        $redis->method('get')->with('dialoghsm:replied:wamid.original.hsm')->willReturn('1');
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->expects($this->never())->method('findByWamid');
+        $this->pointModel->expects($this->never())->method('triggerAction');
+
+        $processor = $this->makeProcessorWithRedis($redis);
+        $processor->process(
+            '+5511999999999',
+            $this->makeInboundPayloadWithContext('5511888888888', 'wamid.original.hsm')
+        );
     }
 }
