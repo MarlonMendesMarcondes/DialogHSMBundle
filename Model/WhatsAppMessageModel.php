@@ -127,7 +127,8 @@ class WhatsAppMessageModel extends FormModel implements AjaxLookupModelInterface
         }
 
         $apiKey    = $number->getApiKey();
-        $baseUrl   = $number->getBaseUrl() ?? 'https://waba.360dialog.io';
+        $numberUrl = $number->getBaseUrl();
+        $baseUrl   = !empty($numberUrl) ? rtrim($numberUrl, '/') : 'https://waba-v2.360dialog.io/messages';
         $sent      = 0;
         $failed    = 0;
         $batchMin  = 0;

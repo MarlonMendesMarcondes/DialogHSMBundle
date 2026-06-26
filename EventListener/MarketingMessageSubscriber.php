@@ -63,7 +63,8 @@ class MarketingMessageSubscriber implements EventSubscriberInterface
         }
 
         $apiKey    = $number->getApiKey();
-        $baseUrl   = $number->getBaseUrl() ?? 'https://waba.360dialog.io';
+        $numberUrl = $number->getBaseUrl();
+        $baseUrl   = !empty($numberUrl) ? rtrim($numberUrl, '/') : 'https://waba-v2.360dialog.io/messages';
         $queueName = $number->getQueueName() ?? $number->getBatchQueueName();
 
         if (empty($apiKey)) {
@@ -149,7 +150,8 @@ class MarketingMessageSubscriber implements EventSubscriberInterface
         }
 
         $apiKey    = $number->getApiKey();
-        $baseUrl   = $number->getBaseUrl() ?? 'https://waba.360dialog.io';
+        $numberUrl = $number->getBaseUrl();
+        $baseUrl   = !empty($numberUrl) ? rtrim($numberUrl, '/') : 'https://waba-v2.360dialog.io/messages';
         $queueName = $number->getQueueName() ?? $number->getBatchQueueName();
 
         if (empty($apiKey)) {
