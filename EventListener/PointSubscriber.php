@@ -24,9 +24,20 @@ class PointSubscriber implements EventSubscriberInterface
             'label'    => 'dialoghsm.point.action.message_read',
             'callback' => [self::class, 'validateRead'],
         ]);
+
+        $event->addAction('dialoghsm.message_replied', [
+            'group'    => 'dialoghsm.point.group',
+            'label'    => 'dialoghsm.point.action.message_replied',
+            'callback' => [self::class, 'validateReplied'],
+        ]);
     }
 
     public static function validateRead(mixed $eventDetails, array $action): bool
+    {
+        return true;
+    }
+
+    public static function validateReplied(mixed $eventDetails, array $action): bool
     {
         return true;
     }

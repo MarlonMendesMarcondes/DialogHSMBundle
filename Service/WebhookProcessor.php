@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace MauticPlugin\DialogHSMBundle\Service;
 
 use Doctrine\ORM\EntityManagerInterface;
+use Mautic\LeadBundle\Entity\Lead;
+use Mautic\LeadBundle\Entity\LeadRepository;
 use Mautic\LeadBundle\Model\LeadModel;
 use Mautic\PointBundle\Model\PointModel;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
@@ -15,6 +17,11 @@ use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
 class WebhookProcessor
 {
+    private const REPLIED_CACHE_TTL    = 86_400;
+    private const REPLIED_CACHE_PREFIX = 'dialoghsm:replied:';
+
+    private ?\Redis $redis = null;
+
     public function __construct(
         private readonly WhatsAppNumberRepository $numberRepository,
         private readonly MessageLogRepository $logRepository,
@@ -23,6 +30,8 @@ class WebhookProcessor
         private readonly LeadModel $leadModel,
         private readonly LeadEventLogWriter $eventLogWriter,
         private readonly PointModel $pointModel,
+        private readonly string $redisDsn = '',
+        private readonly ?\Redis $redisOverride = null,
     ) {}
 
     /**
@@ -41,6 +50,9 @@ class WebhookProcessor
             foreach ($entry['changes'] ?? [] as $change) {
                 foreach ($change['value']['statuses'] ?? [] as $statusData) {
                     $this->processStatus($statusData);
+                }
+                foreach ($change['value']['messages'] ?? [] as $messageData) {
+                    $this->processInbound($messageData);
                 }
             }
         }
@@ -214,6 +226,102 @@ class WebhookProcessor
         } catch (\Throwable) {
             // falha silenciosa — não interrompe o fluxo do webhook
         }
+    }
+
+    /**
+     * @param array<string, mixed> $messageData
+     */
+    private function processInbound(array $messageData): void
+    {
+        $from = $messageData['from'] ?? '';
+        if (!$from) {
+            return;
+        }
+
+        try {
+            // Level 1 — Redis (~0.1ms): skip imediato se já processado nas últimas 24h
+            $redis = $this->getRedis();
+            if ($redis !== null && false !== $redis->get(self::REPLIED_CACHE_PREFIX . $from)) {
+                return;
+            }
+
+            // Level 2 — DB: localiza lead pelo campo mobile
+            $lead = $this->findLeadByMobile($from);
+            if (null === $lead) {
+                return;
+            }
+
+            // Só pontua se o lead já recebeu algum HSM — descarta respostas de estranhos
+            if (!$this->logRepository->hasLogForLead((int) $lead->getId())) {
+                return;
+            }
+
+            $this->pointModel->triggerAction('dialoghsm.message_replied', null, null, $lead, true);
+
+            // Guarda no Redis para bloquear reprocessamento por 24h
+            if ($redis !== null) {
+                $redis->setEx(self::REPLIED_CACHE_PREFIX . $from, self::REPLIED_CACHE_TTL, '1');
+            }
+        } catch (\Throwable) {
+            // falha silenciosa — não interrompe o fluxo do webhook
+        }
+    }
+
+    private function getRedis(): ?\Redis
+    {
+        if ($this->redisOverride !== null) {
+            return $this->redisOverride;
+        }
+
+        if ($this->redis !== null) {
+            try {
+                $this->redis->ping();
+
+                return $this->redis;
+            } catch (\Throwable) {
+                $this->redis = null;
+            }
+        }
+
+        if ('' === $this->redisDsn || !str_starts_with($this->redisDsn, 'redis')) {
+            return null;
+        }
+
+        try {
+            $parsed = parse_url($this->redisDsn);
+            $host   = $parsed['host'] ?? 'localhost';
+            $port   = (int) ($parsed['port'] ?? 6379);
+            $db     = isset($parsed['path']) ? (int) ltrim($parsed['path'], '/') : 0;
+
+            $r = new \Redis();
+            $r->connect($host, $port, 1.0);
+            if ($db > 0) {
+                $r->select($db);
+            }
+            $this->redis = $r;
+        } catch (\Throwable) {
+            return null;
+        }
+
+        return $this->redis;
+    }
+
+    private function findLeadByMobile(string $phone): ?Lead
+    {
+        /** @var LeadRepository $repo */
+        $repo = $this->em->getRepository(Lead::class);
+
+        // 360dialog envia sem '+'; Mautic pode ter gravado com ou sem
+        $candidates = [$phone, '+' . ltrim($phone, '+')];
+
+        foreach ($candidates as $candidate) {
+            $results = $repo->getLeadsByFieldValue('mobile', $candidate);
+            if (!empty($results)) {
+                return reset($results);
+            }
+        }
+
+        return null;
     }
 
     private function isValidTransition(?string $current, string $new): bool

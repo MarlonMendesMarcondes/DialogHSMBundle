@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Doctrine\ORM\EntityManagerInterface;
 use Mautic\LeadBundle\Entity\Lead;
+use Mautic\LeadBundle\Entity\LeadRepository;
 use Mautic\LeadBundle\Model\LeadModel;
 use Mautic\PointBundle\Model\PointModel;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
@@ -1164,5 +1165,295 @@ class WebhookProcessorTest extends TestCase
         $this->processor->process('+5511999999999', $this->makePayload([
             $this->makeStatusEntry('wamid.abc', 'read'),
         ]));
+    }
+
+    // =========================================================================
+    // processInbound — resposta do contato
+    // =========================================================================
+
+    private function makeInboundPayload(string $from, string $type = 'text'): array
+    {
+        return [
+            'entry' => [[
+                'changes' => [[
+                    'value' => [
+                        'messages' => [[
+                            'from'      => $from,
+                            'id'        => 'wamid.inbound.abc',
+                            'type'      => $type,
+                            'timestamp' => '1700000001',
+                        ]],
+                    ],
+                ]],
+            ]],
+        ];
+    }
+
+    private function makeLeadRepo(array $results): LeadRepository&MockObject
+    {
+        $repo = $this->getMockBuilder(LeadRepository::class)
+            ->disableOriginalConstructor()
+            ->onlyMethods(['getLeadsByFieldValue'])
+            ->getMock();
+        $repo->method('getLeadsByFieldValue')->willReturn($results);
+
+        return $repo;
+    }
+
+    public function testInboundMessageTriggersRepliedPointAction(): void
+    {
+        $lead = $this->createMock(Lead::class);
+        $lead->method('getId')->willReturn(77);
+        $repo = $this->makeLeadRepo([$lead]);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->em->method('getRepository')->willReturn($repo);
+        $this->logRepository->method('hasLogForLead')->with(77)->willReturn(true);
+
+        $this->pointModel->expects($this->once())
+            ->method('triggerAction')
+            ->with('dialoghsm.message_replied', null, null, $lead, true);
+
+        $this->processor->process('+5511999999999', $this->makeInboundPayload('5511888888888'));
+    }
+
+    public function testInboundFindsLeadWithPlusPrefix(): void
+    {
+        $lead = $this->createMock(Lead::class);
+        $lead->method('getId')->willReturn(77);
+
+        $repo = $this->getMockBuilder(LeadRepository::class)
+            ->disableOriginalConstructor()
+            ->onlyMethods(['getLeadsByFieldValue'])
+            ->getMock();
+
+        // primeira tentativa (sem +) retorna vazio; segunda (com +) retorna o lead
+        $repo->method('getLeadsByFieldValue')
+            ->willReturnOnConsecutiveCalls([], [$lead]);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->em->method('getRepository')->willReturn($repo);
+        $this->logRepository->method('hasLogForLead')->with(77)->willReturn(true);
+
+        $this->pointModel->expects($this->once())
+            ->method('triggerAction')
+            ->with('dialoghsm.message_replied', null, null, $lead, true);
+
+        $this->processor->process('+5511999999999', $this->makeInboundPayload('5511888888888'));
+    }
+
+    public function testInboundWithUnknownMobileDoesNotTriggerPointAction(): void
+    {
+        $repo = $this->makeLeadRepo([]);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->em->method('getRepository')->willReturn($repo);
+
+        $this->pointModel->expects($this->never())->method('triggerAction');
+
+        $this->processor->process('+5511999999999', $this->makeInboundPayload('5511000000000'));
+    }
+
+    public function testInboundWithoutFromFieldIsSkipped(): void
+    {
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->em->expects($this->never())->method('getRepository');
+
+        $this->pointModel->expects($this->never())->method('triggerAction');
+
+        $payload = [
+            'entry' => [[
+                'changes' => [[
+                    'value' => [
+                        'messages' => [['type' => 'text']], // sem 'from'
+                    ],
+                ]],
+            ]],
+        ];
+
+        $this->processor->process('+5511999999999', $payload);
+    }
+
+    public function testInboundExceptionDoesNotBreakWebhookFlow(): void
+    {
+        $repo = $this->getMockBuilder(LeadRepository::class)
+            ->disableOriginalConstructor()
+            ->onlyMethods(['getLeadsByFieldValue'])
+            ->getMock();
+        $repo->method('getLeadsByFieldValue')->willThrowException(new \RuntimeException('DB error'));
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->em->method('getRepository')->willReturn($repo);
+
+        $result = $this->processor->process('+5511999999999', $this->makeInboundPayload('5511888888888'));
+
+        $this->assertSame(200, $result);
+    }
+
+    public function testInboundSkippedWhenLeadHasNoHsmLog(): void
+    {
+        $lead = $this->createMock(Lead::class);
+        $lead->method('getId')->willReturn(55);
+        $repo = $this->makeLeadRepo([$lead]);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->em->method('getRepository')->willReturn($repo);
+        $this->logRepository->method('hasLogForLead')->with(55)->willReturn(false);
+
+        $this->pointModel->expects($this->never())->method('triggerAction');
+
+        $this->processor->process('+5511999999999', $this->makeInboundPayload('5511777777777'));
+    }
+
+    // =========================================================================
+    // processInbound — cache Redis de dois níveis
+    // =========================================================================
+
+    private function makeProcessorWithRedis(\Redis $redis): WebhookProcessor
+    {
+        return new WebhookProcessor(
+            $this->numberRepository,
+            $this->logRepository,
+            $this->em,
+            $this->dispatcher,
+            $this->leadModel,
+            $this->eventLogWriter,
+            $this->pointModel,
+            '',
+            $redis,
+        );
+    }
+
+    public function testRedisHitSkipsLeadLookupAndPointAction(): void
+    {
+        $redis = $this->createMock(\Redis::class);
+        $redis->method('get')->with('dialoghsm:replied:5511888888888')->willReturn('1');
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->em->expects($this->never())->method('getRepository');
+        $this->pointModel->expects($this->never())->method('triggerAction');
+
+        $processor = $this->makeProcessorWithRedis($redis);
+        $processor->process('+5511999999999', $this->makeInboundPayload('5511888888888'));
+    }
+
+    public function testRedisMissTriggersPointAndSetsKey(): void
+    {
+        $lead = $this->createMock(Lead::class);
+        $lead->method('getId')->willReturn(77);
+        $repo = $this->makeLeadRepo([$lead]);
+
+        $redis = $this->createMock(\Redis::class);
+        $redis->method('get')->with('dialoghsm:replied:5511888888888')->willReturn(false);
+        $redis->expects($this->once())
+            ->method('setEx')
+            ->with('dialoghsm:replied:5511888888888', 86400, '1');
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->em->method('getRepository')->willReturn($repo);
+        $this->logRepository->method('hasLogForLead')->with(77)->willReturn(true);
+
+        $this->pointModel->expects($this->once())
+            ->method('triggerAction')
+            ->with('dialoghsm.message_replied', null, null, $lead, true);
+
+        $processor = $this->makeProcessorWithRedis($redis);
+        $processor->process('+5511999999999', $this->makeInboundPayload('5511888888888'));
+    }
+
+    public function testRedisMissWithNoHsmLogDoesNotSetKey(): void
+    {
+        $lead = $this->createMock(Lead::class);
+        $lead->method('getId')->willReturn(77);
+        $repo = $this->makeLeadRepo([$lead]);
+
+        $redis = $this->createMock(\Redis::class);
+        $redis->method('get')->willReturn(false);
+        $redis->expects($this->never())->method('setEx');
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->em->method('getRepository')->willReturn($repo);
+        $this->logRepository->method('hasLogForLead')->with(77)->willReturn(false);
+
+        $this->pointModel->expects($this->never())->method('triggerAction');
+
+        $processor = $this->makeProcessorWithRedis($redis);
+        $processor->process('+5511999999999', $this->makeInboundPayload('5511888888888'));
+    }
+
+    public function testRedisUnavailableFallsBackToDbCheck(): void
+    {
+        $lead = $this->createMock(Lead::class);
+        $lead->method('getId')->willReturn(77);
+        $repo = $this->makeLeadRepo([$lead]);
+
+        // sem redis override → redisDsn = '' → getRedis() retorna null → DB path normal
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->em->method('getRepository')->willReturn($repo);
+        $this->logRepository->method('hasLogForLead')->with(77)->willReturn(true);
+
+        $this->pointModel->expects($this->once())
+            ->method('triggerAction')
+            ->with('dialoghsm.message_replied', null, null, $lead, true);
+
+        $this->processor->process('+5511999999999', $this->makeInboundPayload('5511888888888'));
+    }
+
+    public function testRedisExceptionDoesNotBreakWebhookFlow(): void
+    {
+        $redis = $this->createMock(\Redis::class);
+        $redis->method('get')->willThrowException(new \RedisException('connection refused'));
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+
+        $result = (new WebhookProcessor(
+            $this->numberRepository,
+            $this->logRepository,
+            $this->em,
+            $this->dispatcher,
+            $this->leadModel,
+            $this->eventLogWriter,
+            $this->pointModel,
+            '',
+            $redis,
+        ))->process('+5511999999999', $this->makeInboundPayload('5511888888888'));
+
+        $this->assertSame(200, $result);
+    }
+
+    public function testInboundAndStatusInSamePayloadBothProcessed(): void
+    {
+        $lead    = $this->createMock(Lead::class);
+        $lead->method('getId')->willReturn(77);
+        $repo    = $this->makeLeadRepo([$lead]);
+        $log     = $this->makeLog(MessageLog::STATUS_DELIVERED);
+        $log->setLeadId(42);
+
+        $this->leadModel->method('getEntity')->willReturn($lead);
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+        $this->logRepository->method('hasLogForLead')->with(77)->willReturn(true);
+        $this->em->method('flush');
+        $this->em->method('getRepository')->willReturn($repo);
+
+        // espera dois triggerAction: um para 'read' (status) e um para 'replied' (inbound)
+        $this->pointModel->expects($this->exactly(2))
+            ->method('triggerAction')
+            ->willReturnCallback(function (string $action): void {
+                $this->assertContains($action, ['dialoghsm.message_read', 'dialoghsm.message_replied']);
+            });
+
+        $payload = [
+            'entry' => [[
+                'changes' => [[
+                    'value' => [
+                        'statuses' => [$this->makeStatusEntry('wamid.abc', 'read')],
+                        'messages' => [['from' => '5511888888888', 'id' => 'wamid.in', 'type' => 'text']],
+                    ],
+                ]],
+            ]],
+        ];
+
+        $this->processor->process('+5511999999999', $payload);
     }
 }

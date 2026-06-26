@@ -273,6 +273,19 @@ class MessageLogRepository extends CommonRepository
         return $results[0] ?? null;
     }
 
+    public function hasLogForLead(int $leadId): bool
+    {
+        $count = (int) $this->createQueryBuilder('dhml')
+            ->select('COUNT(dhml.id)')
+            ->andWhere('dhml.leadId = :leadId')
+            ->setParameter('leadId', $leadId)
+            ->setMaxResults(1)
+            ->getQuery()
+            ->getSingleScalarResult();
+
+        return $count > 0;
+    }
+
     /**
      * Tamanho de cada lote no prune() e deleteQueued(). Limita o lock por statement a ~1k linhas,
      * evitando travamento prolongado em tabelas grandes.

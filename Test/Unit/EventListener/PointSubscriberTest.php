@@ -45,11 +45,11 @@ class PointSubscriberTest extends TestCase
     // onPointBuild — registro da ação
     // =========================================================================
 
-    public function testOnPointBuildRegistersOneAction(): void
+    public function testOnPointBuildRegistersTwoActions(): void
     {
         $event = $this->createMock(PointBuilderEvent::class);
 
-        $event->expects($this->once())->method('addAction');
+        $event->expects($this->exactly(2))->method('addAction');
 
         $this->subscriber->onPointBuild($event);
     }
@@ -67,6 +67,21 @@ class PointSubscriberTest extends TestCase
         $this->subscriber->onPointBuild($event);
 
         $this->assertArrayHasKey('dialoghsm.message_read', $registered);
+    }
+
+    public function testOnPointBuildRegistersMessageRepliedAction(): void
+    {
+        $registered = [];
+
+        $event = $this->createMock(PointBuilderEvent::class);
+        $event->method('addAction')
+            ->willReturnCallback(function (string $key, array $action) use (&$registered): void {
+                $registered[$key] = $action;
+            });
+
+        $this->subscriber->onPointBuild($event);
+
+        $this->assertArrayHasKey('dialoghsm.message_replied', $registered);
     }
 
     public function testRegisteredActionHasLabelGroupAndCallback(): void
@@ -104,6 +119,22 @@ class PointSubscriberTest extends TestCase
     public function testValidateReadIsStatic(): void
     {
         $reflection = new \ReflectionMethod(PointSubscriber::class, 'validateRead');
+
+        $this->assertTrue($reflection->isStatic());
+    }
+
+    // =========================================================================
+    // validateReplied — callback de validação
+    // =========================================================================
+
+    public function testValidateRepliedAlwaysReturnsTrue(): void
+    {
+        $this->assertTrue(PointSubscriber::validateReplied(null, []));
+    }
+
+    public function testValidateRepliedIsStatic(): void
+    {
+        $reflection = new \ReflectionMethod(PointSubscriber::class, 'validateReplied');
 
         $this->assertTrue($reflection->isStatic());
     }
