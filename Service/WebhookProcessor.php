@@ -13,6 +13,7 @@ use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumberRepository;
 use MauticPlugin\DialogHSMBundle\Event\WebhookMessageFailedEvent;
+use Psr\Log\LoggerInterface;
 use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
 class WebhookProcessor
@@ -31,6 +32,7 @@ class WebhookProcessor
         private readonly LeadEventLogWriter $eventLogWriter,
         private readonly PointModel $pointModel,
         private readonly RedisContactCache $contactCache,
+        private readonly LoggerInterface $logger,
         private readonly string $redisDsn = '',
         private readonly ?\Redis $redisOverride = null,
     ) {}
@@ -274,8 +276,14 @@ class WebhookProcessor
                     $redis->setEx('dialoghsm:inbound:'.$inboundWamid, 3600, '1');
                 }
             }
-        } catch (\Throwable) {
-            // falha silenciosa — não interrompe o fluxo do webhook
+        } catch (\Throwable $e) {
+            $this->logger->error('DialogHSM: processInbound falhou', [
+                'from'      => $from,
+                'type'      => $type,
+                'contextId' => $contextId,
+                'error'     => $e->getMessage(),
+                'trace'     => $e->getTraceAsString(),
+            ]);
         }
     }
 
@@ -321,7 +329,7 @@ class WebhookProcessor
 
     /**
      * Scenario B: sem context.id — fast path via Hash Redis (phone → wamid gravado no envio),
-     * com fallback para consulta DB quando Redis indisponível ou chave expirou.
+     * com fallback para consulta DB quando Redis indisponível, chave expirou ou wamid stale.
      *
      * isReplied NÃO é usado como guard inicial: evita bloqueio falso quando a resposta
      * chega antes do setLastSent do próximo HSM (race entre worker e webhook).
@@ -330,44 +338,95 @@ class WebhookProcessor
     private function processInboundFreeText(string $from, \DateTimeInterface $receivedAt): bool
     {
         // Fast path: Redis tem o wamid do último HSM → lookup indexado, sem query complexa.
-        // date_replied !== null garante idempotência sem precisar do flag isReplied.
         $cachedWamid = $this->contactCache->getLastWamid($from);
         if ($cachedWamid !== null) {
             $log = $this->logRepository->findByWamid($cachedWamid);
-            if ($log === null || $log->getLeadId() === null || $log->getDateReplied() !== null) {
+
+            if ($log === null) {
+                // wamid no Redis não encontrado no DB (stale ou race condition) — tenta fallback DB
+                $this->logger->warning('DialogHSM: Scenario B fast-path: wamid Redis não encontrado no DB, caindo no fallback', [
+                    'from'        => $from,
+                    'cachedWamid' => $cachedWamid,
+                ]);
+            } elseif ($log->getLeadId() === null) {
+                $this->logger->warning('DialogHSM: Scenario B fast-path: log sem lead_id', [
+                    'from'        => $from,
+                    'cachedWamid' => $cachedWamid,
+                    'logId'       => $log->getId(),
+                ]);
+
                 return false;
-            }
+            } elseif ($log->getDateReplied() !== null) {
+                $this->logger->info('DialogHSM: Scenario B fast-path: já respondido (idempotência)', [
+                    'from'        => $from,
+                    'cachedWamid' => $cachedWamid,
+                    'dateReplied' => $log->getDateReplied()->format('Y-m-d H:i:s'),
+                ]);
 
-            $lead = $this->leadModel->getEntity($log->getLeadId());
-            if ($lead === null) {
                 return false;
+            } else {
+                $lead = $this->leadModel->getEntity($log->getLeadId());
+                if ($lead === null) {
+                    $this->logger->warning('DialogHSM: Scenario B fast-path: lead não encontrado', [
+                        'from'   => $from,
+                        'leadId' => $log->getLeadId(),
+                    ]);
+
+                    return false;
+                }
+
+                $this->logger->info('DialogHSM: Scenario B fast-path: reply registrado via Redis', [
+                    'from'        => $from,
+                    'cachedWamid' => $cachedWamid,
+                    'leadId'      => $lead->getId(),
+                ]);
+                $this->persistReply($log, $lead, $from, new \DateTime());
+                $this->contactCache->markReplied($from);
+
+                return true;
             }
-
-            $this->persistReply($log, $lead, $from, new \DateTime());
-            $this->contactCache->markReplied($from);
-
-            return true;
+        } else {
+            $this->logger->info('DialogHSM: Scenario B: Redis sem wamid para o contato, usando fallback DB', [
+                'from' => $from,
+            ]);
         }
 
-        // Fallback DB: Redis indisponível ou chave expirou.
+        // Fallback DB: Redis indisponível, chave expirou ou wamid stale (log não encontrado acima).
         // isReplied guarda apenas este caminho (mais caro) — não o fast path acima.
-        // $before omitido: clock drift entre timestamp WhatsApp e date_sent do Mautic
-        // pode excluir o HSM correto; date_replied IS NULL já previne dupla-atribuição.
         if ($this->contactCache->isReplied($from)) {
+            $this->logger->info('DialogHSM: Scenario B fallback DB: contato já marcado como respondido no Redis', [
+                'from' => $from,
+            ]);
+
             return false;
         }
 
         $lead = $this->findLeadByMobile($from);
         if (null === $lead) {
+            $this->logger->warning('DialogHSM: Scenario B fallback DB: lead não encontrado pelo mobile', [
+                'from' => $from,
+            ]);
+
             return false;
         }
 
         $since = (new \DateTime())->modify('-24 hours');
         $log   = $this->logRepository->findMostRecentForLead((int) $lead->getId(), $since);
         if (null === $log) {
+            $this->logger->warning('DialogHSM: Scenario B fallback DB: nenhum HSM recente encontrado para o lead', [
+                'from'   => $from,
+                'leadId' => $lead->getId(),
+                'since'  => $since->format('Y-m-d H:i:s'),
+            ]);
+
             return false;
         }
 
+        $this->logger->info('DialogHSM: Scenario B fallback DB: reply registrado via DB', [
+            'from'   => $from,
+            'wamid'  => $log->getWamid(),
+            'leadId' => $lead->getId(),
+        ]);
         $this->persistReply($log, $lead, $from, new \DateTime());
         $this->contactCache->markReplied($from);
 
