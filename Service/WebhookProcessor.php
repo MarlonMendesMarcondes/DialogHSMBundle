@@ -49,6 +49,18 @@ class WebhookProcessor
             return 404;
         }
 
+        // DEBUG TEMPORÁRIO — remover após diagnóstico
+        $this->logger->error('DialogHSM DEBUG payload', [
+            'phoneNumber' => $phoneNumber,
+            'hasEntry'    => isset($payload['entry']),
+            'hasMessages' => isset($payload['messages']),
+            'hasStatuses' => isset($payload['statuses']),
+            'keys'        => array_keys($payload),
+            'firstEntry'  => isset($payload['entry'][0]) ? array_keys($payload['entry'][0]) : null,
+            'messages'    => $payload['messages'] ?? null,
+            'statuses'    => isset($payload['statuses']) ? count($payload['statuses']) : null,
+        ]);
+
         foreach ($payload['entry'] ?? [] as $entry) {
             foreach ($entry['changes'] ?? [] as $change) {
                 foreach ($change['value']['statuses'] ?? [] as $statusData) {
