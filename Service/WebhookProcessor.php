@@ -322,15 +322,15 @@ class WebhookProcessor
     /**
      * Scenario B: sem context.id — fast path via Hash Redis (phone → wamid gravado no envio),
      * com fallback para consulta DB quando Redis indisponível ou chave expirou.
+     *
+     * isReplied NÃO é usado como guard inicial: evita bloqueio falso quando a resposta
+     * chega antes do setLastSent do próximo HSM (race entre worker e webhook).
+     * A idempotência é garantida por date_replied IS NULL na query e pelo check explícito.
      */
     private function processInboundFreeText(string $from, \DateTimeInterface $receivedAt): bool
     {
-        // Dedup via Hash: contato já respondeu na janela atual
-        if ($this->contactCache->isReplied($from)) {
-            return false;
-        }
-
-        // Fast path: Redis tem o wamid do último HSM → lookup indexado, sem query complexa
+        // Fast path: Redis tem o wamid do último HSM → lookup indexado, sem query complexa.
+        // date_replied !== null garante idempotência sem precisar do flag isReplied.
         $cachedWamid = $this->contactCache->getLastWamid($from);
         if ($cachedWamid !== null) {
             $log = $this->logRepository->findByWamid($cachedWamid);
@@ -343,27 +343,32 @@ class WebhookProcessor
                 return false;
             }
 
-            $now = new \DateTime();
-            $this->persistReply($log, $lead, $from, $now);
+            $this->persistReply($log, $lead, $from, new \DateTime());
             $this->contactCache->markReplied($from);
 
             return true;
         }
 
-        // Fallback DB: Redis indisponível ou chave expirou
+        // Fallback DB: Redis indisponível ou chave expirou.
+        // isReplied guarda apenas este caminho (mais caro) — não o fast path acima.
+        // $before omitido: clock drift entre timestamp WhatsApp e date_sent do Mautic
+        // pode excluir o HSM correto; date_replied IS NULL já previne dupla-atribuição.
+        if ($this->contactCache->isReplied($from)) {
+            return false;
+        }
+
         $lead = $this->findLeadByMobile($from);
         if (null === $lead) {
             return false;
         }
 
         $since = (new \DateTime())->modify('-24 hours');
-        $log   = $this->logRepository->findMostRecentForLead((int) $lead->getId(), $since, $receivedAt);
+        $log   = $this->logRepository->findMostRecentForLead((int) $lead->getId(), $since);
         if (null === $log) {
             return false;
         }
 
-        $now = new \DateTime();
-        $this->persistReply($log, $lead, $from, $now);
+        $this->persistReply($log, $lead, $from, new \DateTime());
         $this->contactCache->markReplied($from);
 
         return true;

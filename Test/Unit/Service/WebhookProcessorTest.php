@@ -1244,7 +1244,7 @@ class WebhookProcessorTest extends TestCase
         $this->em->method('persist');
         $this->em->method('flush');
         $this->logRepository->method('findMostRecentForLead')
-            ->with(77, $this->isInstanceOf(\DateTimeInterface::class), $this->isInstanceOf(\DateTimeInterface::class))
+            ->with(77, $this->isInstanceOf(\DateTimeInterface::class))
             ->willReturn($log);
 
         $this->pointModel->expects($this->once())
@@ -1275,7 +1275,7 @@ class WebhookProcessorTest extends TestCase
         $this->em->method('persist');
         $this->em->method('flush');
         $this->logRepository->method('findMostRecentForLead')
-            ->with(77, $this->isInstanceOf(\DateTimeInterface::class), $this->isInstanceOf(\DateTimeInterface::class))
+            ->with(77, $this->isInstanceOf(\DateTimeInterface::class))
             ->willReturn($log);
 
         $this->pointModel->expects($this->once())
@@ -1345,7 +1345,7 @@ class WebhookProcessorTest extends TestCase
         $this->em->method('persist');
         $this->em->method('flush');
         $this->logRepository->method('findMostRecentForLead')
-            ->with(77, $this->isInstanceOf(\DateTimeInterface::class), $this->isInstanceOf(\DateTimeInterface::class))
+            ->with(77, $this->isInstanceOf(\DateTimeInterface::class))
             ->willReturn($log);
 
         $capturedFields = null;
@@ -1426,7 +1426,7 @@ class WebhookProcessorTest extends TestCase
         $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
         $this->em->method('getRepository')->willReturn($repo);
         $this->logRepository->method('findMostRecentForLead')
-            ->with(55, $this->isInstanceOf(\DateTimeInterface::class), $this->isInstanceOf(\DateTimeInterface::class))
+            ->with(55, $this->isInstanceOf(\DateTimeInterface::class))
             ->willReturn(null);
 
         $this->pointModel->expects($this->never())->method('triggerAction');
@@ -1490,7 +1490,7 @@ class WebhookProcessorTest extends TestCase
         $this->em->method('persist');
         $this->em->method('flush');
         $this->logRepository->method('findMostRecentForLead')
-            ->with(77, $this->isInstanceOf(\DateTimeInterface::class), $this->isInstanceOf(\DateTimeInterface::class))
+            ->with(77, $this->isInstanceOf(\DateTimeInterface::class))
             ->willReturn($log);
 
         $this->pointModel->expects($this->once())
@@ -1534,7 +1534,7 @@ class WebhookProcessorTest extends TestCase
         $this->em->method('persist');
         $this->em->method('flush');
         $this->logRepository->method('findMostRecentForLead')
-            ->with(77, $this->isInstanceOf(\DateTimeInterface::class), $this->isInstanceOf(\DateTimeInterface::class))
+            ->with(77, $this->isInstanceOf(\DateTimeInterface::class))
             ->willReturn($log);
 
         $this->pointModel->expects($this->once())
