@@ -49,18 +49,6 @@ class WebhookProcessor
             return 404;
         }
 
-        // DEBUG TEMPORÁRIO — remover após diagnóstico
-        $this->logger->error('DialogHSM DEBUG payload', [
-            'phoneNumber' => $phoneNumber,
-            'hasEntry'    => isset($payload['entry']),
-            'hasMessages' => isset($payload['messages']),
-            'hasStatuses' => isset($payload['statuses']),
-            'keys'        => array_keys($payload),
-            'firstEntry'  => isset($payload['entry'][0]) ? array_keys($payload['entry'][0]) : null,
-            'messages'    => $payload['messages'] ?? null,
-            'statuses'    => isset($payload['statuses']) ? count($payload['statuses']) : null,
-        ]);
-
         foreach ($payload['entry'] ?? [] as $entry) {
             foreach ($entry['changes'] ?? [] as $change) {
                 foreach ($change['value']['statuses'] ?? [] as $statusData) {
@@ -350,7 +338,19 @@ class WebhookProcessor
     private function processInboundFreeText(string $from, \DateTimeInterface $receivedAt): bool
     {
         // Fast path: Redis tem o wamid do último HSM → lookup indexado, sem query complexa.
-        $cachedWamid = $this->contactCache->getLastWamid($from);
+        // Tenta também com o número normalizado (BR: 12→13 dígitos, adiciona o 9º dígito).
+        $fromCandidates  = $this->getBRPhoneCandidates($from);
+        $cachedWamid     = null;
+        $effectiveFrom   = $from;
+        foreach ($fromCandidates as $candidate) {
+            $wamid = $this->contactCache->getLastWamid($candidate);
+            if ($wamid !== null) {
+                $cachedWamid   = $wamid;
+                $effectiveFrom = $candidate;
+                break;
+            }
+        }
+        $from = $effectiveFrom;
         if ($cachedWamid !== null) {
             $log = $this->logRepository->findByWamid($cachedWamid);
 
@@ -440,7 +440,9 @@ class WebhookProcessor
             'leadId' => $lead->getId(),
         ]);
         $this->persistReply($log, $lead, $from, new \DateTime());
-        $this->contactCache->markReplied($from);
+        foreach ($this->getBRPhoneCandidates($from) as $candidate) {
+            $this->contactCache->markReplied($candidate);
+        }
 
         return true;
     }
@@ -501,10 +503,7 @@ class WebhookProcessor
         /** @var LeadRepository $repo */
         $repo = $this->em->getRepository(Lead::class);
 
-        // 360dialog envia sem '+'; Mautic pode ter gravado com ou sem
-        $candidates = [$phone, '+' . ltrim($phone, '+')];
-
-        foreach ($candidates as $candidate) {
+        foreach ($this->getBRPhoneCandidates($phone) as $candidate) {
             $results = $repo->getLeadsByFieldValue('mobile', $candidate);
             if (!empty($results)) {
                 return reset($results);
@@ -512,6 +511,35 @@ class WebhookProcessor
         }
 
         return null;
+    }
+
+    /**
+     * Retorna variações do número para lidar com o 9º dígito brasileiro.
+     * A 360dialog envia números no formato antigo (12 dígitos: 55+DDD+8 dígitos),
+     * mas o Mautic pode ter gravado no formato novo (13 dígitos: 55+DDD+9+8 dígitos).
+     *
+     * @return string[]
+     */
+    private function getBRPhoneCandidates(string $phone): array
+    {
+        $clean      = ltrim($phone, '+');
+        $candidates = [$clean, '+' . $clean];
+
+        // BR 12→13: adiciona o 9 após o DDD (ex: 554499067833 → 5544999067833)
+        if (12 === strlen($clean) && str_starts_with($clean, '55')) {
+            $with9 = '55' . substr($clean, 2, 2) . '9' . substr($clean, 4);
+            $candidates[] = $with9;
+            $candidates[] = '+' . $with9;
+        }
+
+        // BR 13→12: remove o 9 após o DDD (ex: 5544999067833 → 554499067833)
+        if (13 === strlen($clean) && str_starts_with($clean, '55')) {
+            $without9 = '55' . substr($clean, 2, 2) . substr($clean, 5);
+            $candidates[] = $without9;
+            $candidates[] = '+' . $without9;
+        }
+
+        return array_unique($candidates);
     }
 
     private function isValidTransition(?string $current, string $new): bool

@@ -72,6 +72,13 @@ class LeadEventLogWriter
             return;
         }
 
+        $fmt = static fn (?\DateTimeInterface $dt): ?string => $dt === null ? null :
+            \DateTime::createFromInterface($dt)->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+
+        $normalizedPhone = $fromPhone !== '' && !str_starts_with($fromPhone, '+')
+            ? '+' . $fromPhone
+            : $fromPhone;
+
         $entry = new LeadEventLog();
         $entry
             ->setLead($lead)
@@ -81,9 +88,13 @@ class LeadEventLogWriter
             ->setAction(self::ACTION_REPLIED)
             ->setDateAdded($this->normalizeToUtc($date))
             ->setProperties(array_filter([
-                'phone_number'  => $fromPhone,
+                'phone_number'  => $normalizedPhone,
                 'template_name' => $log->getTemplateName(),
+                'sender_name'   => $log->getSenderName(),
+                'campaign_id'   => $log->getCampaignId(),
                 'wamid'         => $log->getWamid(),
+                'date_sent'     => $fmt($log->getDateSent()),
+                'date_replied'  => $fmt($date),
             ], static fn ($v) => $v !== null && $v !== ''));
 
         $this->eventLogRepository->saveEntity($entry);
