@@ -246,76 +246,114 @@ class LeadEventLogWriterTest extends TestCase
         return $lead;
     }
 
+    private function makeHsmLogMock(int $id, string $template = 'tpl-hsm', string $wamid = 'wamid.abc'): MessageLog&\PHPUnit\Framework\MockObject\MockObject
+    {
+        $log = $this->createMock(MessageLog::class);
+        $log->method('getId')->willReturn($id);
+        $log->method('getTemplateName')->willReturn($template);
+        $log->method('getWamid')->willReturn($wamid);
+
+        return $log;
+    }
+
+    private function stubExistsReply(bool $alreadyExists): void
+    {
+        $this->connection->method('fetchOne')->willReturn($alreadyExists ? '1' : false);
+    }
+
     public function testWriteReplyCallsSaveEntity(): void
     {
+        $this->stubExistsReply(false);
         $this->eventLogRepo->expects($this->once())->method('saveEntity')
             ->with($this->isInstanceOf(LeadEventLog::class));
 
-        $this->writer->writeReply($this->makeLead(99), '5511888888888', new \DateTime());
+        $this->writer->writeReply($this->makeLead(99), '5511888888888', new \DateTime(), $this->makeHsmLogMock(77));
     }
 
     public function testWriteReplyCallsDetachAfterSave(): void
     {
+        $this->stubExistsReply(false);
         $this->eventLogRepo->expects($this->once())->method('detachEntity');
 
-        $this->writer->writeReply($this->makeLead(99), '5511888888888', new \DateTime());
+        $this->writer->writeReply($this->makeLead(99), '5511888888888', new \DateTime(), $this->makeHsmLogMock(77));
     }
 
     public function testWriteReplySetsActionReplied(): void
     {
+        $this->stubExistsReply(false);
         $captured = null;
         $this->eventLogRepo->method('saveEntity')
             ->willReturnCallback(function (LeadEventLog $e) use (&$captured): void {
                 $captured = $e;
             });
 
-        $this->writer->writeReply($this->makeLead(99), '5511888888888', new \DateTime());
+        $this->writer->writeReply($this->makeLead(99), '5511888888888', new \DateTime(), $this->makeHsmLogMock(77));
 
         $this->assertSame(LeadEventLogWriter::ACTION_REPLIED, $captured->getAction());
     }
 
     public function testWriteReplySetsCorrectBundleAndObject(): void
     {
+        $this->stubExistsReply(false);
         $captured = null;
         $this->eventLogRepo->method('saveEntity')
             ->willReturnCallback(function (LeadEventLog $e) use (&$captured): void {
                 $captured = $e;
             });
 
-        $this->writer->writeReply($this->makeLead(99), '5511888888888', new \DateTime());
+        $this->writer->writeReply($this->makeLead(99), '5511888888888', new \DateTime(), $this->makeHsmLogMock(77));
 
         $this->assertSame(LeadEventLogWriter::BUNDLE, $captured->getBundle());
         $this->assertSame(LeadEventLogWriter::OBJECT, $captured->getObject());
     }
 
-    public function testWriteReplySetsObjectIdFromLead(): void
+    public function testWriteReplySetsObjectIdFromLog(): void
     {
+        $this->stubExistsReply(false);
         $captured = null;
         $this->eventLogRepo->method('saveEntity')
             ->willReturnCallback(function (LeadEventLog $e) use (&$captured): void {
                 $captured = $e;
             });
 
-        $this->writer->writeReply($this->makeLead(42), '5511888888888', new \DateTime());
+        $this->writer->writeReply($this->makeLead(99), '5511888888888', new \DateTime(), $this->makeHsmLogMock(42));
 
-        $this->assertSame(42, $captured->getObjectId());
+        $this->assertSame(42, $captured->getObjectId(),
+            'objectId deve vir do MessageLog, não do Lead');
     }
 
     public function testWriteReplySetsPhoneNumberInProperties(): void
     {
+        $this->stubExistsReply(false);
         $captured = null;
         $this->eventLogRepo->method('saveEntity')
             ->willReturnCallback(function (LeadEventLog $e) use (&$captured): void {
                 $captured = $e;
             });
 
-        $this->writer->writeReply($this->makeLead(99), '5511888888888', new \DateTime());
+        $this->writer->writeReply($this->makeLead(99), '5511888888888', new \DateTime(), $this->makeHsmLogMock(77));
 
         $this->assertSame('5511888888888', $captured->getProperties()['phone_number']);
     }
 
+    public function testWriteReplySetsTemplateNameInProperties(): void
+    {
+        $this->stubExistsReply(false);
+        $captured = null;
+        $this->eventLogRepo->method('saveEntity')
+            ->willReturnCallback(function (LeadEventLog $e) use (&$captured): void {
+                $captured = $e;
+            });
+
+        $this->writer->writeReply($this->makeLead(99), '5511888888888', new \DateTime(), $this->makeHsmLogMock(77, 'meu-template', 'wamid.xyz'));
+
+        $this->assertSame('meu-template', $captured->getProperties()['template_name']);
+        $this->assertSame('wamid.xyz', $captured->getProperties()['wamid']);
+    }
+
     public function testWriteReplyNormalizesDateToUtc(): void
     {
+        $this->stubExistsReply(false);
         $captured  = null;
         $localDate = new \DateTime('2025-06-25 10:00:00', new \DateTimeZone('America/Sao_Paulo'));
         $this->eventLogRepo->method('saveEntity')
@@ -323,19 +361,35 @@ class LeadEventLogWriterTest extends TestCase
                 $captured = $e;
             });
 
-        $this->writer->writeReply($this->makeLead(99), '5511888888888', $localDate);
+        $this->writer->writeReply($this->makeLead(99), '5511888888888', $localDate, $this->makeHsmLogMock(77));
 
         $stored = $captured->getDateAdded();
         $this->assertSame('UTC', $stored->getTimezone()->getName());
         $this->assertSame('2025-06-25 13:00:00', $stored->format('Y-m-d H:i:s'));
     }
 
-    public function testWriteReplyDoesNotQueryExistsTable(): void
+    public function testWriteReplySkipsWhenLogIdIsZero(): void
     {
-        $this->connection->expects($this->never())->method('fetchOne');
+        $this->eventLogRepo->expects($this->never())->method('saveEntity');
+
+        $this->writer->writeReply($this->makeLead(99), '5511888888888', new \DateTime(), $this->makeHsmLogMock(0));
+    }
+
+    public function testWriteReplyIsIdempotentWhenAlreadyReplied(): void
+    {
+        $this->stubExistsReply(true); // already exists in DB
+        $this->eventLogRepo->expects($this->never())->method('saveEntity');
+
+        $this->writer->writeReply($this->makeLead(99), '5511888888888', new \DateTime(), $this->makeHsmLogMock(77));
+    }
+
+    public function testWriteReplyChecksExistenceBeforeSaving(): void
+    {
+        $this->stubExistsReply(false);
+        $this->connection->expects($this->once())->method('fetchOne');
         $this->eventLogRepo->method('saveEntity');
 
-        $this->writer->writeReply($this->makeLead(99), '5511888888888', new \DateTime());
+        $this->writer->writeReply($this->makeLead(99), '5511888888888', new \DateTime(), $this->makeHsmLogMock(77));
     }
 
 }

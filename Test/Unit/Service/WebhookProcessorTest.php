@@ -1397,7 +1397,7 @@ class WebhookProcessorTest extends TestCase
 
         $this->eventLogWriter->expects($this->once())
             ->method('writeReply')
-            ->with($lead, '5511888888888', $this->isInstanceOf(\DateTimeInterface::class));
+            ->with($lead, '5511888888888', $this->isInstanceOf(\DateTimeInterface::class), $this->isInstanceOf(MessageLog::class));
 
         $this->processor->process('+5511999999999', $this->makeInboundPayload('5511888888888'));
     }

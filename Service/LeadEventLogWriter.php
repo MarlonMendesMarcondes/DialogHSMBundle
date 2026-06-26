@@ -62,19 +62,29 @@ class LeadEventLogWriter
      */
     /**
      * Grava um evento de resposta inbound em lead_event_log.
-     * Não tem idempotência — dedup é responsabilidade do Redis cache em WebhookProcessor.
+     * Requer o MessageLog do disparo original — sem ele, o evento não é registrado.
+     * Idempotente: não grava se já existe entry para este log_id + action replied.
      */
-    public function writeReply(Lead $lead, string $fromPhone, \DateTimeInterface $date): void
+    public function writeReply(Lead $lead, string $fromPhone, \DateTimeInterface $date, MessageLog $log): void
     {
+        $logId = (int) $log->getId();
+        if ($logId === 0 || $this->exists($logId, self::ACTION_REPLIED)) {
+            return;
+        }
+
         $entry = new LeadEventLog();
         $entry
             ->setLead($lead)
             ->setBundle(self::BUNDLE)
             ->setObject(self::OBJECT)
-            ->setObjectId((int) $lead->getId())
+            ->setObjectId($logId)
             ->setAction(self::ACTION_REPLIED)
             ->setDateAdded($this->normalizeToUtc($date))
-            ->setProperties(['phone_number' => $fromPhone]);
+            ->setProperties(array_filter([
+                'phone_number'  => $fromPhone,
+                'template_name' => $log->getTemplateName(),
+                'wamid'         => $log->getWamid(),
+            ], static fn ($v) => $v !== null && $v !== ''));
 
         $this->eventLogRepository->saveEntity($entry);
         $this->eventLogRepository->detachEntity($entry);

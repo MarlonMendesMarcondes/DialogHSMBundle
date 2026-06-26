@@ -376,7 +376,7 @@ class WebhookProcessor
         $this->em->flush();
 
         $this->pointModel->triggerAction('dialoghsm.message_replied', null, null, $lead, true);
-        $this->eventLogWriter->writeReply($lead, $from, $now);
+        $this->eventLogWriter->writeReply($lead, $from, $now, $log);
         $this->leadModel->setFieldValues($lead, ['dialoghsm_last_reply' => $now]);
         $this->leadModel->saveEntity($lead);
     }
