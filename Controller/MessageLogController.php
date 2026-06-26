@@ -10,6 +10,7 @@ use Mautic\IntegrationsBundle\Helper\IntegrationsHelper;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Integration\DialogHSMIntegration;
+use MauticPlugin\DialogHSMBundle\Service\LeadEventLogWriter;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -52,7 +53,7 @@ class MessageLogController extends FormController
         }
     }
 
-    public function dashboardAction(Request $request, MessageLogRepository $messageLogRepository): Response
+    public function dashboardAction(Request $request, MessageLogRepository $messageLogRepository, LeadEventLogWriter $eventLogWriter): Response
     {
         $allowedDays = [7, 14, 30];
         $chartDays   = in_array((int) $request->query->get('days', 7), $allowedDays, true)
@@ -70,14 +71,16 @@ class MessageLogController extends FormController
 
         $dashboardData = $this->cache->get(
             "dialoghsm.dashboard.all.{$chartDays}.{$hourSlot}",
-            function (ItemInterface $item) use ($messageLogRepository, $from24h, $from7d, $chartDays, $timezone): array {
+            function (ItemInterface $item) use ($messageLogRepository, $eventLogWriter, $from24h, $from7d, $chartDays, $timezone): array {
                 $item->expiresAfter(self::DASHBOARD_CACHE_TTL);
 
                 return [
-                    'stats24h'   => $messageLogRepository->getStatsByPeriod($from24h),
-                    'stats7d'    => $messageLogRepository->getStatsByPeriod($from7d),
-                    'chartRaw'   => $messageLogRepository->getChartData($chartDays, $timezone),
-                    'dispatches' => $messageLogRepository->getGroupedDispatches(),
+                    'stats24h'    => $messageLogRepository->getStatsByPeriod($from24h),
+                    'stats7d'     => $messageLogRepository->getStatsByPeriod($from7d),
+                    'chartRaw'    => $messageLogRepository->getChartData($chartDays, $timezone),
+                    'dispatches'  => $messageLogRepository->getGroupedDispatches(),
+                    'replied24h'  => $eventLogWriter->countReplied($from24h),
+                    'replied7d'   => $eventLogWriter->countReplied($from7d),
                 ];
             }
         );
@@ -86,6 +89,8 @@ class MessageLogController extends FormController
         $stats7d    = $dashboardData['stats7d'];
         $chartRaw   = $dashboardData['chartRaw'];
         $dispatches = $dashboardData['dispatches'];
+        $replied24h = $dashboardData['replied24h'];
+        $replied7d  = $dashboardData['replied7d'];
 
         // Prepara dados para Chart.js
         $labels   = array_keys($chartRaw);
@@ -110,13 +115,15 @@ class MessageLogController extends FormController
 
         return $this->delegateView([
             'viewParameters'  => [
-                'stats24h'   => $stats24h,
-                'stats7d'    => $stats7d,
-                'chartJson'  => json_encode(['labels' => $labels, 'datasets' => $datasets]),
-                'chartDays'  => $chartDays,
-                'timezone'   => $this->coreParametersHelper->get('default_timezone', 'UTC'),
-                'dispatches' => $dispatches,
-                'tmpl'       => 'index',
+                'stats24h'    => $stats24h,
+                'stats7d'     => $stats7d,
+                'replied24h'  => $replied24h,
+                'replied7d'   => $replied7d,
+                'chartJson'   => json_encode(['labels' => $labels, 'datasets' => $datasets]),
+                'chartDays'   => $chartDays,
+                'timezone'    => $this->coreParametersHelper->get('default_timezone', 'UTC'),
+                'dispatches'  => $dispatches,
+                'tmpl'        => 'index',
             ],
             'contentTemplate' => '@DialogHSM/MessageLog/dashboard.html.twig',
             'passthroughVars' => [

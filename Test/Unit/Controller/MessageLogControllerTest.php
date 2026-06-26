@@ -6,6 +6,7 @@ use Mautic\CoreBundle\Helper\CoreParametersHelper;
 use MauticPlugin\DialogHSMBundle\Controller\MessageLogController;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
+use MauticPlugin\DialogHSMBundle\Service\LeadEventLogWriter;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpFoundation\Request;
@@ -18,6 +19,7 @@ class MessageLogControllerTest extends TestCase
 {
     /** @var MessageLogRepository&MockObject */
     private MessageLogRepository $repo;
+    private LeadEventLogWriter&MockObject $eventLogWriter;
 
     protected function setUp(): void
     {
@@ -34,6 +36,12 @@ class MessageLogControllerTest extends TestCase
                 'getGroupedDispatches',
             ])
             ->getMock();
+
+        $this->eventLogWriter = $this->getMockBuilder(LeadEventLogWriter::class)
+            ->disableOriginalConstructor()
+            ->onlyMethods(['write', 'writeReply', 'countReplied'])
+            ->getMock();
+        $this->eventLogWriter->method('countReplied')->willReturn(0);
     }
 
     /**
@@ -269,7 +277,7 @@ class MessageLogControllerTest extends TestCase
             });
         $controller->method('generateUrl')->willReturn('/');
 
-        $controller->dashboardAction(Request::create('/dashboard'), $this->repo);
+        $controller->dashboardAction(Request::create('/dashboard'), $this->repo, $this->eventLogWriter);
 
         $this->assertSame($dispatches, $capturedArgs['viewParameters']['dispatches']);
     }
@@ -288,7 +296,7 @@ class MessageLogControllerTest extends TestCase
         $controller->method('delegateView')->willReturn(new Response());
         $controller->method('generateUrl')->willReturn('/');
 
-        $controller->dashboardAction(Request::create('/dashboard'), $this->repo);
+        $controller->dashboardAction(Request::create('/dashboard'), $this->repo, $this->eventLogWriter);
     }
 
     public function testDashboardActionDefaultChartDaysIsSeven(): void
@@ -311,7 +319,7 @@ class MessageLogControllerTest extends TestCase
             });
         $controller->method('generateUrl')->willReturn('/');
 
-        $controller->dashboardAction(Request::create('/dashboard'), $this->repo);
+        $controller->dashboardAction(Request::create('/dashboard'), $this->repo, $this->eventLogWriter);
 
         $this->assertSame(7, $capturedArgs['viewParameters']['chartDays']);
     }
@@ -337,7 +345,7 @@ class MessageLogControllerTest extends TestCase
         $controller->method('generateUrl')->willReturn('/');
 
         // 99 is not in [7, 14, 30] — must fall back to 7
-        $controller->dashboardAction(Request::create('/dashboard', 'GET', ['days' => '99']), $this->repo);
+        $controller->dashboardAction(Request::create('/dashboard', 'GET', ['days' => '99']), $this->repo, $this->eventLogWriter);
 
         $this->assertSame(7, $capturedArgs['viewParameters']['chartDays']);
     }
@@ -370,6 +378,8 @@ class MessageLogControllerTest extends TestCase
             'stats7d'    => $cachedStats,
             'chartRaw'   => [],
             'dispatches' => [],
+            'replied24h' => 0,
+            'replied7d'  => 0,
         ];
 
         $cache = $this->createMock(CacheInterface::class);
@@ -384,7 +394,7 @@ class MessageLogControllerTest extends TestCase
         $controller->method('delegateView')->willReturn(new Response());
         $controller->method('generateUrl')->willReturn('/');
 
-        $controller->dashboardAction(Request::create('/dashboard'), $this->repo);
+        $controller->dashboardAction(Request::create('/dashboard'), $this->repo, $this->eventLogWriter);
     }
 
     /**
@@ -405,7 +415,7 @@ class MessageLogControllerTest extends TestCase
         $controller->method('delegateView')->willReturn(new Response());
         $controller->method('generateUrl')->willReturn('/');
 
-        $controller->dashboardAction(Request::create('/dashboard'), $this->repo);
+        $controller->dashboardAction(Request::create('/dashboard'), $this->repo, $this->eventLogWriter);
     }
 
     /**
@@ -445,7 +455,7 @@ class MessageLogControllerTest extends TestCase
         $controller->method('delegateView')->willReturn(new Response());
         $controller->method('generateUrl')->willReturn('/');
 
-        $controller->dashboardAction(Request::create('/dashboard'), $this->repo);
+        $controller->dashboardAction(Request::create('/dashboard'), $this->repo, $this->eventLogWriter);
 
         $expectedSlot = (new \DateTime())->format('YmdH');
         foreach ($capturedKeys as $key) {

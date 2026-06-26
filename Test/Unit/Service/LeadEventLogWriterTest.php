@@ -233,4 +233,146 @@ class LeadEventLogWriterTest extends TestCase
         $this->assertSame(LeadEventLogWriter::BUNDLE, $capturedParams['bundle']);
         $this->assertSame(LeadEventLogWriter::OBJECT, $capturedParams['object']);
     }
+
+    // =========================================================================
+    // writeReply — resposta inbound do contato
+    // =========================================================================
+
+    private function makeLead(int $id): Lead&\PHPUnit\Framework\MockObject\MockObject
+    {
+        $lead = $this->createMock(Lead::class);
+        $lead->method('getId')->willReturn($id);
+
+        return $lead;
+    }
+
+    public function testWriteReplyCallsSaveEntity(): void
+    {
+        $this->eventLogRepo->expects($this->once())->method('saveEntity')
+            ->with($this->isInstanceOf(LeadEventLog::class));
+
+        $this->writer->writeReply($this->makeLead(99), '5511888888888', new \DateTime());
+    }
+
+    public function testWriteReplyCallsDetachAfterSave(): void
+    {
+        $this->eventLogRepo->expects($this->once())->method('detachEntity');
+
+        $this->writer->writeReply($this->makeLead(99), '5511888888888', new \DateTime());
+    }
+
+    public function testWriteReplySetsActionReplied(): void
+    {
+        $captured = null;
+        $this->eventLogRepo->method('saveEntity')
+            ->willReturnCallback(function (LeadEventLog $e) use (&$captured): void {
+                $captured = $e;
+            });
+
+        $this->writer->writeReply($this->makeLead(99), '5511888888888', new \DateTime());
+
+        $this->assertSame(LeadEventLogWriter::ACTION_REPLIED, $captured->getAction());
+    }
+
+    public function testWriteReplySetsCorrectBundleAndObject(): void
+    {
+        $captured = null;
+        $this->eventLogRepo->method('saveEntity')
+            ->willReturnCallback(function (LeadEventLog $e) use (&$captured): void {
+                $captured = $e;
+            });
+
+        $this->writer->writeReply($this->makeLead(99), '5511888888888', new \DateTime());
+
+        $this->assertSame(LeadEventLogWriter::BUNDLE, $captured->getBundle());
+        $this->assertSame(LeadEventLogWriter::OBJECT, $captured->getObject());
+    }
+
+    public function testWriteReplySetsObjectIdFromLead(): void
+    {
+        $captured = null;
+        $this->eventLogRepo->method('saveEntity')
+            ->willReturnCallback(function (LeadEventLog $e) use (&$captured): void {
+                $captured = $e;
+            });
+
+        $this->writer->writeReply($this->makeLead(42), '5511888888888', new \DateTime());
+
+        $this->assertSame(42, $captured->getObjectId());
+    }
+
+    public function testWriteReplySetsPhoneNumberInProperties(): void
+    {
+        $captured = null;
+        $this->eventLogRepo->method('saveEntity')
+            ->willReturnCallback(function (LeadEventLog $e) use (&$captured): void {
+                $captured = $e;
+            });
+
+        $this->writer->writeReply($this->makeLead(99), '5511888888888', new \DateTime());
+
+        $this->assertSame('5511888888888', $captured->getProperties()['phone_number']);
+    }
+
+    public function testWriteReplyNormalizesDateToUtc(): void
+    {
+        $captured  = null;
+        $localDate = new \DateTime('2025-06-25 10:00:00', new \DateTimeZone('America/Sao_Paulo'));
+        $this->eventLogRepo->method('saveEntity')
+            ->willReturnCallback(function (LeadEventLog $e) use (&$captured): void {
+                $captured = $e;
+            });
+
+        $this->writer->writeReply($this->makeLead(99), '5511888888888', $localDate);
+
+        $stored = $captured->getDateAdded();
+        $this->assertSame('UTC', $stored->getTimezone()->getName());
+        $this->assertSame('2025-06-25 13:00:00', $stored->format('Y-m-d H:i:s'));
+    }
+
+    public function testWriteReplyDoesNotQueryExistsTable(): void
+    {
+        $this->connection->expects($this->never())->method('fetchOne');
+        $this->eventLogRepo->method('saveEntity');
+
+        $this->writer->writeReply($this->makeLead(99), '5511888888888', new \DateTime());
+    }
+
+    // =========================================================================
+    // countReplied
+    // =========================================================================
+
+    public function testCountRepliedReturnsInteger(): void
+    {
+        $this->connection->method('fetchOne')->willReturn('3');
+
+        $result = $this->writer->countReplied(new \DateTime('-24 hours'));
+
+        $this->assertSame(3, $result);
+    }
+
+    public function testCountRepliedReturnsZeroWhenNone(): void
+    {
+        $this->connection->method('fetchOne')->willReturn('0');
+
+        $result = $this->writer->countReplied(new \DateTime('-7 days'));
+
+        $this->assertSame(0, $result);
+    }
+
+    public function testCountRepliedQueriesWithCorrectAction(): void
+    {
+        $capturedParams = null;
+        $this->connection->method('fetchOne')
+            ->willReturnCallback(function (string $sql, array $params) use (&$capturedParams) {
+                $capturedParams = $params;
+                return '0';
+            });
+
+        $this->writer->countReplied(new \DateTime('-24 hours'));
+
+        $this->assertSame(LeadEventLogWriter::ACTION_REPLIED, $capturedParams['action']);
+        $this->assertSame(LeadEventLogWriter::BUNDLE, $capturedParams['bundle']);
+        $this->assertSame(LeadEventLogWriter::OBJECT, $capturedParams['object']);
+    }
 }

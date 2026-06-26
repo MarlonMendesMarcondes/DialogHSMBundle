@@ -25,6 +25,8 @@ class LeadEventLogWriter
         $this->eventLogRepository = $repo;
     }
 
+    public const ACTION_REPLIED = 'replied';
+
     /**
      * Grava um evento em lead_event_log para o status informado.
      * Idempotente: ignora se já existe (bundle, object, action, object_id).
@@ -58,6 +60,26 @@ class LeadEventLogWriter
      *
      * @return array<string, mixed>
      */
+    /**
+     * Grava um evento de resposta inbound em lead_event_log.
+     * Não tem idempotência — dedup é responsabilidade do Redis cache em WebhookProcessor.
+     */
+    public function writeReply(Lead $lead, string $fromPhone, \DateTimeInterface $date): void
+    {
+        $entry = new LeadEventLog();
+        $entry
+            ->setLead($lead)
+            ->setBundle(self::BUNDLE)
+            ->setObject(self::OBJECT)
+            ->setObjectId((int) $lead->getId())
+            ->setAction(self::ACTION_REPLIED)
+            ->setDateAdded($this->normalizeToUtc($date))
+            ->setProperties(['phone_number' => $fromPhone]);
+
+        $this->eventLogRepository->saveEntity($entry);
+        $this->eventLogRepository->detachEntity($entry);
+    }
+
     private function buildProperties(MessageLog $log): array
     {
         $fmt = static fn (?\DateTimeInterface $dt): ?string => $dt === null ? null :
@@ -75,6 +97,22 @@ class LeadEventLogWriter
             'error_message'      => $log->getErrorMessage(),
             'webhook_error_code' => $log->getWebhookErrorCode(),
         ], static fn ($v) => $v !== null && $v !== '');
+    }
+
+    public function countReplied(\DateTime $since): int
+    {
+        $conn  = $this->em->getConnection();
+        $table = $this->em->getClassMetadata(LeadEventLog::class)->getTableName();
+
+        return (int) $conn->fetchOne(
+            "SELECT COUNT(*) FROM {$table} WHERE bundle = :bundle AND object = :object AND action = :action AND date_added >= :since",
+            [
+                'bundle' => self::BUNDLE,
+                'object' => self::OBJECT,
+                'action' => self::ACTION_REPLIED,
+                'since'  => $since->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s'),
+            ]
+        );
     }
 
     private function normalizeToUtc(\DateTimeInterface $date): \DateTime

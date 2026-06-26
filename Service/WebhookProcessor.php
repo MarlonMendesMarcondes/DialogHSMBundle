@@ -256,7 +256,13 @@ class WebhookProcessor
                 return;
             }
 
+            $now = new \DateTime();
+
             $this->pointModel->triggerAction('dialoghsm.message_replied', null, null, $lead, true);
+            $this->eventLogWriter->writeReply($lead, $from, $now);
+
+            $this->leadModel->setFieldValues($lead, ['dialoghsm_last_reply' => $now]);
+            $this->leadModel->saveEntity($lead);
 
             // Guarda no Redis para bloquear reprocessamento por 24h
             if ($redis !== null) {

@@ -1290,6 +1290,63 @@ class WebhookProcessorTest extends TestCase
         $this->assertSame(200, $result);
     }
 
+    public function testInboundSetsLastReplyFieldOnLead(): void
+    {
+        $lead = $this->createMock(Lead::class);
+        $lead->method('getId')->willReturn(77);
+        $repo = $this->makeLeadRepo([$lead]);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->em->method('getRepository')->willReturn($repo);
+        $this->logRepository->method('hasLogForLead')->willReturn(true);
+
+        $capturedFields = null;
+        $this->leadModel
+            ->expects($this->once())
+            ->method('setFieldValues')
+            ->willReturnCallback(function ($l, array $fields) use (&$capturedFields): void {
+                $capturedFields = $fields;
+            });
+        $this->leadModel->expects($this->once())->method('saveEntity')->with($lead);
+
+        $this->processor->process('+5511999999999', $this->makeInboundPayload('5511888888888'));
+
+        $this->assertArrayHasKey('dialoghsm_last_reply', $capturedFields);
+        $this->assertInstanceOf(\DateTimeInterface::class, $capturedFields['dialoghsm_last_reply']);
+    }
+
+    public function testInboundWritesReplyToEventLog(): void
+    {
+        $lead = $this->createMock(Lead::class);
+        $lead->method('getId')->willReturn(77);
+        $repo = $this->makeLeadRepo([$lead]);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->em->method('getRepository')->willReturn($repo);
+        $this->logRepository->method('hasLogForLead')->willReturn(true);
+
+        $this->eventLogWriter->expects($this->once())
+            ->method('writeReply')
+            ->with($lead, '5511888888888', $this->isInstanceOf(\DateTimeInterface::class));
+
+        $this->processor->process('+5511999999999', $this->makeInboundPayload('5511888888888'));
+    }
+
+    public function testInboundWithNoHsmLogDoesNotWriteReply(): void
+    {
+        $lead = $this->createMock(Lead::class);
+        $lead->method('getId')->willReturn(55);
+        $repo = $this->makeLeadRepo([$lead]);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->em->method('getRepository')->willReturn($repo);
+        $this->logRepository->method('hasLogForLead')->willReturn(false);
+
+        $this->eventLogWriter->expects($this->never())->method('writeReply');
+
+        $this->processor->process('+5511999999999', $this->makeInboundPayload('5511777777777'));
+    }
+
     public function testInboundSkippedWhenLeadHasNoHsmLog(): void
     {
         $lead = $this->createMock(Lead::class);

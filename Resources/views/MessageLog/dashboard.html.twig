@@ -50,8 +50,9 @@
         {{ _self.statCard('dialoghsm.dashboard.pending_webhook', stats24h.pending_webhook, 'ri-loader-line',          '#b08020') }}
         {{ _self.statCard('dialoghsm.dashboard.sent',            stats24h.sent,            'ri-checkbox-circle-line', '#5cb85c') }}
         {{ _self.statCard('dialoghsm.dashboard.delivered', stats24h.delivered, 'ri-check-double-line',     '#17a2b8') }}
-        {{ _self.statCard('dialoghsm.dashboard.read',      stats24h.read,      'ri-eye-line',              '#0275d8') }}
-        {{ _self.statCard('dialoghsm.dashboard.failed',    stats24h.failed,    'ri-close-circle-line',     '#d9534f') }}
+        {{ _self.statCard('dialoghsm.dashboard.read',       stats24h.read,    'ri-eye-line',           '#0275d8') }}
+        {{ _self.statCard('dialoghsm.dashboard.replied',   replied24h,        'ri-reply-line',          '#7952b3') }}
+        {{ _self.statCard('dialoghsm.dashboard.failed',    stats24h.failed,  'ri-close-circle-line',  '#d9534f') }}
         {{ _self.statCard('dialoghsm.dashboard.dlq',       stats24h.dlq,       'ri-error-warning-line',    '#f0ad4e') }}
         {% set processed24h = stats24h.sent + stats24h.failed + stats24h.dlq %}
         {% set rate = processed24h > 0 ? (stats24h.sent / processed24h * 100)|round(1) : 0 %}
@@ -66,8 +67,9 @@
         {{ _self.statCard('dialoghsm.dashboard.pending_webhook', stats7d.pending_webhook, 'ri-loader-line',          '#b08020') }}
         {{ _self.statCard('dialoghsm.dashboard.sent',            stats7d.sent,            'ri-checkbox-circle-line', '#5cb85c') }}
         {{ _self.statCard('dialoghsm.dashboard.delivered', stats7d.delivered, 'ri-check-double-line',     '#17a2b8') }}
-        {{ _self.statCard('dialoghsm.dashboard.read',      stats7d.read,      'ri-eye-line',              '#0275d8') }}
-        {{ _self.statCard('dialoghsm.dashboard.failed',    stats7d.failed,    'ri-close-circle-line',     '#d9534f') }}
+        {{ _self.statCard('dialoghsm.dashboard.read',       stats7d.read,     'ri-eye-line',           '#0275d8') }}
+        {{ _self.statCard('dialoghsm.dashboard.replied',   replied7d,         'ri-reply-line',          '#7952b3') }}
+        {{ _self.statCard('dialoghsm.dashboard.failed',    stats7d.failed,   'ri-close-circle-line',  '#d9534f') }}
         {{ _self.statCard('dialoghsm.dashboard.dlq',       stats7d.dlq,       'ri-error-warning-line',    '#f0ad4e') }}
         {% set processed7d = stats7d.sent + stats7d.failed + stats7d.dlq %}
         {% set rate7 = processed7d > 0 ? (stats7d.sent / processed7d * 100)|round(1) : 0 %}
