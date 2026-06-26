@@ -105,12 +105,13 @@ class RedisContactCache
     }
 
     /**
-     * Remove o '+' inicial para garantir chave uniforme entre envio (E.164 com +)
-     * e recebimento 360dialog (sem +).
+     * Normaliza para dígitos puros: remove '+', espaços, hífens e parênteses.
+     * Garante chave uniforme independente do formato gravado no lead (E.164, com espaços, etc.)
+     * e do formato enviado pela 360dialog no webhook (só dígitos, sem +).
      */
     private function normalizePhone(string $phone): string
     {
-        return ltrim($phone, '+');
+        return preg_replace('/\D/', '', $phone);
     }
 
     private function getRedis(): ?\Redis
