@@ -42,7 +42,7 @@ class RedisContactCache
         }
 
         try {
-            $key = self::KEY_PREFIX . $phone;
+            $key = self::KEY_PREFIX . $this->normalizePhone($phone);
             $redis->hMSet($key, ['wamid' => $wamid, 'replied' => '0']);
             $redis->expire($key, self::TTL);
         } catch (\Throwable) {
@@ -61,7 +61,7 @@ class RedisContactCache
         }
 
         try {
-            $wamid = $redis->hGet(self::KEY_PREFIX . $phone, 'wamid');
+            $wamid = $redis->hGet(self::KEY_PREFIX . $this->normalizePhone($phone), 'wamid');
 
             return ($wamid !== false && $wamid !== '') ? (string) $wamid : null;
         } catch (\Throwable) {
@@ -81,7 +81,7 @@ class RedisContactCache
         }
 
         try {
-            return $redis->hGet(self::KEY_PREFIX . $phone, 'replied') === '1';
+            return $redis->hGet(self::KEY_PREFIX . $this->normalizePhone($phone), 'replied') === '1';
         } catch (\Throwable) {
             return false;
         }
@@ -99,9 +99,18 @@ class RedisContactCache
         }
 
         try {
-            $redis->hSet(self::KEY_PREFIX . $phone, 'replied', '1');
+            $redis->hSet(self::KEY_PREFIX . $this->normalizePhone($phone), 'replied', '1');
         } catch (\Throwable) {
         }
+    }
+
+    /**
+     * Remove o '+' inicial para garantir chave uniforme entre envio (E.164 com +)
+     * e recebimento 360dialog (sem +).
+     */
+    private function normalizePhone(string $phone): string
+    {
+        return ltrim($phone, '+');
     }
 
     private function getRedis(): ?\Redis

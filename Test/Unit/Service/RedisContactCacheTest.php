@@ -195,6 +195,65 @@ class RedisContactCacheTest extends TestCase
     }
 
     // =========================================================================
+    // Normalização de telefone (+ removido para chave uniforme)
+    // =========================================================================
+
+    public function testSetLastSentStripsLeadingPlusFromKey(): void
+    {
+        $this->redis->expects($this->once())
+            ->method('hMSet')
+            ->with('dialoghsm:contact:5511999999999', $this->anything());
+
+        // E.164 com + (formato Mautic) → mesma chave que sem +
+        $this->cache->setLastSent('+5511999999999', 'wamid.HSM001');
+    }
+
+    public function testGetLastWamidStripsLeadingPlusFromKey(): void
+    {
+        $this->redis->method('hGet')
+            ->with('dialoghsm:contact:5511999999999', 'wamid')
+            ->willReturn('wamid.HSM001');
+
+        $this->assertSame('wamid.HSM001', $this->cache->getLastWamid('+5511999999999'));
+    }
+
+    public function testSetWithPlusAndGetWithoutPlusShareSameKey(): void
+    {
+        // Envio usa E.164 (+55...), webhook 360dialog chega sem + (55...)
+        // Ambos devem acessar a mesma chave Redis
+        $this->redis->expects($this->once())
+            ->method('hMSet')
+            ->with('dialoghsm:contact:5511999999999', $this->anything());
+
+        $this->redis->method('hGet')
+            ->with('dialoghsm:contact:5511999999999', 'wamid')
+            ->willReturn('wamid.HSM001');
+
+        $this->cache->setLastSent('+5511999999999', 'wamid.HSM001');
+        $wamid = $this->cache->getLastWamid('5511999999999');
+
+        $this->assertSame('wamid.HSM001', $wamid);
+    }
+
+    public function testMarkRepliedStripsLeadingPlusFromKey(): void
+    {
+        $this->redis->expects($this->once())
+            ->method('hSet')
+            ->with('dialoghsm:contact:5511999999999', 'replied', '1');
+
+        $this->cache->markReplied('+5511999999999');
+    }
+
+    public function testIsRepliedStripsLeadingPlusFromKey(): void
+    {
+        $this->redis->method('hGet')
+            ->with('dialoghsm:contact:5511999999999', 'replied')
+            ->willReturn('1');
+
+        $this->assertTrue($this->cache->isReplied('+5511999999999'));
+    }
+
+    // =========================================================================
     // Sequência de uso: setLastSent → isReplied → markReplied
     // =========================================================================
 
