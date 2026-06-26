@@ -455,10 +455,21 @@ class WebhookProcessor
         $this->em->persist($log);
         $this->em->flush();
 
-        $this->pointModel->triggerAction('dialoghsm.message_replied', null, null, $lead, true);
-        $this->eventLogWriter->writeReply($lead, $from, $now, $log);
-        $this->leadModel->setFieldValues($lead, ['dialoghsm_last_reply' => $now]);
-        $this->leadModel->saveEntity($lead);
+        // Operações pós-flush não devem impedir que markReplied seja chamado pelos callers.
+        // Se qualquer uma falhar (ex.: triggerAction lança, LiteSpeed timeout mata o processo
+        // antes do retorno), o Redis ficaria com replied=0 mesmo com date_replied já no MySQL.
+        try {
+            $this->pointModel->triggerAction('dialoghsm.message_replied', null, null, $lead, true);
+            $this->eventLogWriter->writeReply($lead, $from, $now, $log);
+            $this->leadModel->setFieldValues($lead, ['dialoghsm_last_reply' => $now]);
+            $this->leadModel->saveEntity($lead);
+        } catch (\Throwable $e) {
+            $this->logger->error('DialogHSM: persistReply side-effects failed after flush', [
+                'from'    => $from,
+                'logId'   => $log->getId(),
+                'message' => $e->getMessage(),
+            ]);
+        }
     }
 
     private function getRedis(): ?\Redis

@@ -2083,4 +2083,139 @@ class WebhookProcessorTest extends TestCase
         $this->assertContains('554499067833', $markedPhones,
             'Fix: Scenario A deve marcar replied no formato 12 dígitos também');
     }
+
+    // =========================================================================
+    // Bad paths — Cenário A
+    // =========================================================================
+
+    /**
+     * Log encontrado pelo wamid mas sem leadId — deve retornar sem processar.
+     */
+    public function testScenarioALogWithoutLeadIdIsSkipped(): void
+    {
+        $hsmLog = new MessageLog(); // leadId null
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($hsmLog);
+
+        $this->pointModel->expects($this->never())->method('triggerAction');
+        $this->em->expects($this->never())->method('flush');
+
+        $this->processor->process(
+            '+5511999999999',
+            $this->makeInboundPayloadWithContext('5511888888888', 'wamid.sem.lead')
+        );
+    }
+
+    /**
+     * Log encontrado, leadId preenchido, mas getEntity retorna null — deve retornar sem processar.
+     */
+    public function testScenarioALeadNotFoundIsSkipped(): void
+    {
+        $hsmLog = $this->makeHsmLog(99);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($hsmLog);
+        $this->leadModel->method('getEntity')->with(99)->willReturn(null);
+
+        $this->pointModel->expects($this->never())->method('triggerAction');
+        $this->em->expects($this->never())->method('flush');
+
+        $this->processor->process(
+            '+5511999999999',
+            $this->makeInboundPayloadWithContext('5511888888888', 'wamid.lead.sumiu')
+        );
+    }
+
+    // =========================================================================
+    // Bad paths — Cenário B fast-path
+    // =========================================================================
+
+    /**
+     * Wamid stale: Redis tem wamid mas findByWamid retorna null (race condition ou
+     * registro deletado). O fluxo NÃO deve retornar false — deve cair no fallback DB.
+     */
+    public function testScenarioBFastPathStaleWamidFallsBackToDb(): void
+    {
+        $lead = $this->createMock(Lead::class);
+        $lead->method('getId')->willReturn(77);
+        $log  = $this->makeHsmLog(77);
+        $repo = $this->makeLeadRepo([$lead]);
+
+        // Redis tem wamid, mas o log não existe no DB (stale)
+        $this->contactCache->method('getLastWamid')->willReturn('wamid.stale');
+        $this->logRepository->method('findByWamid')->with('wamid.stale')->willReturn(null);
+
+        // Fallback DB: encontra lead pelo mobile e HSM recente
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->em->method('getRepository')->willReturn($repo);
+        $this->em->method('persist');
+        $this->em->method('flush');
+        $this->logRepository->method('findMostRecentForLead')
+            ->with(77, $this->isInstanceOf(\DateTimeInterface::class))
+            ->willReturn($log);
+
+        // Deve processar via fallback DB — não silenciar
+        $this->pointModel->expects($this->once())
+            ->method('triggerAction')
+            ->with('dialoghsm.message_replied', null, null, $lead, true);
+
+        $this->processor->process('+5511999999999', $this->makeInboundPayload('5511888888888'));
+    }
+
+    /**
+     * Fast-path: log encontrado mas leadId === null — deve retornar sem processar.
+     * Diferente do wamid stale: aqui o log existe mas está corrompido.
+     */
+    public function testScenarioBFastPathLogWithoutLeadIdIsSkipped(): void
+    {
+        $logSemLead = new MessageLog(); // leadId null
+
+        $this->contactCache->method('getLastWamid')->willReturn('wamid.sem.lead');
+        $this->logRepository->method('findByWamid')->with('wamid.sem.lead')->willReturn($logSemLead);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->pointModel->expects($this->never())->method('triggerAction');
+        $this->em->expects($this->never())->method('flush');
+
+        $this->processor->process('+5511999999999', $this->makeInboundPayload('5511888888888'));
+    }
+
+    /**
+     * Fast-path: log encontrado com dateReplied preenchido — idempotência via DB.
+     * Não deve reprocessar mesmo que Redis não tenha a chave replied setada.
+     */
+    public function testScenarioBFastPathAlreadyRepliedLogIsSkipped(): void
+    {
+        $log = $this->makeHsmLog(55);
+        $log->setDateReplied(new \DateTime('-30 minutes'));
+
+        $this->contactCache->method('getLastWamid')->willReturn('wamid.ja.respondido');
+        $this->logRepository->method('findByWamid')->with('wamid.ja.respondido')->willReturn($log);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->pointModel->expects($this->never())->method('triggerAction');
+        $this->em->expects($this->never())->method('flush');
+
+        $this->processor->process('+5511999999999', $this->makeInboundPayload('5511888888888'));
+    }
+
+    /**
+     * Fast-path: log encontrado, leadId preenchido, mas getEntity retorna null.
+     * Deve retornar sem processar e sem disparar ponto.
+     */
+    public function testScenarioBFastPathLeadNotFoundIsSkipped(): void
+    {
+        $log = $this->makeHsmLog(88);
+
+        $this->contactCache->method('getLastWamid')->willReturn('wamid.lead.sumiu');
+        $this->logRepository->method('findByWamid')->with('wamid.lead.sumiu')->willReturn($log);
+        $this->leadModel->method('getEntity')->with(88)->willReturn(null);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->pointModel->expects($this->never())->method('triggerAction');
+        $this->em->expects($this->never())->method('flush');
+
+        $this->processor->process('+5511999999999', $this->makeInboundPayload('5511888888888'));
+    }
 }
