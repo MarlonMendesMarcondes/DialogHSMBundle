@@ -12,6 +12,7 @@ use MauticPlugin\DialogHSMBundle\Exception\TransientApiException;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppMessageHandler;
 use MauticPlugin\DialogHSMBundle\Service\BulkRateLimiter;
+use MauticPlugin\DialogHSMBundle\Service\RedisContactCache;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
@@ -26,6 +27,7 @@ class SendWhatsAppMessageHandlerTest extends TestCase
     private MessageLogRepository&MockObject $mockMessageLogRepository;
     private BulkRateLimiter&MockObject $mockRateLimiter;
     private IntegrationsHelper&MockObject $mockIntegrationsHelper;
+    private RedisContactCache&MockObject $mockContactCache;
     private SendWhatsAppMessageHandler $handler;
 
     protected function setUp(): void
@@ -38,6 +40,7 @@ class SendWhatsAppMessageHandlerTest extends TestCase
         $this->mockMessageLogRepository = $this->createMock(MessageLogRepository::class);
         $this->mockRateLimiter          = $this->createMock(BulkRateLimiter::class);
         $this->mockIntegrationsHelper   = $this->createMock(IntegrationsHelper::class);
+        $this->mockContactCache         = $this->createMock(RedisContactCache::class);
 
         // Default: getIntegration throws (fail-open → DEFAULT_MAX_RECORDS=10000)
         $this->mockIntegrationsHelper->method('getIntegration')->willThrowException(new \RuntimeException('not configured'));
@@ -50,6 +53,7 @@ class SendWhatsAppMessageHandlerTest extends TestCase
             $this->mockMessageLogRepository,
             $this->mockRateLimiter,
             $this->mockIntegrationsHelper,
+            $this->mockContactCache,
         );
     }
 
@@ -700,5 +704,62 @@ class SendWhatsAppMessageHandlerTest extends TestCase
         $this->assertNotNull($capturedLog);
         $this->assertNull($capturedLog->getErrorMessage(),
             'Envio com sucesso não deve ter errorMessage');
+    }
+
+    // =========================================================================
+    // RedisContactCache — gravação do Hash após envio
+    // =========================================================================
+
+    public function testSuccessfulSendCallsContactCacheSetLastSent(): void
+    {
+        $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
+        $this->mockApi->method('sendMessage')->willReturn([
+            'success'     => true,
+            'wamid'       => 'wamid.HSM123',
+            'response'    => null,
+            'error'       => null,
+            'http_status' => 200,
+            'retryable'   => false,
+        ]);
+
+        $this->mockContactCache->expects($this->once())
+            ->method('setLastSent')
+            ->with('11999999999', 'wamid.HSM123');
+
+        ($this->handler)($this->makeMessage());
+    }
+
+    public function testFailedSendDoesNotCallContactCacheSetLastSent(): void
+    {
+        $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
+        $this->mockApi->method('sendMessage')->willReturn([
+            'success'     => false,
+            'wamid'       => null,
+            'response'    => null,
+            'error'       => 'Bad request',
+            'http_status' => 400,
+            'retryable'   => false,
+        ]);
+
+        $this->mockContactCache->expects($this->never())->method('setLastSent');
+
+        ($this->handler)($this->makeMessage());
+    }
+
+    public function testSuccessWithoutWamidDoesNotCallContactCacheSetLastSent(): void
+    {
+        $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
+        $this->mockApi->method('sendMessage')->willReturn([
+            'success'     => true,
+            'wamid'       => null, // raro: API retornou sucesso sem wamid
+            'response'    => null,
+            'error'       => null,
+            'http_status' => 200,
+            'retryable'   => false,
+        ]);
+
+        $this->mockContactCache->expects($this->never())->method('setLastSent');
+
+        ($this->handler)($this->makeMessage());
     }
 }

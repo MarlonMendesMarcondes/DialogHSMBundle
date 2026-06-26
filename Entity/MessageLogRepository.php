@@ -288,17 +288,25 @@ class MessageLogRepository extends CommonRepository
 
     /**
      * Retorna o HSM mais recente enviado ao lead que ainda não foi marcado como respondido,
-     * dentro da janela de tempo informada. Usado para correlação de resposta no Scenario B
-     * (texto livre sem context.id).
+     * dentro da janela de tempo informada. Quando $before é fornecido, limita apenas a HSMs
+     * enviados antes desse timestamp — evita atribuir resposta a HSM enviado após a mensagem
+     * de entrada (Scenario B).
      */
-    public function findMostRecentForLead(int $leadId, \DateTimeInterface $since): ?MessageLog
+    public function findMostRecentForLead(int $leadId, \DateTimeInterface $since, ?\DateTimeInterface $before = null): ?MessageLog
     {
-        $results = $this->createQueryBuilder('dhml')
+        $qb = $this->createQueryBuilder('dhml')
             ->andWhere('dhml.leadId = :leadId')
             ->andWhere('dhml.dateSent >= :since')
             ->andWhere('dhml.dateReplied IS NULL')
             ->setParameter('leadId', $leadId)
-            ->setParameter('since', $since)
+            ->setParameter('since', $since);
+
+        if ($before !== null) {
+            $qb->andWhere('dhml.dateSent < :before')
+               ->setParameter('before', $before);
+        }
+
+        $results = $qb
             ->orderBy('dhml.dateSent', 'DESC')
             ->setMaxResults(1)
             ->getQuery()

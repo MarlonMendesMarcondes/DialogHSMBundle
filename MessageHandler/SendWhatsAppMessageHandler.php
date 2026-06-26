@@ -14,6 +14,7 @@ use MauticPlugin\DialogHSMBundle\Exception\TransientApiException;
 use MauticPlugin\DialogHSMBundle\Integration\DialogHSMIntegration;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use MauticPlugin\DialogHSMBundle\Service\BulkRateLimiter;
+use MauticPlugin\DialogHSMBundle\Service\RedisContactCache;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Messenger\Handler\MessageHandlerInterface;
 
@@ -35,6 +36,7 @@ class SendWhatsAppMessageHandler implements MessageHandlerInterface
         private MessageLogRepository $messageLogRepository,
         private BulkRateLimiter $rateLimiter,
         private IntegrationsHelper $integrationsHelper,
+        private RedisContactCache $contactCache,
     ) {
     }
 
@@ -131,6 +133,11 @@ class SendWhatsAppMessageHandler implements MessageHandlerInterface
                 'lead_id' => $message->leadId,
                 'error'   => $e->getMessage(),
             ]);
+        }
+
+        // Grava phone → wamid no Redis para correlação de resposta no webhook (Scenario B)
+        if ($result['success'] && !empty($result['wamid'])) {
+            $this->contactCache->setLastSent($message->phone, $result['wamid']);
         }
 
         $this->updateContactFields($message->leadId, $result);

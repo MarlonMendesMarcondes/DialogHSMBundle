@@ -1295,6 +1295,53 @@ class MessageLogRepositoryTest extends TestCase
         $this->repository->findMostRecentForLead(1, new \DateTime('-24 hours'));
     }
 
+    public function testFindMostRecentForLeadWithBeforeReturnsLog(): void
+    {
+        $log = new MessageLog();
+        $this->mockQuery->method('getResult')->willReturn([$log]);
+
+        $since  = new \DateTime('-24 hours');
+        $before = new \DateTime();
+        $result = $this->repository->findMostRecentForLead(42, $since, $before);
+
+        $this->assertSame($log, $result);
+    }
+
+    public function testFindMostRecentForLeadWithBeforeAddsExtraCondition(): void
+    {
+        // Quando $before é fornecido, andWhere deve ser chamado uma vez a mais
+        // (leadId, dateSent >=, dateReplied IS NULL, dateSent <)
+        $callCount = 0;
+        $this->mockQueryBuilder
+            ->method('andWhere')
+            ->willReturnCallback(function () use (&$callCount) {
+                ++$callCount;
+
+                return $this->mockQueryBuilder;
+            });
+        $this->mockQuery->method('getResult')->willReturn([]);
+
+        $withoutBefore = 0;
+        $this->repository->findMostRecentForLead(1, new \DateTime('-24 hours'));
+        $withoutBefore = $callCount;
+
+        $callCount = 0;
+        $this->repository->findMostRecentForLead(1, new \DateTime('-24 hours'), new \DateTime());
+        $withBefore = $callCount;
+
+        $this->assertGreaterThan($withoutBefore, $withBefore,
+            'findMostRecentForLead com $before deve adicionar condição extra ao QueryBuilder');
+    }
+
+    public function testFindMostRecentForLeadWithoutBeforeReturnsNull(): void
+    {
+        $this->mockQuery->method('getResult')->willReturn([]);
+
+        $result = $this->repository->findMostRecentForLead(42, new \DateTime('-24 hours'), null);
+
+        $this->assertNull($result);
+    }
+
     // =========================================================================
     // countReplied
     // =========================================================================

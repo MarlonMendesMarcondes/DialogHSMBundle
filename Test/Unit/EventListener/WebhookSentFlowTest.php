@@ -20,6 +20,7 @@ use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppDirectBatchMessage;
 use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppDirectBatchMessageHandler;
 use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppMessageHandler;
 use MauticPlugin\DialogHSMBundle\Model\WhatsAppNumberModel;
+use MauticPlugin\DialogHSMBundle\Service\RedisContactCache;
 use MauticPlugin\DialogHSMBundle\Service\WebhookProcessor;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
@@ -159,7 +160,7 @@ class WebhookSentFlowTest extends TestCase
         $leadModel      = $this->createMock(LeadModel::class);
         $eventLogWriter = $this->createMock(LeadEventLogWriter::class);
 
-        return new WebhookProcessor($numberRepo, $logRepo, $em, $dispatcher, $leadModel, $eventLogWriter, $this->createMock(PointModel::class));
+        return new WebhookProcessor($numberRepo, $logRepo, $em, $dispatcher, $leadModel, $eventLogWriter, $this->createMock(PointModel::class), $this->createMock(RedisContactCache::class));
     }
 
     private function makeWebhookPayload(string $wamid, string $status, array $errors = []): array
@@ -296,7 +297,7 @@ class WebhookSentFlowTest extends TestCase
 
         $leadModel      = $this->createMock(LeadModel::class);
         $eventLogWriter = $this->createMock(LeadEventLogWriter::class);
-        $processor      = new WebhookProcessor($numberRepo, $logRepo, $em, $dispatcher, $leadModel, $eventLogWriter, $this->createMock(PointModel::class));
+        $processor      = new WebhookProcessor($numberRepo, $logRepo, $em, $dispatcher, $leadModel, $eventLogWriter, $this->createMock(PointModel::class), $this->createMock(RedisContactCache::class));
         $processor->process('+5511999999999', $this->makeWebhookPayload($wamid, 'failed', $errors));
 
         $this->assertSame(MessageLog::STATUS_FAILED, $sharedLog->getStatus(),
