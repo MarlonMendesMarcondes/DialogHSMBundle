@@ -239,6 +239,12 @@ class MarketingMessageSubscriber implements EventSubscriberInterface
             $result[$key] = TokenHelper::findLeadTokens((string) $item['value'], $profileFields, true);
         }
 
+        if (!empty($result) && !isset($result['vars'])) {
+            $controlKeys    = ['content', 'url_arquivo', 'buttons', 'buttons_vars', 'limited_time_offer', 'language'];
+            $varKeys        = array_diff(array_keys($result), $controlKeys);
+            $result['vars'] = implode(',', $varKeys);
+        }
+
         return $result;
     }
 }

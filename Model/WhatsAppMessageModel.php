@@ -240,6 +240,16 @@ class WhatsAppMessageModel extends FormModel implements AjaxLookupModelInterface
             $result[$key] = TokenHelper::findLeadTokens((string) $item['value'], $profileFields, true);
         }
 
+        // buildPayload() usa 'vars' como CSV dos nomes dos body parameters.
+        // Campanhas preenchem 'vars' via form; MM não tem esse campo.
+        // Geramos aqui excluindo as chaves de controle da API (url_arquivo, buttons, etc.)
+        // para que elas não virem body parameters erroneamente.
+        if (!empty($result) && !isset($result['vars'])) {
+            $controlKeys    = ['content', 'url_arquivo', 'buttons', 'buttons_vars', 'limited_time_offer', 'language'];
+            $varKeys        = array_diff(array_keys($result), $controlKeys);
+            $result['vars'] = implode(',', $varKeys);
+        }
+
         return $result;
     }
 }
