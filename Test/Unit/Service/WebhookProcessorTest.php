@@ -1970,10 +1970,11 @@ class WebhookProcessorTest extends TestCase
     }
 
     /**
-     * Scenario A (direct): não usa getBRPhoneCandidates — lookup por wamid já é exato.
-     * Verifica que markReplied ainda é chamado (com o $from recebido) para bloquear Scenario B.
+     * Scenario A (direct): após o fix, markReplied é chamado para todos os candidatos BR
+     * gerados via getBRPhoneCandidates, garantindo que o hash Redis seja atualizado
+     * independente de o contato estar cadastrado no formato 12 ou 13 dígitos.
      */
-    public function testScenarioADirectDoesNotRequirePhoneNormalization(): void
+    public function testScenarioADirectCallsMarkRepliedForAllBRCandidates(): void
     {
         $lead   = $this->createMock(Lead::class);
         $lead->method('getId')->willReturn(77);
@@ -1985,14 +1986,101 @@ class WebhookProcessorTest extends TestCase
         $this->em->method('persist');
         $this->em->method('flush');
 
-        // markReplied deve ser chamado com o $from recebido (pode ser 12 ou 13 dígitos)
-        $this->contactCache->expects($this->once())
-            ->method('markReplied')
-            ->with('554499067833');
+        $markedPhones = [];
+        $this->contactCache->method('markReplied')
+            ->willReturnCallback(function (string $phone) use (&$markedPhones): void {
+                $markedPhones[] = $phone;
+            });
 
         $this->processor->process(
             '+5511999999999',
             $this->makeInboundPayloadWithContext('554499067833', 'wamid.original.hsm')
         );
+
+        // Todos os formatos BR devem ser marcados (fix: usa getBRPhoneCandidates no Scenario A)
+        $this->assertContains('554499067833',   $markedPhones, 'Deve marcar formato 12 dígitos');
+        $this->assertContains('+554499067833',  $markedPhones, 'Deve marcar formato 12 dígitos com +');
+        $this->assertContains('5544999067833',  $markedPhones, 'Deve marcar formato 13 dígitos (com 9º dígito)');
+        $this->assertContains('+5544999067833', $markedPhones, 'Deve marcar formato 13 dígitos com +');
+    }
+
+    /**
+     * Scenario B fast-path: markReplied é chamado com o effectiveFrom (candidato que
+     * teve hit no Redis), não com o $from bruto de 12 dígitos recebido da 360dialog.
+     *
+     * Reproduz o caso real: 360dialog envia '554499067833', Redis tem chave '5544999067833'.
+     */
+    public function testScenarioBFastPathCallsMarkRepliedWithEffectiveFrom(): void
+    {
+        $lead = $this->createMock(Lead::class);
+        $lead->method('getId')->willReturn(55);
+        $log  = $this->makeHsmLog(55);
+
+        $this->contactCache->method('getLastWamid')
+            ->willReturnMap([
+                ['554499067833',   null],
+                ['+554499067833',  null],
+                ['5544999067833',  'wamid.hsm'], // hit no formato 13 dígitos
+                ['+5544999067833', null],
+            ]);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->leadModel->method('getEntity')->with(55)->willReturn($lead);
+        $this->logRepository->method('findByWamid')->with('wamid.hsm')->willReturn($log);
+        $this->em->method('persist');
+        $this->em->method('flush');
+
+        $markedPhones = [];
+        $this->contactCache->method('markReplied')
+            ->willReturnCallback(function (string $phone) use (&$markedPhones): void {
+                $markedPhones[] = $phone;
+            });
+
+        // 360dialog envia 12 dígitos; Redis tem chave no formato 13 dígitos
+        $this->processor->process('+5511999999999', $this->makeInboundPayload('554499067833'));
+
+        $this->assertContains('5544999067833', $markedPhones,
+            'Fast-path: markReplied deve usar o effectiveFrom (formato que teve hit no Redis)');
+    }
+
+    /**
+     * Regressão do bug: antes do fix, Scenario A chamava markReplied('554499067833') —
+     * formato 12 dígitos — mas o hash Redis estava gravado em '5544999067833' (13 dígitos),
+     * resultando em replied=0 permanente na chave certa.
+     *
+     * Valida que após o fix ambos os formatos são marcados.
+     */
+    public function testScenarioAFixCorretsRepliedFlagForBothPhoneFormats(): void
+    {
+        $lead   = $this->createMock(Lead::class);
+        $lead->method('getId')->willReturn(42);
+        $hsmLog = $this->makeHsmLog(42);
+
+        $redis = $this->createMock(\Redis::class);
+        $redis->method('get')->willReturn(false);
+        $redis->method('setEx')->willReturn(true);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->leadModel->method('getEntity')->with(42)->willReturn($lead);
+        $this->logRepository->method('findByWamid')->willReturn($hsmLog);
+        $this->em->method('persist');
+        $this->em->method('flush');
+
+        $markedPhones = [];
+        $this->contactCache->method('markReplied')
+            ->willReturnCallback(function (string $phone) use (&$markedPhones): void {
+                $markedPhones[] = $phone;
+            });
+
+        $processor = $this->makeProcessorWithRedis($redis);
+        $processor->process(
+            '+5511999999999',
+            $this->makeInboundPayloadWithContext('554499067833', 'wamid.hsm.correto')
+        );
+
+        $this->assertContains('5544999067833', $markedPhones,
+            'Fix: Scenario A deve marcar replied no formato 13 dígitos (chave real do Redis)');
+        $this->assertContains('554499067833', $markedPhones,
+            'Fix: Scenario A deve marcar replied no formato 12 dígitos também');
     }
 }

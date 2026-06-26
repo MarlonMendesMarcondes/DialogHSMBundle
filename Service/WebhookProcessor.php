@@ -322,7 +322,9 @@ class WebhookProcessor
         }
 
         // Sincroniza o Hash do celular para bloquear duplicações via Scenario B
-        $this->contactCache->markReplied($from);
+        foreach ($this->getBRPhoneCandidates($from) as $candidate) {
+            $this->contactCache->markReplied($candidate);
+        }
 
         return true;
     }
