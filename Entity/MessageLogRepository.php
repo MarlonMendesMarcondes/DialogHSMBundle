@@ -92,8 +92,12 @@ class MessageLogRepository extends CommonRepository
     private function applyFilters(\Doctrine\ORM\QueryBuilder $qb, array $filters): void
     {
         if (!empty($filters['status'])) {
-            $qb->andWhere('dhml.status = :status')
-               ->setParameter('status', $filters['status']);
+            if ($filters['status'] === 'replied') {
+                $qb->andWhere('dhml.dateReplied IS NOT NULL');
+            } else {
+                $qb->andWhere('dhml.status = :status')
+                   ->setParameter('status', $filters['status']);
+            }
         }
 
         if (!empty($filters['dateFrom'])) {
