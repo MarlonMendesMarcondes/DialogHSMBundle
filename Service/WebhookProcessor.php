@@ -118,6 +118,11 @@ class WebhookProcessor
         };
 
         try {
+            // Garante que "sent" sempre precede "delivered"/"read" no timeline,
+            // mesmo quando o webhook "sent" da 360dialog chega depois ou não chega.
+            if (in_array($status, [MessageLog::STATUS_DELIVERED, MessageLog::STATUS_READ], true)) {
+                $this->eventLogWriter->write($log, MessageLog::STATUS_SENT, $log->getDateSent() ?? $now);
+            }
             $this->eventLogWriter->write($log, $status, $eventDate);
         } catch (\Throwable) {
             // falha silenciosa — não interrompe o fluxo do webhook

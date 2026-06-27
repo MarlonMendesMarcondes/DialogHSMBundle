@@ -158,6 +158,12 @@ class MessageLogRepository extends CommonRepository
         $stats['sent']      += $stats['delivered'] + $stats['read'];
         $stats['delivered'] += $stats['read'];
 
+        $replied = $conn->fetchOne(
+            "SELECT COUNT(*) FROM `{$tableName}` WHERE whatsapp_message_id = ? AND date_replied IS NOT NULL",
+            [$whatsappMessageId]
+        );
+        $stats['replied'] = (int) $replied;
+
         return $stats;
     }
 
