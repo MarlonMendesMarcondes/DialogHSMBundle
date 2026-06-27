@@ -11,6 +11,7 @@ use Mautic\LeadBundle\Event\LeadTimelineEvent;
 use Mautic\LeadBundle\LeadEvents;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\EventListener\LeadTimelineSubscriber;
+use MauticPlugin\DialogHSMBundle\Service\LeadEventLogWriter;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Symfony\Contracts\Translation\TranslatorInterface;
@@ -110,16 +111,17 @@ class LeadTimelineSubscriberTest extends TestCase
     // Registro de tipos de evento
     // =========================================================================
 
-    public function testOnTimelineGenerateRegistersAllSixEventTypes(): void
+    public function testOnTimelineGenerateRegistersAllSevenEventTypes(): void
     {
         $event = $this->makeTimelineEvent(applicable: false);
 
         $expectedTypes = [
+            'dialoghsm.dispatched',
             'dialoghsm.sent', 'dialoghsm.delivered', 'dialoghsm.read',
             'dialoghsm.replied', 'dialoghsm.failed', 'dialoghsm.dlq',
         ];
 
-        $event->expects($this->exactly(6))
+        $event->expects($this->exactly(7))
             ->method('addEventType')
             ->with(
                 $this->callback(fn ($key) => in_array($key, $expectedTypes, true)),
@@ -161,7 +163,7 @@ class LeadTimelineSubscriberTest extends TestCase
 
         $event = $this->makeTimelineEvent();
 
-        $event->expects($this->exactly(6))->method('addToCounter');
+        $event->expects($this->exactly(7))->method('addToCounter');
 
         $this->subscriber->onTimelineGenerate($event);
     }
@@ -286,6 +288,32 @@ class LeadTimelineSubscriberTest extends TestCase
         $this->assertSame('meu_template', $captured['extra']['template_name']);
         $this->assertSame('+5511912345678', $captured['extra']['phone_number']);
         $this->assertSame('2026-01-15 10:05:00', $captured['extra']['date_delivered']);
+    }
+
+    public function testDispatchedEventIsRenderedWithCorrectIcon(): void
+    {
+        $this->mockRows([$this->makeRow(LeadEventLogWriter::ACTION_DISPATCHED, '2026-01-15 10:00:00', ['template_name' => 'tpl_mm'])]);
+
+        $event = $this->getMockBuilder(LeadTimelineEvent::class)
+            ->disableOriginalConstructor()
+            ->onlyMethods(['addEventType', 'isApplicable', 'getLeadId', 'getQueryOptions', 'addToCounter', 'isEngagementCount', 'addEvent'])
+            ->getMock();
+        $event->method('isApplicable')->willReturnCallback(fn ($t) => 'dialoghsm.dispatched' === $t);
+        $event->method('getLeadId')->willReturn(42);
+        $event->method('isEngagementCount')->willReturn(false);
+        $event->method('getQueryOptions')->willReturn(['paginated' => true, 'limit' => 25, 'start' => 0]);
+
+        $captured = null;
+        $event->method('addEvent')->willReturnCallback(function (array $e) use (&$captured): void {
+            $captured = $e;
+        });
+
+        $this->subscriber->onTimelineGenerate($event);
+
+        $this->assertNotNull($captured);
+        $this->assertSame('dialoghsm.dispatched', $captured['event']);
+        $this->assertSame('ri-send-plane-line', $captured['icon']);
+        $this->assertStringContainsString('tpl_mm', $captured['eventLabel']);
     }
 
     public function testEventLabelFallsBackToTypeNameWhenTemplateNameEmpty(): void

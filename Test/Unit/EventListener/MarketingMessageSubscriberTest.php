@@ -11,6 +11,7 @@ use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
 use MauticPlugin\DialogHSMBundle\EventListener\MarketingMessageSubscriber;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use MauticPlugin\DialogHSMBundle\Model\WhatsAppMessageModel;
+use MauticPlugin\DialogHSMBundle\Service\LeadEventLogWriter;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
@@ -27,13 +28,15 @@ class MarketingMessageSubscriberTest extends TestCase
     private MessageBusInterface&MockObject  $mockBus;
     private EntityManagerInterface&MockObject $mockEm;
     private LoggerInterface&MockObject $mockLogger;
+    private LeadEventLogWriter&MockObject $mockEventLogWriter;
 
     protected function setUp(): void
     {
-        $this->mockModel  = $this->createMock(WhatsAppMessageModel::class);
-        $this->mockBus    = $this->createMock(MessageBusInterface::class);
-        $this->mockEm     = $this->createMock(EntityManagerInterface::class);
-        $this->mockLogger = $this->createMock(LoggerInterface::class);
+        $this->mockModel          = $this->createMock(WhatsAppMessageModel::class);
+        $this->mockBus            = $this->createMock(MessageBusInterface::class);
+        $this->mockEm             = $this->createMock(EntityManagerInterface::class);
+        $this->mockLogger         = $this->createMock(LoggerInterface::class);
+        $this->mockEventLogWriter = $this->createMock(LeadEventLogWriter::class);
     }
 
     private function makeSubscriber(): MarketingMessageSubscriber
@@ -43,6 +46,7 @@ class MarketingMessageSubscriberTest extends TestCase
             $this->mockBus,
             $this->mockEm,
             $this->mockLogger,
+            $this->mockEventLogWriter,
         );
     }
 
@@ -457,6 +461,59 @@ class MarketingMessageSubscriberTest extends TestCase
         $this->mockEm->method('clear');
 
         $this->mockBus->method('dispatch')->willReturn(new Envelope(new \stdClass()));
+
+        $event = $this->makeBatchEvent(1, [$qm]);
+        $this->makeSubscriber()->onProcessMessageQueueBatch($event);
+    }
+
+    // -------------------------------------------------------------------------
+    // EventLogWriter: chamada de write() com ACTION_DISPATCHED após dispatch bem-sucedido
+    // -------------------------------------------------------------------------
+
+    public function testWritesDispatchedEventOnSuccessfulDispatch(): void
+    {
+        $this->mockModel->method('getEntity')->willReturn($this->makeWhatsAppMessage([]));
+
+        $lead = $this->makeLead();
+        $qm   = $this->makeQueuedMessage($lead);
+        $qm->method('setProcessed');
+        $qm->method('setSuccess');
+
+        $this->mockEm->method('persist');
+        $this->mockEm->method('flush');
+        $this->mockEm->method('clear');
+
+        $this->mockBus->method('dispatch')->willReturn(new Envelope(new \stdClass()));
+
+        $this->mockEventLogWriter->expects($this->once())
+            ->method('write')
+            ->with(
+                $this->anything(),
+                LeadEventLogWriter::ACTION_DISPATCHED,
+                $this->isInstanceOf(\DateTime::class)
+            );
+
+        $event = $this->makeBatchEvent(1, [$qm]);
+        $this->makeSubscriber()->onProcessMessageQueueBatch($event);
+    }
+
+    public function testDoesNotWriteDispatchedEventOnDispatchFailure(): void
+    {
+        $this->mockModel->method('getEntity')->willReturn($this->makeWhatsAppMessage([]));
+
+        $lead = $this->makeLead();
+        $qm   = $this->makeQueuedMessage($lead);
+        $qm->method('setProcessed');
+        $qm->method('setFailed');
+
+        $this->mockEm->method('persist');
+        $this->mockEm->method('flush');
+        $this->mockEm->method('clear');
+
+        $this->mockBus->method('dispatch')->willThrowException(new \RuntimeException('bus failure'));
+        $this->mockLogger->method('error');
+
+        $this->mockEventLogWriter->expects($this->never())->method('write');
 
         $event = $this->makeBatchEvent(1, [$qm]);
         $this->makeSubscriber()->onProcessMessageQueueBatch($event);

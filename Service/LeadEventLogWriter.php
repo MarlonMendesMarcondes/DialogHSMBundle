@@ -25,7 +25,8 @@ class LeadEventLogWriter
         $this->eventLogRepository = $repo;
     }
 
-    public const ACTION_REPLIED = 'replied';
+    public const ACTION_REPLIED     = 'replied';
+    public const ACTION_DISPATCHED  = 'dispatched';
 
     /**
      * Grava um evento em lead_event_log para o status informado.
@@ -107,16 +108,17 @@ class LeadEventLogWriter
             \DateTime::createFromInterface($dt)->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s');
 
         return array_filter([
-            'template_name'      => $log->getTemplateName(),
-            'sender_name'        => $log->getSenderName(),
-            'phone_number'       => $log->getPhoneNumber(),
-            'wamid'              => $log->getWamid(),
-            'campaign_id'        => $log->getCampaignId(),
-            'date_sent'          => $fmt($log->getDateSent()),
-            'date_delivered'     => $fmt($log->getDateDelivered()),
-            'date_read'          => $fmt($log->getDateRead()),
-            'error_message'      => $log->getErrorMessage(),
-            'webhook_error_code' => $log->getWebhookErrorCode(),
+            'template_name'       => $log->getTemplateName(),
+            'sender_name'         => $log->getSenderName(),
+            'phone_number'        => $log->getPhoneNumber(),
+            'wamid'               => $log->getWamid(),
+            'campaign_id'         => $log->getCampaignId(),
+            'whatsapp_message_id' => $log->getWhatsappMessageId(),
+            'date_sent'           => $fmt($log->getDateSent()),
+            'date_delivered'      => $fmt($log->getDateDelivered()),
+            'date_read'           => $fmt($log->getDateRead()),
+            'error_message'       => $log->getErrorMessage(),
+            'webhook_error_code'  => $log->getWebhookErrorCode(),
         ], static fn ($v) => $v !== null && $v !== '');
     }
 

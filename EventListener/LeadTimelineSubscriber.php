@@ -17,12 +17,13 @@ use Symfony\Contracts\Translation\TranslatorInterface;
 class LeadTimelineSubscriber implements EventSubscriberInterface
 {
     private const STATUS_CONFIG = [
-        MessageLog::STATUS_SENT      => ['icon' => 'ri-checkbox-circle-line',  'color' => '#5cb85c'],
-        MessageLog::STATUS_DELIVERED => ['icon' => 'ri-check-double-line',     'color' => '#17a2b8'],
-        MessageLog::STATUS_READ      => ['icon' => 'ri-eye-line',              'color' => '#0275d8'],
-        LeadEventLogWriter::ACTION_REPLIED => ['icon' => 'ri-reply-line',      'color' => '#6f42c1'],
-        MessageLog::STATUS_FAILED    => ['icon' => 'ri-close-circle-line',     'color' => '#d9534f'],
-        MessageLog::STATUS_DLQ       => ['icon' => 'ri-error-warning-line',    'color' => '#f0ad4e'],
+        LeadEventLogWriter::ACTION_DISPATCHED => ['icon' => 'ri-send-plane-line',        'color' => '#20c997'],
+        MessageLog::STATUS_SENT               => ['icon' => 'ri-checkbox-circle-line',   'color' => '#5cb85c'],
+        MessageLog::STATUS_DELIVERED          => ['icon' => 'ri-check-double-line',      'color' => '#17a2b8'],
+        MessageLog::STATUS_READ               => ['icon' => 'ri-eye-line',               'color' => '#0275d8'],
+        LeadEventLogWriter::ACTION_REPLIED    => ['icon' => 'ri-reply-line',             'color' => '#6f42c1'],
+        MessageLog::STATUS_FAILED             => ['icon' => 'ri-close-circle-line',      'color' => '#d9534f'],
+        MessageLog::STATUS_DLQ                => ['icon' => 'ri-error-warning-line',     'color' => '#f0ad4e'],
     ];
 
     public function __construct(

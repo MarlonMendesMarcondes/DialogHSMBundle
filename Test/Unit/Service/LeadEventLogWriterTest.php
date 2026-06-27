@@ -210,6 +210,44 @@ class LeadEventLogWriterTest extends TestCase
         $this->assertSame('wamid.abc', $props['wamid']);
     }
 
+    public function testWriteSetsWhatsappMessageIdInProperties(): void
+    {
+        $this->connection->method('fetchOne')->willReturn(false);
+
+        $log = $this->makeLog();
+        $log->setWhatsappMessageId(7);
+
+        $captured = null;
+        $this->eventLogRepo->method('saveEntity')
+            ->willReturnCallback(function (LeadEventLog $entry) use (&$captured): void {
+                $captured = $entry;
+            });
+
+        $this->writer->write($log, MessageLog::STATUS_SENT, new \DateTime());
+
+        $this->assertSame(7, $captured->getProperties()['whatsapp_message_id']);
+    }
+
+    public function testWriteOmitsWhatsappMessageIdWhenNull(): void
+    {
+        $this->connection->method('fetchOne')->willReturn(false);
+
+        $captured = null;
+        $this->eventLogRepo->method('saveEntity')
+            ->willReturnCallback(function (LeadEventLog $entry) use (&$captured): void {
+                $captured = $entry;
+            });
+
+        $this->writer->write($this->makeLog(), MessageLog::STATUS_SENT, new \DateTime());
+
+        $this->assertArrayNotHasKey('whatsapp_message_id', $captured->getProperties());
+    }
+
+    public function testActionDispatchedConstantValue(): void
+    {
+        $this->assertSame('dispatched', LeadEventLogWriter::ACTION_DISPATCHED);
+    }
+
     // =========================================================================
     // Idempotência — checa com os parâmetros corretos
     // =========================================================================
