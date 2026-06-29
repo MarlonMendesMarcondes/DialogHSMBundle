@@ -93,13 +93,14 @@ class MessageLogController extends FormController
 
         // Prepara dados para Chart.js
         $labels   = array_keys($chartRaw);
-        $statuses = ['queued', 'sent', 'delivered', 'read', 'failed', 'dlq'];
+        $statuses = ['queued', 'sent', 'delivered', 'read', 'replied', 'failed', 'dlq'];
         $datasets = [];
         $colors   = [
             'queued'    => 'rgba(150, 150, 150, 0.85)',
             'sent'      => 'rgba(92, 184, 92, 0.85)',
             'delivered' => 'rgba(23, 162, 184, 0.85)',
             'read'      => 'rgba(2, 117, 216, 0.85)',
+            'replied'   => 'rgba(111, 66, 193, 0.85)',
             'failed'    => 'rgba(217, 83, 79, 0.85)',
             'dlq'       => 'rgba(240, 173, 78, 0.85)',
         ];
