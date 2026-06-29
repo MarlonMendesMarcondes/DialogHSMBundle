@@ -32,8 +32,10 @@ class MessageLogControllerTest extends TestCase
                 'getStatsByPeriod',
                 'getChartData',
                 'getGroupedDispatches',
+                'countReplied',
             ])
             ->getMock();
+        $this->repo->method('countReplied')->willReturn(0);
     }
 
     /**
@@ -370,6 +372,8 @@ class MessageLogControllerTest extends TestCase
             'stats7d'    => $cachedStats,
             'chartRaw'   => [],
             'dispatches' => [],
+            'replied24h' => 0,
+            'replied7d'  => 0,
         ];
 
         $cache = $this->createMock(CacheInterface::class);

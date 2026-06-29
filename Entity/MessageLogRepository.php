@@ -92,8 +92,12 @@ class MessageLogRepository extends CommonRepository
     private function applyFilters(\Doctrine\ORM\QueryBuilder $qb, array $filters): void
     {
         if (!empty($filters['status'])) {
-            $qb->andWhere('dhml.status = :status')
-               ->setParameter('status', $filters['status']);
+            if ($filters['status'] === 'replied') {
+                $qb->andWhere('dhml.dateReplied IS NOT NULL');
+            } else {
+                $qb->andWhere('dhml.status = :status')
+                   ->setParameter('status', $filters['status']);
+            }
         }
 
         if (!empty($filters['dateFrom'])) {
@@ -153,6 +157,12 @@ class MessageLogRepository extends CommonRepository
 
         $stats['sent']      += $stats['delivered'] + $stats['read'];
         $stats['delivered'] += $stats['read'];
+
+        $replied = $conn->fetchOne(
+            "SELECT COUNT(*) FROM `{$tableName}` WHERE whatsapp_message_id = ? AND date_replied IS NOT NULL",
+            [$whatsappMessageId]
+        );
+        $stats['replied'] = (int) $replied;
 
         return $stats;
     }
@@ -271,6 +281,62 @@ class MessageLogRepository extends CommonRepository
             ->getResult();
 
         return $results[0] ?? null;
+    }
+
+    public function hasLogForLead(int $leadId): bool
+    {
+        $count = (int) $this->createQueryBuilder('dhml')
+            ->select('COUNT(dhml.id)')
+            ->andWhere('dhml.leadId = :leadId')
+            ->setParameter('leadId', $leadId)
+            ->setMaxResults(1)
+            ->getQuery()
+            ->getSingleScalarResult();
+
+        return $count > 0;
+    }
+
+    /**
+     * Retorna o HSM mais recente enviado ao lead que ainda não foi marcado como respondido,
+     * dentro da janela de tempo informada. Quando $before é fornecido, limita apenas a HSMs
+     * enviados antes desse timestamp — evita atribuir resposta a HSM enviado após a mensagem
+     * de entrada (Scenario B).
+     */
+    public function findMostRecentForLead(int $leadId, \DateTimeInterface $since, ?\DateTimeInterface $before = null): ?MessageLog
+    {
+        $qb = $this->createQueryBuilder('dhml')
+            ->andWhere('dhml.leadId = :leadId')
+            ->andWhere('dhml.dateSent >= :since')
+            ->andWhere('dhml.dateReplied IS NULL')
+            ->setParameter('leadId', $leadId)
+            ->setParameter('since', $since);
+
+        if ($before !== null) {
+            $qb->andWhere('dhml.dateSent < :before')
+               ->setParameter('before', $before);
+        }
+
+        $results = $qb
+            ->orderBy('dhml.dateSent', 'DESC')
+            ->setMaxResults(1)
+            ->getQuery()
+            ->getResult();
+
+        return $results[0] ?? null;
+    }
+
+    /**
+     * Conta respostas recebidas (date_replied preenchido) a partir de uma data.
+     */
+    public function countReplied(\DateTime $since): int
+    {
+        $conn      = $this->getEntityManager()->getConnection();
+        $tableName = $this->getEntityManager()->getClassMetadata(MessageLog::class)->getTableName();
+
+        return (int) $conn->fetchOne(
+            "SELECT COUNT(*) FROM `{$tableName}` WHERE date_replied IS NOT NULL AND date_replied >= ?",
+            [$since->format('Y-m-d H:i:s')]
+        );
     }
 
     /**
@@ -507,10 +573,9 @@ class MessageLogRepository extends CommonRepository
      *   sent_plus      = status IN ('sent', 'delivered', 'read')  — chegou ao menos em "sent"
      *   delivered_plus = status IN ('delivered', 'read')          — chegou ao menos em "delivered"
      *   read_count     = status = 'read'
+     *   replied_count  = date_replied IS NOT NULL (exato via context.id ou aproximado por telefone+tempo)
      *
-     * Evita que mensagens lidas "desapareçam" dos contadores de enviadas/entregues.
-     *
-     * @return array<int, array{template_name: string, campaign_id: int|null, date: string, total: int, sent_plus: int, delivered_plus: int, read_count: int, failed: int, dlq: int}>
+     * @return array<int, array{template_name: string, campaign_id: int|null, date: string, total: int, sent_plus: int, delivered_plus: int, read_count: int, replied_count: int, failed: int, dlq: int}>
      */
     public function getGroupedDispatches(int $limit = 50): array
     {
@@ -523,14 +588,15 @@ class MessageLogRepository extends CommonRepository
                 ml.template_name,
                 ml.campaign_id,
                 ml.whatsapp_message_id,
-                wm.name                                                        AS whatsapp_message_name,
-                DATE(ml.date_sent)                                             AS date,
-                COUNT(*)                                                       AS total,
-                SUM(ml.status IN ('sent', 'delivered', 'read'))                AS sent_plus,
-                SUM(ml.status IN ('delivered', 'read'))                        AS delivered_plus,
-                SUM(ml.status = 'read')                                        AS read_count,
-                SUM(ml.status = 'failed')                                      AS failed,
-                SUM(ml.status = 'dlq')                                         AS dlq
+                wm.name                                  AS whatsapp_message_name,
+                DATE(ml.date_sent)                       AS date,
+                COUNT(*)                                 AS total,
+                SUM(ml.status IN ('sent', 'delivered', 'read'))  AS sent_plus,
+                SUM(ml.status IN ('delivered', 'read'))           AS delivered_plus,
+                SUM(ml.status = 'read')                          AS read_count,
+                SUM(ml.date_replied IS NOT NULL)                  AS replied_count,
+                SUM(ml.status = 'failed')                        AS failed,
+                SUM(ml.status = 'dlq')                           AS dlq
              FROM `{$tableName}` ml
              LEFT JOIN `{$msgTable}` wm ON wm.id = ml.whatsapp_message_id
              GROUP BY ml.template_name, ml.campaign_id, ml.whatsapp_message_id, DATE(ml.date_sent)

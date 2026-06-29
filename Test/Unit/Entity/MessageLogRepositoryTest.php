@@ -35,7 +35,7 @@ class MessageLogRepositoryTest extends TestCase
 
         $this->mockEntityManager->method('getClassMetadata')
             ->willReturnMap([
-                [MessageLog::class,    $this->mockClassMetadata],
+                [MessageLog::class,      $this->mockClassMetadata],
                 [WhatsAppMessage::class, $waMsgMeta],
             ]);
         $this->mockClassMetadata->method('getTableName')->willReturn('dialog_hsm_message_log');
@@ -1246,5 +1246,121 @@ class MessageLogRepositoryTest extends TestCase
         $this->assertIsArray($result['failed']);
         $this->assertArrayNotHasKey('total', $result['failed']);
         $this->assertCount(1, $result['failed']);
+    }
+
+    // =========================================================================
+    // findMostRecentForLead
+    // =========================================================================
+
+    public function testFindMostRecentForLeadReturnsLogWhenFound(): void
+    {
+        $log = new MessageLog();
+        $this->mockQuery->method('getResult')->willReturn([$log]);
+
+        $since  = new \DateTime('-24 hours');
+        $result = $this->repository->findMostRecentForLead(42, $since);
+
+        $this->assertSame($log, $result);
+    }
+
+    public function testFindMostRecentForLeadReturnsNullWhenNotFound(): void
+    {
+        $this->mockQuery->method('getResult')->willReturn([]);
+
+        $result = $this->repository->findMostRecentForLead(42, new \DateTime('-24 hours'));
+
+        $this->assertNull($result);
+    }
+
+    public function testFindMostRecentForLeadFiltersUnrepliedOnly(): void
+    {
+        // andWhere('dhml.dateReplied IS NULL') deve estar presente — verificamos
+        // que o método é chamado; o conteúdo é garantido pelo teste de comportamento.
+        $this->mockQueryBuilder->expects($this->atLeastOnce())->method('andWhere');
+        $this->mockQuery->method('getResult')->willReturn([]);
+
+        $this->repository->findMostRecentForLead(1, new \DateTime('-24 hours'));
+    }
+
+    public function testFindMostRecentForLeadLimitsToOneResult(): void
+    {
+        $this->mockQueryBuilder
+            ->expects($this->once())
+            ->method('setMaxResults')
+            ->with(1)
+            ->willReturnSelf();
+
+        $this->mockQuery->method('getResult')->willReturn([]);
+
+        $this->repository->findMostRecentForLead(1, new \DateTime('-24 hours'));
+    }
+
+    public function testFindMostRecentForLeadWithBeforeReturnsLog(): void
+    {
+        $log = new MessageLog();
+        $this->mockQuery->method('getResult')->willReturn([$log]);
+
+        $since  = new \DateTime('-24 hours');
+        $before = new \DateTime();
+        $result = $this->repository->findMostRecentForLead(42, $since, $before);
+
+        $this->assertSame($log, $result);
+    }
+
+    public function testFindMostRecentForLeadWithBeforeAddsExtraCondition(): void
+    {
+        // Quando $before é fornecido, andWhere deve ser chamado uma vez a mais
+        // (leadId, dateSent >=, dateReplied IS NULL, dateSent <)
+        $callCount = 0;
+        $this->mockQueryBuilder
+            ->method('andWhere')
+            ->willReturnCallback(function () use (&$callCount) {
+                ++$callCount;
+
+                return $this->mockQueryBuilder;
+            });
+        $this->mockQuery->method('getResult')->willReturn([]);
+
+        $withoutBefore = 0;
+        $this->repository->findMostRecentForLead(1, new \DateTime('-24 hours'));
+        $withoutBefore = $callCount;
+
+        $callCount = 0;
+        $this->repository->findMostRecentForLead(1, new \DateTime('-24 hours'), new \DateTime());
+        $withBefore = $callCount;
+
+        $this->assertGreaterThan($withoutBefore, $withBefore,
+            'findMostRecentForLead com $before deve adicionar condição extra ao QueryBuilder');
+    }
+
+    public function testFindMostRecentForLeadWithoutBeforeReturnsNull(): void
+    {
+        $this->mockQuery->method('getResult')->willReturn([]);
+
+        $result = $this->repository->findMostRecentForLead(42, new \DateTime('-24 hours'), null);
+
+        $this->assertNull($result);
+    }
+
+    // =========================================================================
+    // countReplied
+    // =========================================================================
+
+    public function testCountRepliedReturnsCountFromDb(): void
+    {
+        $this->mockConnection->method('fetchOne')->willReturn('7');
+
+        $result = $this->repository->countReplied(new \DateTime('-24 hours'));
+
+        $this->assertSame(7, $result);
+    }
+
+    public function testCountRepliedReturnsZeroWhenNoReplies(): void
+    {
+        $this->mockConnection->method('fetchOne')->willReturn('0');
+
+        $result = $this->repository->countReplied(new \DateTime('-7 days'));
+
+        $this->assertSame(0, $result);
     }
 }

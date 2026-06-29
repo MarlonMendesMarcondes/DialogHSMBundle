@@ -25,6 +25,9 @@ class LeadEventLogWriter
         $this->eventLogRepository = $repo;
     }
 
+    public const ACTION_REPLIED     = 'replied';
+    public const ACTION_DISPATCHED  = 'dispatched';
+
     /**
      * Grava um evento em lead_event_log para o status informado.
      * Idempotente: ignora se já existe (bundle, object, action, object_id).
@@ -58,22 +61,64 @@ class LeadEventLogWriter
      *
      * @return array<string, mixed>
      */
+    /**
+     * Grava um evento de resposta inbound em lead_event_log.
+     * Requer o MessageLog do disparo original — sem ele, o evento não é registrado.
+     * Idempotente: não grava se já existe entry para este log_id + action replied.
+     */
+    public function writeReply(Lead $lead, string $fromPhone, \DateTimeInterface $date, MessageLog $log): void
+    {
+        $logId = (int) $log->getId();
+        if ($logId === 0 || $this->exists($logId, self::ACTION_REPLIED)) {
+            return;
+        }
+
+        $fmt = static fn (?\DateTimeInterface $dt): ?string => $dt === null ? null :
+            \DateTime::createFromInterface($dt)->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+
+        $normalizedPhone = $fromPhone !== '' && !str_starts_with($fromPhone, '+')
+            ? '+' . $fromPhone
+            : $fromPhone;
+
+        $entry = new LeadEventLog();
+        $entry
+            ->setLead($lead)
+            ->setBundle(self::BUNDLE)
+            ->setObject(self::OBJECT)
+            ->setObjectId($logId)
+            ->setAction(self::ACTION_REPLIED)
+            ->setDateAdded($this->normalizeToUtc($date))
+            ->setProperties(array_filter([
+                'phone_number'  => $normalizedPhone,
+                'template_name' => $log->getTemplateName(),
+                'sender_name'   => $log->getSenderName(),
+                'campaign_id'   => $log->getCampaignId(),
+                'wamid'         => $log->getWamid(),
+                'date_sent'     => $fmt($log->getDateSent()),
+                'date_replied'  => $fmt($date),
+            ], static fn ($v) => $v !== null && $v !== ''));
+
+        $this->eventLogRepository->saveEntity($entry);
+        $this->eventLogRepository->detachEntity($entry);
+    }
+
     private function buildProperties(MessageLog $log): array
     {
         $fmt = static fn (?\DateTimeInterface $dt): ?string => $dt === null ? null :
             \DateTime::createFromInterface($dt)->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s');
 
         return array_filter([
-            'template_name'      => $log->getTemplateName(),
-            'sender_name'        => $log->getSenderName(),
-            'phone_number'       => $log->getPhoneNumber(),
-            'wamid'              => $log->getWamid(),
-            'campaign_id'        => $log->getCampaignId(),
-            'date_sent'          => $fmt($log->getDateSent()),
-            'date_delivered'     => $fmt($log->getDateDelivered()),
-            'date_read'          => $fmt($log->getDateRead()),
-            'error_message'      => $log->getErrorMessage(),
-            'webhook_error_code' => $log->getWebhookErrorCode(),
+            'template_name'       => $log->getTemplateName(),
+            'sender_name'         => $log->getSenderName(),
+            'phone_number'        => $log->getPhoneNumber(),
+            'wamid'               => $log->getWamid(),
+            'campaign_id'         => $log->getCampaignId(),
+            'whatsapp_message_id' => $log->getWhatsappMessageId(),
+            'date_sent'           => $fmt($log->getDateSent()),
+            'date_delivered'      => $fmt($log->getDateDelivered()),
+            'date_read'           => $fmt($log->getDateRead()),
+            'error_message'       => $log->getErrorMessage(),
+            'webhook_error_code'  => $log->getWebhookErrorCode(),
         ], static fn ($v) => $v !== null && $v !== '');
     }
 

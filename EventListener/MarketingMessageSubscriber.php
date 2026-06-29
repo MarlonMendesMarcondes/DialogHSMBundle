@@ -13,6 +13,7 @@ use MauticPlugin\DialogHSMBundle\DialogHSMEvents;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use MauticPlugin\DialogHSMBundle\Model\WhatsAppMessageModel;
+use MauticPlugin\DialogHSMBundle\Service\LeadEventLogWriter;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\Messenger\Bridge\Amqp\Transport\AmqpStamp;
@@ -25,6 +26,7 @@ class MarketingMessageSubscriber implements EventSubscriberInterface
         private readonly MessageBusInterface $bus,
         private readonly EntityManagerInterface $em,
         private readonly LoggerInterface $logger,
+        private readonly LeadEventLogWriter $eventLogWriter,
     ) {
     }
 
@@ -63,7 +65,8 @@ class MarketingMessageSubscriber implements EventSubscriberInterface
         }
 
         $apiKey    = $number->getApiKey();
-        $baseUrl   = $number->getBaseUrl() ?? 'https://waba.360dialog.io';
+        $numberUrl = $number->getBaseUrl();
+        $baseUrl   = !empty($numberUrl) ? rtrim($numberUrl, '/') : 'https://waba-v2.360dialog.io/messages';
         $queueName = $number->getQueueName() ?? $number->getBatchQueueName();
 
         if (empty($apiKey)) {
@@ -114,6 +117,7 @@ class MarketingMessageSubscriber implements EventSubscriberInterface
                     queueLogId:         (string) $msgLog->getId(),
                     isBatch:            true,
                 ), $stamps);
+                $this->eventLogWriter->write($msgLog, LeadEventLogWriter::ACTION_DISPATCHED, new \DateTime());
                 $pendingEvent->pass($log);
             } catch (\Throwable $e) {
                 $this->logger->error('DialogHSM MarketingMessage: dispatch failed', [
@@ -149,7 +153,8 @@ class MarketingMessageSubscriber implements EventSubscriberInterface
         }
 
         $apiKey    = $number->getApiKey();
-        $baseUrl   = $number->getBaseUrl() ?? 'https://waba.360dialog.io';
+        $numberUrl = $number->getBaseUrl();
+        $baseUrl   = !empty($numberUrl) ? rtrim($numberUrl, '/') : 'https://waba-v2.360dialog.io/messages';
         $queueName = $number->getQueueName() ?? $number->getBatchQueueName();
 
         if (empty($apiKey)) {
@@ -198,6 +203,7 @@ class MarketingMessageSubscriber implements EventSubscriberInterface
                     queueLogId:         (string) $msgLog->getId(),
                     isBatch:            true,
                 ), $stamps);
+                $this->eventLogWriter->write($msgLog, LeadEventLogWriter::ACTION_DISPATCHED, new \DateTime());
                 $queuedMessage->setProcessed();
                 $queuedMessage->setSuccess();
             } catch (\Throwable $e) {
@@ -237,6 +243,12 @@ class MarketingMessageSubscriber implements EventSubscriberInterface
                 continue;
             }
             $result[$key] = TokenHelper::findLeadTokens((string) $item['value'], $profileFields, true);
+        }
+
+        if (!empty($result) && !isset($result['vars'])) {
+            $controlKeys    = ['content', 'url_arquivo', 'buttons', 'buttons_vars', 'limited_time_offer', 'language'];
+            $varKeys        = array_diff(array_keys($result), $controlKeys);
+            $result['vars'] = implode(',', $varKeys);
         }
 
         return $result;

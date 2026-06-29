@@ -29,10 +29,16 @@
                     <div class="h4 mb-0" style="color:#0275d8">{{ stats.read }}</div>
                 </div>
                 <div class="col-xs-2">
+                    <div class="text-muted small">Respondido</div>
+                    <div class="h4 mb-0" style="color:#6f42c1">{{ stats.replied }}</div>
+                </div>
+                <div class="col-xs-2">
                     <div class="text-muted small">Falha</div>
                     <div class="h4 mb-0 text-danger">{{ stats.failed + stats.dlq }}</div>
                 </div>
-                <div class="col-xs-2">
+            </div>
+            <div class="row text-center mt-sm">
+                <div class="col-xs-2 col-xs-offset-4">
                     <div class="text-muted small">Na fila</div>
                     <div class="h4 mb-0 text-muted">{{ stats.queued + stats.pending_webhook }}</div>
                 </div>

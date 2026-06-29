@@ -128,7 +128,8 @@ class WhatsAppMessageModel extends FormModel implements AjaxLookupModelInterface
         }
 
         $apiKey    = $number->getApiKey();
-        $baseUrl   = $number->getBaseUrl() ?? 'https://waba.360dialog.io';
+        $numberUrl = $number->getBaseUrl();
+        $baseUrl   = !empty($numberUrl) ? rtrim($numberUrl, '/') : 'https://waba-v2.360dialog.io/messages';
         $sent      = 0;
         $failed    = 0;
         $batchMin  = 0;
@@ -239,6 +240,16 @@ class WhatsAppMessageModel extends FormModel implements AjaxLookupModelInterface
                 continue;
             }
             $result[$key] = TokenHelper::findLeadTokens((string) $item['value'], $profileFields, true);
+        }
+
+        // buildPayload() usa 'vars' como CSV dos nomes dos body parameters.
+        // Campanhas preenchem 'vars' via form; MM não tem esse campo.
+        // Geramos aqui excluindo as chaves de controle da API (url_arquivo, buttons, etc.)
+        // para que elas não virem body parameters erroneamente.
+        if (!empty($result) && !isset($result['vars'])) {
+            $controlKeys    = ['content', 'url_arquivo', 'buttons', 'buttons_vars', 'limited_time_offer', 'language'];
+            $varKeys        = array_diff(array_keys($result), $controlKeys);
+            $result['vars'] = implode(',', $varKeys);
         }
 
         return $result;

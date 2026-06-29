@@ -30,6 +30,14 @@ return function (ContainerConfigurator $configurator): void {
         ->autowire()
         ->arg('$redisDsn', '%env(default::MAUTIC_MESSENGER_DSN_WHATSAPP_DIRECT)%');
 
+    $services->set(\MauticPlugin\DialogHSMBundle\Service\RedisContactCache::class)
+        ->autowire()
+        ->arg('$redisDsn', '%env(default::MAUTIC_MESSENGER_DSN_WHATSAPP_DIRECT)%');
+
+    $services->set(\MauticPlugin\DialogHSMBundle\Service\WebhookProcessor::class)
+        ->autowire()
+        ->arg('$redisDsn', '%env(default::MAUTIC_MESSENGER_DSN_WHATSAPP_DIRECT)%');
+
     $services->set(\MauticPlugin\DialogHSMBundle\EventListener\CampaignSubscriber::class)
         ->autowire()
         ->autoconfigure()

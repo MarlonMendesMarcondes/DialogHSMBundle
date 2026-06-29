@@ -74,10 +74,12 @@ class MessageLogController extends FormController
                 $item->expiresAfter(self::DASHBOARD_CACHE_TTL);
 
                 return [
-                    'stats24h'   => $messageLogRepository->getStatsByPeriod($from24h),
-                    'stats7d'    => $messageLogRepository->getStatsByPeriod($from7d),
-                    'chartRaw'   => $messageLogRepository->getChartData($chartDays, $timezone),
-                    'dispatches' => $messageLogRepository->getGroupedDispatches(),
+                    'stats24h'    => $messageLogRepository->getStatsByPeriod($from24h),
+                    'stats7d'     => $messageLogRepository->getStatsByPeriod($from7d),
+                    'chartRaw'    => $messageLogRepository->getChartData($chartDays, $timezone),
+                    'dispatches'  => $messageLogRepository->getGroupedDispatches(),
+                    'replied24h'  => $messageLogRepository->countReplied($from24h),
+                    'replied7d'   => $messageLogRepository->countReplied($from7d),
                 ];
             }
         );
@@ -86,6 +88,8 @@ class MessageLogController extends FormController
         $stats7d    = $dashboardData['stats7d'];
         $chartRaw   = $dashboardData['chartRaw'];
         $dispatches = $dashboardData['dispatches'];
+        $replied24h = $dashboardData['replied24h'];
+        $replied7d  = $dashboardData['replied7d'];
 
         // Prepara dados para Chart.js
         $labels   = array_keys($chartRaw);
@@ -110,13 +114,15 @@ class MessageLogController extends FormController
 
         return $this->delegateView([
             'viewParameters'  => [
-                'stats24h'   => $stats24h,
-                'stats7d'    => $stats7d,
-                'chartJson'  => json_encode(['labels' => $labels, 'datasets' => $datasets]),
-                'chartDays'  => $chartDays,
-                'timezone'   => $this->coreParametersHelper->get('default_timezone', 'UTC'),
-                'dispatches' => $dispatches,
-                'tmpl'       => 'index',
+                'stats24h'    => $stats24h,
+                'stats7d'     => $stats7d,
+                'replied24h'  => $replied24h,
+                'replied7d'   => $replied7d,
+                'chartJson'   => json_encode(['labels' => $labels, 'datasets' => $datasets]),
+                'chartDays'   => $chartDays,
+                'timezone'    => $this->coreParametersHelper->get('default_timezone', 'UTC'),
+                'dispatches'  => $dispatches,
+                'tmpl'        => 'index',
             ],
             'contentTemplate' => '@DialogHSM/MessageLog/dashboard.html.twig',
             'passthroughVars' => [
