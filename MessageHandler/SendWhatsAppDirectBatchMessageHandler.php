@@ -28,11 +28,19 @@ use Symfony\Component\Messenger\Handler\MessageHandlerInterface;
  */
 class SendWhatsAppDirectBatchMessageHandler implements MessageHandlerInterface
 {
+    /** @var callable(int): void */
+    private $sleepFn;
+
+    /**
+     * @param (callable(int): void)|null $sleepFn
+     */
     public function __construct(
         private SendWhatsAppMessageHandler $handler,
         private LoggerInterface $logger,
         private MessageLogRepository $messageLogRepository,
+        ?callable $sleepFn = null,
     ) {
+        $this->sleepFn = $sleepFn ?? 'usleep';
     }
 
     public function __invoke(SendWhatsAppDirectBatchMessage $batch): void
@@ -60,7 +68,7 @@ class SendWhatsAppDirectBatchMessageHandler implements MessageHandlerInterface
             ++$sentCount;
 
             if ($batch->sendDelay > 0 && $sentCount % $effectiveBatch === 0) {
-                usleep((int) ($batch->sendDelay * 1_000_000));
+                ($this->sleepFn)((int) ($batch->sendDelay * 1_000_000));
             }
         }
 
