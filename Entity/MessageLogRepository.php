@@ -223,7 +223,16 @@ class MessageLogRepository extends CommonRepository
             [$offsetSeconds, $from->format('Y-m-d H:i:s'), $offsetSeconds]
         );
 
-        $empty = ['queued' => 0, 'sent' => 0, 'delivered' => 0, 'read' => 0, 'failed' => 0, 'dlq' => 0];
+        $repliedRows = $conn->fetchAllAssociative(
+            "SELECT DATE(date_sent + INTERVAL ? SECOND) AS day, COUNT(*) AS cnt
+             FROM `{$tableName}`
+             WHERE date_sent >= ? AND date_replied IS NOT NULL
+             GROUP BY DATE(date_sent + INTERVAL ? SECOND)
+             ORDER BY day ASC",
+            [$offsetSeconds, $from->format('Y-m-d H:i:s'), $offsetSeconds]
+        );
+
+        $empty = ['queued' => 0, 'sent' => 0, 'delivered' => 0, 'read' => 0, 'replied' => 0, 'failed' => 0, 'dlq' => 0];
         $data  = [];
 
         // Preenche todos os dias do período com zeros para o gráfico ficar contínuo
@@ -237,6 +246,13 @@ class MessageLogRepository extends CommonRepository
             $status = (string) $row['status'];
             if (isset($data[$day]) && array_key_exists($status, $data[$day])) {
                 $data[$day][$status] = (int) $row['cnt'];
+            }
+        }
+
+        foreach ($repliedRows as $row) {
+            $day = (string) $row['day'];
+            if (isset($data[$day])) {
+                $data[$day]['replied'] = (int) $row['cnt'];
             }
         }
 
