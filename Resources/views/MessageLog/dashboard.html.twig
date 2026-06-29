@@ -139,7 +139,8 @@
                         {% set repliedCount  = row.replied_count|default(0) %}
                         {% set failed        = row.failed|default(0) %}
                         {% set dlq           = row.dlq|default(0) %}
-                        {% set rate          = total > 0 ? (sentPlus / total * 100)|round(0) : 0 %}
+                        {% set processed     = sentPlus + failed + dlq %}
+                        {% set rate          = processed > 0 ? (sentPlus / processed * 100)|round(0) : 0 %}
                         {% set rateColor     = rate >= 90 ? '#5cb85c' : (rate >= 70 ? '#f0ad4e' : '#d9534f') %}
                         <tr>
                             <td><span class="dialoghsm-template-badge">{{ row.template_name }}</span></td>
@@ -188,6 +189,7 @@
         sent:      '{{ 'dialoghsm.log.status.sent'|trans }}',
         delivered: '{{ 'dialoghsm.log.status.delivered'|trans }}',
         read:      '{{ 'dialoghsm.log.status.read'|trans }}',
+        replied:   '{{ 'dialoghsm.log.status.replied'|trans }}',
         failed:    '{{ 'dialoghsm.log.status.failed'|trans }}',
         dlq:       '{{ 'dialoghsm.log.status.dlq'|trans }}'
     };
