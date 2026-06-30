@@ -44,6 +44,10 @@ class DialogHSMExtension extends Extension implements PrependExtensionInterface
                         'dsn'            => '%env(MAUTIC_MESSENGER_DSN_WHATSAPP_DIRECT)%',
                         'options'        => [
                             'auto_setup' => false,
+                            // Consumer name único por servidor: evita que múltiplos workers no mesmo
+                            // host compartilhem a PEL do Redis Stream e causem race condition no XACK.
+                            // Para garantir exclusividade dentro do mesmo servidor, use flock no cron.
+                            'consumer'   => gethostname().'-whatsapp-direct',
                         ],
                         'retry_strategy' => [
                             'max_retries' => 3,

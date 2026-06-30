@@ -345,7 +345,7 @@ class ReportSubscriber implements EventSubscriberInterface
                         $sentLabel      => (int) $r['sent'],
                         $deliveredLabel => (int) $r['delivered'],
                         $readLabel      => (int) $r['read'],
-                        $repliedLabel   => (int) $r['replied'],
+                        $repliedLabel   => (int) ($r['replied'] ?? 0),
                         $failedLabel    => (int) $r['failed'],
                     ], $rows, array_keys($rows));
 

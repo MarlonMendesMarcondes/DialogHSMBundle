@@ -527,8 +527,8 @@ class ReportSubscriberTest extends TestCase
     public function testTableTopTemplatesCallsSetGraphWithDataKey(): void
     {
         $rows = [
-            ['template' => 'tpl_a', 'sent' => 100, 'delivered' => 80, 'read' => 40, 'failed' => 5, 'total' => 105],
-            ['template' => 'tpl_b', 'sent' => 50,  'delivered' => 30, 'read' => 10, 'failed' => 2, 'total' => 52],
+            ['template' => 'tpl_a', 'sent' => 100, 'delivered' => 80, 'read' => 40, 'replied' => 12, 'failed' => 5, 'total' => 105],
+            ['template' => 'tpl_b', 'sent' => 50,  'delivered' => 30, 'read' => 10, 'replied' => 3,  'failed' => 2, 'total' => 52],
         ];
 
         $captured = null;
