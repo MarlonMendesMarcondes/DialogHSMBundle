@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MauticPlugin\DialogHSMBundle\EventListener;
 
-use Mautic\CoreBundle\Helper\Chart\ChartQuery;
 use Mautic\CoreBundle\Helper\Chart\LineChart;
 use Mautic\CoreBundle\Helper\Chart\PieChart;
 use Mautic\ReportBundle\Event\ReportBuilderEvent;
@@ -208,48 +207,55 @@ class ReportSubscriber implements EventSubscriberInterface
         $qb     = $event->getQueryBuilder();
 
         foreach ($graphs as $g) {
-            $options      = $event->getOptions($g);
-            /** @var ChartQuery $chartQuery */
-            $chartQuery = clone $options['chartQuery'];
+            $options = $event->getOptions($g);
 
             switch ($g) {
                 case self::GRAPH_LINE_SENDS_PER_DAY:
-                    $chart = new LineChart(null, $options['dateFrom'], $options['dateTo']);
-
-                    $sentQuery = clone $qb;
-                    $sentQuery->andWhere(self::ML.'.status = :s_sent')
-                        ->setParameter('s_sent', 'sent');
-
-                    $deliveredQuery = clone $qb;
-                    $deliveredQuery->andWhere(self::ML.'.status = :s_delivered')
-                        ->setParameter('s_delivered', 'delivered');
-
-                    $readQuery = clone $qb;
-                    $readQuery->andWhere(self::ML.'.status = :s_read')
-                        ->setParameter('s_read', 'read');
-
-                    $failedQuery = clone $qb;
-                    $failedQuery->andWhere(
-                        $failedQuery->expr()->in(self::ML.'.status', [':s_failed', ':s_dlq'])
+                    // Raw SQL direto — loadAndBuildTimeData usa $query->execute() (removido
+                    // no DBAL 3.x do Mautic 5.x) e retornaria vazio silenciosamente.
+                    $conn  = $event->getQueryBuilder()->getConnection();
+                    $sqLn  = clone $qb;
+                    $sqLn->select(
+                        'DATE('.self::ML.'.date_sent)                                    AS day',
+                        'SUM('.self::ML.'.status IN (\'sent\',\'delivered\',\'read\'))   AS sent_cnt',
+                        'SUM('.self::ML.'.status IN (\'delivered\',\'read\'))            AS del_cnt',
+                        'SUM('.self::ML.'.status = \'read\')                            AS read_cnt',
+                        'SUM('.self::ML.'.date_replied IS NOT NULL)                     AS replied_cnt',
+                        'SUM('.self::ML.'.status IN (\'failed\',\'dlq\'))               AS failed_cnt'
                     )
-                    ->setParameter('s_failed', 'failed')
-                    ->setParameter('s_dlq', 'dlq');
+                    ->groupBy('DATE('.self::ML.'.date_sent)')
+                    ->orderBy('day', 'ASC');
 
-                    $chartQuery->modifyTimeDataQuery($sentQuery, 'date_sent', self::ML);
-                    $chartQuery->modifyTimeDataQuery($deliveredQuery, 'date_delivered', self::ML);
-                    $chartQuery->modifyTimeDataQuery($readQuery, 'date_read', self::ML);
-                    $chartQuery->modifyTimeDataQuery($failedQuery, 'date_sent', self::ML);
+                    $lnRows = $conn->fetchAllAssociative($sqLn->getSQL(), $sqLn->getParameters());
+                    $lnMap  = array_column($lnRows, null, 'day');
 
-                    $chart->setDataset($options['translator']->trans('dialoghsm.report.graph.sent'), $chartQuery->loadAndBuildTimeData($sentQuery));
-                    $chart->setDataset($options['translator']->trans('dialoghsm.report.graph.delivered'), $chartQuery->loadAndBuildTimeData($deliveredQuery));
-                    $chart->setDataset($options['translator']->trans('dialoghsm.report.graph.read'), $chartQuery->loadAndBuildTimeData($readQuery));
-                    $chart->setDataset($options['translator']->trans('dialoghsm.report.graph.failed'), $chartQuery->loadAndBuildTimeData($failedQuery));
+                    $bSent = $bDel = $bRead = $bReplied = $bFailed = [];
+                    $cur   = (clone $options['dateFrom'])->setTime(0, 0, 0);
+                    $end   = (clone $options['dateTo'])->setTime(0, 0, 0);
+                    while ($cur <= $end) {
+                        $d          = $cur->format('Y-m-d');
+                        $r          = $lnMap[$d] ?? [];
+                        $bSent[]    = (int) ($r['sent_cnt']    ?? 0);
+                        $bDel[]     = (int) ($r['del_cnt']     ?? 0);
+                        $bRead[]    = (int) ($r['read_cnt']    ?? 0);
+                        $bReplied[] = (int) ($r['replied_cnt'] ?? 0);
+                        $bFailed[]  = (int) ($r['failed_cnt']  ?? 0);
+                        $cur->modify('+1 day');
+                    }
 
-                    // Mesma paleta de cores do dashboard de disparos
+                    $chart = new LineChart(null, $options['dateFrom'], $options['dateTo']);
+                    $trans = $options['translator'];
+                    $chart->setDataset($trans->trans('dialoghsm.report.graph.sent'),      $bSent);
+                    $chart->setDataset($trans->trans('dialoghsm.report.graph.delivered'), $bDel);
+                    $chart->setDataset($trans->trans('dialoghsm.report.graph.read'),      $bRead);
+                    $chart->setDataset($trans->trans('dialoghsm.report.graph.replied'),   $bReplied);
+                    $chart->setDataset($trans->trans('dialoghsm.report.graph.failed'),    $bFailed);
+
                     $palette = [
                         ['r' => 92,  'g' => 184, 'b' => 92],   // sent      #5cb85c
                         ['r' => 23,  'g' => 162, 'b' => 184],  // delivered #17a2b8
                         ['r' => 2,   'g' => 117, 'b' => 216],  // read      #0275d8
+                        ['r' => 111, 'g' => 66,  'b' => 193],  // replied   #6f42c1
                         ['r' => 217, 'g' => 83,  'b' => 79],   // failed    #d9534f
                     ];
 
@@ -273,37 +279,37 @@ class ReportSubscriber implements EventSubscriberInterface
                     $conn = $event->getQueryBuilder()->getConnection();
                     $sq   = clone $qb;
                     $sq->select(
-                        self::ML.'.status',
-                        'COUNT(*) AS cnt'
-                    )
-                    ->groupBy(self::ML.'.status');
+                        'SUM('.self::ML.'.status IN (\'sent\',\'delivered\',\'read\'))  AS sent',
+                        'SUM('.self::ML.'.status IN (\'delivered\',\'read\'))           AS delivered',
+                        'SUM('.self::ML.'.status = \'read\')                            AS read_cnt',
+                        'SUM('.self::ML.'.date_replied IS NOT NULL)                     AS replied',
+                        'SUM('.self::ML.'.status IN (\'failed\',\'dlq\'))               AS failed'
+                    );
 
-                    $rows    = $conn->fetchAllAssociative($sq->getSQL(), $sq->getParameters());
-                    $buckets = ['sent' => 0, 'delivered' => 0, 'read' => 0, 'failed' => 0];
-                    foreach ($rows as $row) {
-                        $status = $row['status'];
-                        $count  = (int) $row['cnt'];
-                        if (in_array($status, ['sent', 'delivered', 'read'], true)) {
-                            $buckets[$status] += $count;
-                        } elseif (in_array($status, ['failed', 'dlq'], true)) {
-                            $buckets['failed'] += $count;
-                        }
-                    }
+                    $row     = $conn->fetchAssociative($sq->getSQL(), $sq->getParameters());
+                    $buckets = [
+                        'sent'      => (int) ($row['sent']      ?? 0),
+                        'delivered' => (int) ($row['delivered'] ?? 0),
+                        'read'      => (int) ($row['read_cnt']  ?? 0),
+                        'replied'   => (int) ($row['replied']   ?? 0),
+                        'failed'    => (int) ($row['failed']    ?? 0),
+                    ];
 
                     $pie = new PieChart();
                     $pie->setDataset($options['translator']->trans('dialoghsm.report.graph.sent'),      $buckets['sent']);
                     $pie->setDataset($options['translator']->trans('dialoghsm.report.graph.delivered'), $buckets['delivered']);
                     $pie->setDataset($options['translator']->trans('dialoghsm.report.graph.read'),      $buckets['read']);
+                    $pie->setDataset($options['translator']->trans('dialoghsm.report.graph.replied'),   $buckets['replied']);
                     $pie->setDataset($options['translator']->trans('dialoghsm.report.graph.failed'),    $buckets['failed']);
 
-                    $pieRender = $pie->render();
-                    // Paleta de cores do dashboard
-                    $pieRender['labels']                        = array_keys($buckets);
+                    $pieRender                               = $pie->render();
+                    $pieRender['labels']                     = array_keys($buckets);
                     $pieRender['datasets'][0]['backgroundColor'] = [
-                        'rgba(92,184,92,0.8)',   // sent
-                        'rgba(23,162,184,0.8)',  // delivered
-                        'rgba(2,117,216,0.8)',   // read
-                        'rgba(217,83,79,0.8)',   // failed
+                        'rgba(92,184,92,0.8)',    // sent
+                        'rgba(23,162,184,0.8)',   // delivered
+                        'rgba(2,117,216,0.8)',    // read
+                        'rgba(111,66,193,0.8)',   // replied
+                        'rgba(217,83,79,0.8)',    // failed
                     ];
                     $event->setGraph($g, ['data' => $pieRender, 'name' => $g]);
                     break;
@@ -315,6 +321,7 @@ class ReportSubscriber implements EventSubscriberInterface
                         'SUM('.self::ML.'.status IN (\'sent\',\'delivered\',\'read\')) AS sent',
                         'SUM('.self::ML.'.status IN (\'delivered\',\'read\'))          AS delivered',
                         'SUM('.self::ML.'.status = \'read\')                           AS `read`',
+                        'SUM('.self::ML.'.date_replied IS NOT NULL)                    AS replied',
                         'SUM('.self::ML.'.status IN (\'failed\',\'dlq\'))              AS failed',
                         'COUNT(*) AS total'
                     )
@@ -329,86 +336,58 @@ class ReportSubscriber implements EventSubscriberInterface
                     $sentLabel      = $options['translator']->trans('dialoghsm.report.column.sent_count');
                     $deliveredLabel = $options['translator']->trans('dialoghsm.report.graph.delivered');
                     $readLabel      = $options['translator']->trans('dialoghsm.report.graph.read');
+                    $repliedLabel   = $options['translator']->trans('dialoghsm.report.graph.replied');
                     $failedLabel    = $options['translator']->trans('dialoghsm.report.column.failed_count');
 
                     $data = array_map(fn ($r, $i) => [
-                        'id'          => $i + 1,
-                        $tplLabel     => $r['template'],
-                        $sentLabel    => (int) $r['sent'],
+                        'id'            => $i + 1,
+                        $tplLabel       => $r['template'],
+                        $sentLabel      => (int) $r['sent'],
                         $deliveredLabel => (int) $r['delivered'],
-                        $readLabel    => (int) $r['read'],
-                        $failedLabel  => (int) $r['failed'],
+                        $readLabel      => (int) $r['read'],
+                        $repliedLabel   => (int) $r['replied'],
+                        $failedLabel    => (int) $r['failed'],
                     ], $rows, array_keys($rows));
 
-                    $tableData = [
-                        'data' => $data,
-                        'name' => $g,
-                    ];
-
-                    $event->setGraph($g, $tableData);
+                    $event->setGraph($g, ['data' => $data, 'name' => $g]);
                     break;
 
                 case self::GRAPH_LINE_DELIVERY_RATE:
-                    // Taxa de entrega e leitura por dia (%) — custom SQL por dia
-                    $conn   = $event->getQueryBuilder()->getConnection();
-                    $sq     = clone $qb;
-                    $sq->select(
+                    $conn  = $event->getQueryBuilder()->getConnection();
+                    $sqRt  = clone $qb;
+                    $sqRt->select(
                         'DATE('.self::ML.'.date_sent) AS day',
                         'SUM('.self::ML.'.status IN (\'sent\',\'delivered\',\'read\')) AS sent_plus',
-                        'SUM('.self::ML.'.status IN (\'delivered\',\'read\'))          AS delivered_plus',
-                        'SUM('.self::ML.'.status = \'read\')                           AS read_count'
+                        'SUM('.self::ML.'.status IN (\'delivered\',\'read\'))          AS del_plus',
+                        'SUM('.self::ML.'.status = \'read\')                           AS read_cnt'
                     )
                     ->groupBy('DATE('.self::ML.'.date_sent)')
                     ->orderBy('day', 'ASC');
 
-                    $dailyRows = $conn->fetchAllAssociative($sq->getSQL(), $sq->getParameters());
+                    $rateRows = $conn->fetchAllAssociative($sqRt->getSQL(), $sqRt->getParameters());
+                    $rateMap  = array_column($rateRows, null, 'day');
 
-                    $rateChart = new LineChart(null, $options['dateFrom'], $options['dateTo']);
-                    $chartQuery->modifyTimeDataQuery($sq, 'date_sent', self::ML);
-
-                    $deliveryRates = [];
-                    $readRates     = [];
-                    foreach ($dailyRows as $row) {
-                        $sentPlus = (int) $row['sent_plus'];
-                        $deliveryRates[$row['day']] = $sentPlus > 0 ? round((int) $row['delivered_plus'] / $sentPlus * 100, 1) : 0;
-                        $readRates[$row['day']]     = $sentPlus > 0 ? round((int) $row['read_count']    / $sentPlus * 100, 1) : 0;
+                    $bDelRate = $bReadRate = [];
+                    $cur = (clone $options['dateFrom'])->setTime(0, 0, 0);
+                    $end = (clone $options['dateTo'])->setTime(0, 0, 0);
+                    while ($cur <= $end) {
+                        $d   = $cur->format('Y-m-d');
+                        $r   = $rateMap[$d] ?? [];
+                        $s   = (int) ($r['sent_plus'] ?? 0);
+                        $bDelRate[]  = $s > 0 ? round((int) ($r['del_plus']  ?? 0) / $s * 100, 1) : 0;
+                        $bReadRate[] = $s > 0 ? round((int) ($r['read_cnt']  ?? 0) / $s * 100, 1) : 0;
+                        $cur->modify('+1 day');
                     }
 
-                    // Monta datasets no mesmo formato de time series do ChartQuery
-                    $deliveryData = $chartQuery->loadAndBuildTimeData(
-                        (clone $qb)->andWhere(self::ML.'.status IN (\'delivered\',\'read\')')
-                            ->select('DATE('.self::ML.'.date_sent) AS date, SUM(1) AS count')
-                            ->groupBy('DATE('.self::ML.'.date_sent)')
-                    );
-                    $sentData = $chartQuery->loadAndBuildTimeData(
-                        (clone $qb)->andWhere(self::ML.'.status IN (\'sent\',\'delivered\',\'read\')')
-                            ->select('DATE('.self::ML.'.date_sent) AS date, SUM(1) AS count')
-                            ->groupBy('DATE('.self::ML.'.date_sent)')
-                    );
-
-                    // Calcula % ponto a ponto
-                    $deliveryPct = array_map(
-                        fn ($d, $s) => $s > 0 ? round($d / $s * 100, 1) : 0,
-                        $deliveryData,
-                        $sentData
-                    );
-                    $readPctQuery = clone $qb;
-                    $readPctQuery->andWhere(self::ML.'.status = \'read\'');
-                    $chartQuery->modifyTimeDataQuery($readPctQuery, 'date_sent', self::ML);
-                    $readData = $chartQuery->loadAndBuildTimeData($readPctQuery);
-                    $readPct  = array_map(
-                        fn ($r, $s) => $s > 0 ? round($r / $s * 100, 1) : 0,
-                        $readData,
-                        $sentData
-                    );
-
-                    $rateChart->setDataset($options['translator']->trans('dialoghsm.report.graph.delivery_rate_pct'), $deliveryPct);
-                    $rateChart->setDataset($options['translator']->trans('dialoghsm.report.graph.read_rate_pct'),     $readPct);
+                    $rateChart = new LineChart(null, $options['dateFrom'], $options['dateTo']);
+                    $trans     = $options['translator'];
+                    $rateChart->setDataset($trans->trans('dialoghsm.report.graph.delivery_rate_pct'), $bDelRate);
+                    $rateChart->setDataset($trans->trans('dialoghsm.report.graph.read_rate_pct'),     $bReadRate);
 
                     $rateData = $rateChart->render();
                     $palette  = [
-                        ['r' => 23,  'g' => 162, 'b' => 184],  // delivery #17a2b8
-                        ['r' => 2,   'g' => 117, 'b' => 216],  // read     #0275d8
+                        ['r' => 23, 'g' => 162, 'b' => 184],  // delivery #17a2b8
+                        ['r' => 2,  'g' => 117, 'b' => 216],  // read     #0275d8
                     ];
                     foreach ($palette as $i => $rgb) {
                         if (!isset($rateData['datasets'][$i])) {

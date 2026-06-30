@@ -369,14 +369,15 @@ class ReportSubscriberTest extends TestCase
     // onReportGraphGenerate helpers
     // =========================================================================
 
-    private function makeGraphQb(array $fetchRows = []): QueryBuilder&MockObject
+    private function makeGraphQb(array $fetchRows = [], array $fetchOneRow = []): QueryBuilder&MockObject
     {
         $connection = $this->getMockBuilder(\Doctrine\DBAL\Connection::class)
             ->disableOriginalConstructor()
-            ->onlyMethods(['fetchAllAssociative'])
+            ->onlyMethods(['fetchAllAssociative', 'fetchAssociative'])
             ->getMock();
 
         $connection->method('fetchAllAssociative')->willReturn($fetchRows);
+        $connection->method('fetchAssociative')->willReturn($fetchOneRow ?: ['cnt' => 0]);
 
         $expr = $this->getMockBuilder(\Doctrine\DBAL\Query\Expression\ExpressionBuilder::class)
             ->disableOriginalConstructor()
@@ -422,7 +423,7 @@ class ReportSubscriberTest extends TestCase
         return $cq;
     }
 
-    private function makeGraphEvent(bool $contextMatches, string $graph, array $fetchRows = []): \Mautic\ReportBundle\Event\ReportGraphEvent&MockObject
+    private function makeGraphEvent(bool $contextMatches, string $graph, array $fetchRows = [], array $fetchOneRow = []): \Mautic\ReportBundle\Event\ReportGraphEvent&MockObject
     {
         $translator = $this->createMock(\Symfony\Contracts\Translation\TranslatorInterface::class);
         $translator->method('trans')->willReturnArgument(0);
@@ -436,7 +437,7 @@ class ReportSubscriberTest extends TestCase
 
         if ($contextMatches) {
             $event->method('getRequestedGraphs')->willReturn([$graph]);
-            $event->method('getQueryBuilder')->willReturn($this->makeGraphQb($fetchRows));
+            $event->method('getQueryBuilder')->willReturn($this->makeGraphQb($fetchRows, $fetchOneRow));
             $event->method('getOptions')->willReturn([
                 'chartQuery' => $this->makeChartQuery(),
                 'dateFrom'   => new \DateTime('-30 days'),
@@ -478,16 +479,11 @@ class ReportSubscriberTest extends TestCase
 
     public function testPieStatusBucketsDlqIntoFailed(): void
     {
-        $rows = [
-            ['status' => 'sent',      'cnt' => 100],
-            ['status' => 'delivered', 'cnt' => 80],
-            ['status' => 'read',      'cnt' => 50],
-            ['status' => 'failed',    'cnt' => 10],
-            ['status' => 'dlq',       'cnt' => 5],
-        ];
+        // dlq já é somado em 'failed' pelo SUM(status IN ('failed','dlq')) no SQL
+        $fetchOneRow = ['sent' => 100, 'delivered' => 80, 'read_cnt' => 50, 'replied' => 0, 'failed' => 15];
 
         $captured = null;
-        $event    = $this->makeGraphEvent(true, ReportSubscriber::GRAPH_PIE_STATUS, $rows);
+        $event    = $this->makeGraphEvent(true, ReportSubscriber::GRAPH_PIE_STATUS, [], $fetchOneRow);
         $event->method('setGraph')
             ->willReturnCallback(function (string $g, array $data) use (&$captured): void {
                 $captured = $data;
@@ -497,10 +493,11 @@ class ReportSubscriberTest extends TestCase
 
         // dlq (5) deve somar em failed (10) → total 15
         $datasets = $captured['data']['datasets'][0]['data'];
-        $this->assertSame(15, $datasets[3], 'failed bucket deve incluir dlq');
         $this->assertSame(100, $datasets[0], 'sent bucket');
         $this->assertSame(80, $datasets[1], 'delivered bucket');
         $this->assertSame(50, $datasets[2], 'read bucket');
+        $this->assertSame(0, $datasets[3], 'replied bucket');
+        $this->assertSame(15, $datasets[4], 'failed bucket deve incluir dlq');
     }
 
     public function testPieStatusAppliesFourColors(): void
@@ -515,11 +512,12 @@ class ReportSubscriberTest extends TestCase
         $this->subscriber->onReportGraphGenerate($event);
 
         $colors = $captured['data']['datasets'][0]['backgroundColor'];
-        $this->assertCount(4, $colors);
-        $this->assertStringContainsString('92,184,92',   $colors[0]); // sent    #5cb85c
+        $this->assertCount(5, $colors);
+        $this->assertStringContainsString('92,184,92',   $colors[0]); // sent      #5cb85c
         $this->assertStringContainsString('23,162,184',  $colors[1]); // delivered #17a2b8
-        $this->assertStringContainsString('2,117,216',   $colors[2]); // read    #0275d8
-        $this->assertStringContainsString('217,83,79',   $colors[3]); // failed  #d9534f
+        $this->assertStringContainsString('2,117,216',   $colors[2]); // read      #0275d8
+        $this->assertStringContainsString('111,66,193',  $colors[3]); // replied   #6f42c1
+        $this->assertStringContainsString('217,83,79',   $colors[4]); // failed    #d9534f
     }
 
     // =========================================================================
@@ -591,7 +589,7 @@ class ReportSubscriberTest extends TestCase
         $event->expects($this->once())->method('setGraph')
             ->with(
                 ReportSubscriber::GRAPH_LINE_SENDS_PER_DAY,
-                $this->callback(fn ($d) => isset($d['datasets']) && count($d['datasets']) === 4)
+                $this->callback(fn ($d) => isset($d['datasets']) && count($d['datasets']) === 5)
             );
 
         $this->subscriber->onReportGraphGenerate($event);
@@ -611,7 +609,8 @@ class ReportSubscriberTest extends TestCase
         $this->assertStringContainsString('92,184,92',  $captured['datasets'][0]['borderColor']); // sent
         $this->assertStringContainsString('23,162,184', $captured['datasets'][1]['borderColor']); // delivered
         $this->assertStringContainsString('2,117,216',  $captured['datasets'][2]['borderColor']); // read
-        $this->assertStringContainsString('217,83,79',  $captured['datasets'][3]['borderColor']); // failed
+        $this->assertStringContainsString('111,66,193', $captured['datasets'][3]['borderColor']); // replied
+        $this->assertStringContainsString('217,83,79',  $captured['datasets'][4]['borderColor']); // failed
     }
 
     // =========================================================================

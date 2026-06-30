@@ -17,6 +17,9 @@ class SendWhatsAppDirectBatchMessageHandlerTest extends TestCase
     private MessageLogRepository&MockObject $mockRepo;
     private SendWhatsAppDirectBatchMessageHandler $handler;
 
+    /** @var int[] */
+    private array $sleepCalls = [];
+
     protected function setUp(): void
     {
         $this->mockBaseHandler = $this->createMock(SendWhatsAppMessageHandler::class);
@@ -26,7 +29,10 @@ class SendWhatsAppDirectBatchMessageHandlerTest extends TestCase
         $this->mockBaseHandler->method('getLogMaxRecords')->willReturn(100_000);
         $this->mockBaseHandler->method('getLogMaxDays')->willReturn(30);
 
-        $this->handler = new SendWhatsAppDirectBatchMessageHandler($this->mockBaseHandler, new NullLogger(), $this->mockRepo);
+        $this->sleepCalls = [];
+        $sleepSpy         = function (int $us): void { $this->sleepCalls[] = $us; };
+
+        $this->handler = new SendWhatsAppDirectBatchMessageHandler($this->mockBaseHandler, new NullLogger(), $this->mockRepo, $sleepSpy);
     }
 
     private function makeMessage(int $leadId = 1): SendWhatsAppMessage
@@ -92,11 +98,9 @@ class SendWhatsAppDirectBatchMessageHandlerTest extends TestCase
             ->method('__invoke')
             ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200]);
 
-        $start   = microtime(true);
         ($this->handler)($batch);
-        $elapsed = microtime(true) - $start;
 
-        $this->assertLessThan(0.1, $elapsed, 'Sem delay configurado não deve dormir');
+        $this->assertCount(0, $this->sleepCalls, 'Sem delay configurado não deve dormir');
     }
 
     public function testNoDelayRunsWithoutSleepEvenWithBatchLimit(): void
@@ -107,11 +111,9 @@ class SendWhatsAppDirectBatchMessageHandlerTest extends TestCase
             ->method('__invoke')
             ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200]);
 
-        $start   = microtime(true);
         ($this->handler)($batch);
-        $elapsed = microtime(true) - $start;
 
-        $this->assertLessThan(0.1, $elapsed, 'sendDelay=0 não deve gerar nenhum sleep');
+        $this->assertCount(0, $this->sleepCalls, 'sendDelay=0 não deve gerar nenhum sleep');
     }
 
     // -------------------------------------------------------------------------
@@ -120,19 +122,18 @@ class SendWhatsAppDirectBatchMessageHandlerTest extends TestCase
 
     public function testBatchGroupSleepAfterEachGroup(): void
     {
-        // 10 mensagens, grupos de 5, delay de 1s → 2 sleeps = ~2s
+        // 10 mensagens, grupos de 5, delay de 1s → 2 sleeps de 1_000_000µs
         $batch = $this->makeBatch(10, batchLimit: 5, sendDelay: 1);
 
         $this->mockBaseHandler
             ->method('__invoke')
             ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200]);
 
-        $start   = microtime(true);
         ($this->handler)($batch);
-        $elapsed = microtime(true) - $start;
 
-        $this->assertGreaterThanOrEqual(1.2, $elapsed, 'Esperados 2 sleeps de 1s (≥1.2s)');
-        $this->assertLessThan(5.0, $elapsed, 'Não deve demorar mais que 5s');
+        $this->assertCount(2, $this->sleepCalls, 'Esperados exatamente 2 sleeps');
+        $this->assertSame(1_000_000, $this->sleepCalls[0], 'Primeiro sleep deve ser 1s (1_000_000µs)');
+        $this->assertSame(1_000_000, $this->sleepCalls[1], 'Segundo sleep deve ser 1s (1_000_000µs)');
     }
 
     public function testPartialGroupDoesNotSleep(): void
@@ -144,12 +145,10 @@ class SendWhatsAppDirectBatchMessageHandlerTest extends TestCase
             ->method('__invoke')
             ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200]);
 
-        $start   = microtime(true);
         ($this->handler)($batch);
-        $elapsed = microtime(true) - $start;
 
-        $this->assertGreaterThanOrEqual(0.75, $elapsed, 'Esperado 1 sleep de 1s (≥0.75s)');
-        $this->assertLessThan(2.5, $elapsed, 'Grupo parcial não gera sleep extra');
+        $this->assertCount(1, $this->sleepCalls, 'Esperado exatamente 1 sleep');
+        $this->assertSame(1_000_000, $this->sleepCalls[0], 'Sleep deve ser 1s (1_000_000µs)');
     }
 
     // -------------------------------------------------------------------------
@@ -172,11 +171,9 @@ class SendWhatsAppDirectBatchMessageHandlerTest extends TestCase
             ->method('__invoke')
             ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200]);
 
-        $start   = microtime(true);
         ($this->handler)($batch);
-        $elapsed = microtime(true) - $start;
 
-        $this->assertLessThan(0.1, $elapsed, 'sendDelay=0 não dorme mesmo com batchLimit=0');
+        $this->assertCount(0, $this->sleepCalls, 'sendDelay=0 não dorme mesmo com batchLimit=0');
     }
 
     // -------------------------------------------------------------------------
