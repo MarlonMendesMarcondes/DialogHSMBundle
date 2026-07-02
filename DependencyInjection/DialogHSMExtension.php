@@ -43,7 +43,12 @@ class DialogHSMExtension extends Extension implements PrependExtensionInterface
                     'whatsapp_direct' => [
                         'dsn'            => '%env(MAUTIC_MESSENGER_DSN_WHATSAPP_DIRECT)%',
                         'options'        => [
-                            'auto_setup' => false,
+                            // Diferente do AMQP (RabbitMQ), criar o Stream/Group no Redis é uma
+                            // operação idempotente e sem implicação de topologia/permissão — não
+                            // há motivo para gerenciar isso manualmente. Sem isso, era necessário
+                            // rodar `messenger:setup-transport whatsapp_direct` manualmente sempre
+                            // que o Redis fosse recriado/limpo (nova instância, FLUSHALL, etc.).
+                            'auto_setup' => true,
                             // Consumer name único por servidor: evita que múltiplos workers no mesmo
                             // host compartilhem a PEL do Redis Stream e causem race condition no XACK.
                             // Para garantir exclusividade dentro do mesmo servidor, use flock no cron.
