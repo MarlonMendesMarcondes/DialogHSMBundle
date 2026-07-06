@@ -7,10 +7,12 @@ use Doctrine\ORM\EntityManagerInterface;
 use Mautic\CampaignBundle\Entity\Event as CampaignEvent;
 use Mautic\CampaignBundle\Entity\LeadEventLog;
 use Mautic\CampaignBundle\Event\PendingEvent;
+use Mautic\CampaignBundle\Executioner\RealTimeExecutioner;
 use Mautic\CampaignBundle\Executioner\Scheduler\EventScheduler;
 use Mautic\IntegrationsBundle\Helper\IntegrationsHelper;
 use Mautic\LeadBundle\Entity\Lead;
 use Mautic\LeadBundle\Model\LeadModel;
+use Mautic\LeadBundle\Tracker\ContactTracker;
 use MauticPlugin\DialogHSMBundle\Service\OptimalTimeResolver;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
@@ -164,7 +166,7 @@ class WebhookSentFlowTest extends TestCase
         $leadModel      = $this->createMock(LeadModel::class);
         $eventLogWriter = $this->createMock(LeadEventLogWriter::class);
 
-        return new WebhookProcessor($numberRepo, $logRepo, $em, $dispatcher, $leadModel, $eventLogWriter, $this->createMock(PointModel::class), $this->createMock(RedisContactCache::class), $this->createMock(LoggerInterface::class));
+        return new WebhookProcessor($numberRepo, $logRepo, $em, $dispatcher, $leadModel, $eventLogWriter, $this->createMock(PointModel::class), $this->createMock(RedisContactCache::class), $this->createMock(RealTimeExecutioner::class), $this->createMock(ContactTracker::class), $this->createMock(LoggerInterface::class));
     }
 
     private function makeWebhookPayload(string $wamid, string $status, array $errors = []): array
@@ -301,7 +303,7 @@ class WebhookSentFlowTest extends TestCase
 
         $leadModel      = $this->createMock(LeadModel::class);
         $eventLogWriter = $this->createMock(LeadEventLogWriter::class);
-        $processor      = new WebhookProcessor($numberRepo, $logRepo, $em, $dispatcher, $leadModel, $eventLogWriter, $this->createMock(PointModel::class), $this->createMock(RedisContactCache::class), $this->createMock(LoggerInterface::class));
+        $processor      = new WebhookProcessor($numberRepo, $logRepo, $em, $dispatcher, $leadModel, $eventLogWriter, $this->createMock(PointModel::class), $this->createMock(RedisContactCache::class), $this->createMock(RealTimeExecutioner::class), $this->createMock(ContactTracker::class), $this->createMock(LoggerInterface::class));
         $processor->process('+5511999999999', $this->makeWebhookPayload($wamid, 'failed', $errors));
 
         $this->assertSame(MessageLog::STATUS_FAILED, $sharedLog->getStatus(),

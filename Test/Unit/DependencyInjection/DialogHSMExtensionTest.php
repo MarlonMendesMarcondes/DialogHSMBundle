@@ -70,16 +70,26 @@ class DialogHSMExtensionTest extends TestCase
         $this->assertArrayHasKey('whatsapp_failed',  $transports, 'Transport "whatsapp_failed" (DLQ) deve existir');
     }
 
-    public function testAllTransportsHaveAutoSetupFalse(): void
+    public function testAmqpTransportsHaveAutoSetupFalse(): void
     {
         $transports = $this->getMessengerConfig()['transports'];
 
-        foreach (['whatsapp', 'whatsapp_direct', 'whatsapp_failed'] as $name) {
+        foreach (['whatsapp', 'whatsapp_failed'] as $name) {
             $this->assertFalse(
                 $transports[$name]['options']['auto_setup'],
-                "Transport \"{$name}\" deve ter auto_setup=false (queues gerenciadas manualmente)"
+                "Transport \"{$name}\" deve ter auto_setup=false (filas/exchanges do RabbitMQ gerenciadas manualmente)"
             );
         }
+    }
+
+    public function testWhatsAppDirectHasAutoSetupTrue(): void
+    {
+        $transports = $this->getMessengerConfig()['transports'];
+
+        $this->assertTrue(
+            $transports['whatsapp_direct']['options']['auto_setup'],
+            'Transport "whatsapp_direct" deve ter auto_setup=true (criação do Redis Stream/Group é idempotente e sem risco de topologia)'
+        );
     }
 
     // =========================================================================

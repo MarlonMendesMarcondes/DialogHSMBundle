@@ -1,5 +1,8 @@
 .phpunit.result.cache
 
+# Documentação de referência interna (não versionada)
+docs/
+
 # Artefatos do Infection (mutation testing)
 infection.log
 infection.html

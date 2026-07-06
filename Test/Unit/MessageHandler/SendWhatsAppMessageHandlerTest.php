@@ -8,6 +8,8 @@ use Mautic\LeadBundle\Model\LeadModel;
 use MauticPlugin\DialogHSMBundle\Api\DialogHSMApi;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
+use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
+use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumberRepository;
 use MauticPlugin\DialogHSMBundle\Exception\TransientApiException;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppMessageHandler;
@@ -28,6 +30,7 @@ class SendWhatsAppMessageHandlerTest extends TestCase
     private BulkRateLimiter&MockObject $mockRateLimiter;
     private IntegrationsHelper&MockObject $mockIntegrationsHelper;
     private RedisContactCache&MockObject $mockContactCache;
+    private WhatsAppNumberRepository&MockObject $mockWhatsAppNumberRepository;
     private SendWhatsAppMessageHandler $handler;
 
     protected function setUp(): void
@@ -41,6 +44,7 @@ class SendWhatsAppMessageHandlerTest extends TestCase
         $this->mockRateLimiter          = $this->createMock(BulkRateLimiter::class);
         $this->mockIntegrationsHelper   = $this->createMock(IntegrationsHelper::class);
         $this->mockContactCache         = $this->createMock(RedisContactCache::class);
+        $this->mockWhatsAppNumberRepository = $this->createMock(WhatsAppNumberRepository::class);
 
         // Default: getIntegration throws (fail-open → DEFAULT_MAX_RECORDS=10000)
         $this->mockIntegrationsHelper->method('getIntegration')->willThrowException(new \RuntimeException('not configured'));
@@ -54,6 +58,7 @@ class SendWhatsAppMessageHandlerTest extends TestCase
             $this->mockRateLimiter,
             $this->mockIntegrationsHelper,
             $this->mockContactCache,
+            $this->mockWhatsAppNumberRepository,
         );
     }
 
@@ -347,9 +352,56 @@ class SendWhatsAppMessageHandlerTest extends TestCase
             ->method('sendMessage')
             ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200, 'retryable' => false]);
 
+        $publishedNumber = $this->createMock(WhatsAppNumber::class);
+        $publishedNumber->method('getIsPublished')->willReturn(true);
+        $this->mockWhatsAppNumberRepository->method('findOneBy')->willReturn($publishedNumber);
+
         $this->mockRateLimiter->expects($this->once())->method('throttle')->with('Numero_Comercial');
 
         ($this->handler)($this->makeMessage(whatsAppNumberName: 'Numero_Comercial'));
+    }
+
+    // -------------------------------------------------------------------------
+    // Testes: número desativado — envio deve ser ignorado sem chamar a API
+    // -------------------------------------------------------------------------
+
+    public function testSkipsSendWhenNumberIsUnpublished(): void
+    {
+        $unpublishedNumber = $this->createMock(WhatsAppNumber::class);
+        $unpublishedNumber->method('getIsPublished')->willReturn(false);
+        $this->mockWhatsAppNumberRepository->method('findOneBy')->willReturn($unpublishedNumber);
+
+        $this->mockApi->expects($this->never())->method('sendMessage');
+        $this->mockRateLimiter->expects($this->never())->method('throttle');
+
+        $result = ($this->handler)($this->makeMessage(whatsAppNumberName: 'Numero_Comercial'));
+
+        $this->assertFalse($result['success']);
+        $this->assertSame('Número WhatsApp desativado', $result['error']);
+        $this->assertFalse($result['retryable']);
+    }
+
+    public function testSkipsSendWhenNumberIsNotFound(): void
+    {
+        $this->mockWhatsAppNumberRepository->method('findOneBy')->willReturn(null);
+
+        $this->mockApi->expects($this->never())->method('sendMessage');
+
+        $result = ($this->handler)($this->makeMessage(whatsAppNumberName: 'Numero_Inexistente'));
+
+        $this->assertFalse($result['success']);
+    }
+
+    public function testDoesNotCheckNumberStatusWhenNameIsEmpty(): void
+    {
+        $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
+        $this->mockApi
+            ->method('sendMessage')
+            ->willReturn(['success' => true, 'response' => null, 'error' => null, 'http_status' => 200, 'retryable' => false]);
+
+        $this->mockWhatsAppNumberRepository->expects($this->never())->method('findOneBy');
+
+        ($this->handler)($this->makeMessage(whatsAppNumberName: ''));
     }
 
     // -------------------------------------------------------------------------

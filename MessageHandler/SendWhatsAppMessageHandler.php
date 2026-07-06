@@ -10,6 +10,7 @@ use Mautic\LeadBundle\Model\LeadModel;
 use MauticPlugin\DialogHSMBundle\Api\DialogHSMApi;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
+use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumberRepository;
 use MauticPlugin\DialogHSMBundle\Exception\TransientApiException;
 use MauticPlugin\DialogHSMBundle\Integration\DialogHSMIntegration;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
@@ -37,6 +38,7 @@ class SendWhatsAppMessageHandler implements MessageHandlerInterface
         private BulkRateLimiter $rateLimiter,
         private IntegrationsHelper $integrationsHelper,
         private RedisContactCache $contactCache,
+        private WhatsAppNumberRepository $whatsAppNumberRepository,
     ) {
     }
 
@@ -86,6 +88,34 @@ class SendWhatsAppMessageHandler implements MessageHandlerInterface
 
                     return ['success' => true, 'response' => null, 'error' => null, 'http_status' => null, 'retryable' => false];
                 }
+            }
+        }
+
+        // Número desativado (isPublished=false) após a mensagem já estar na fila: ignora
+        // silenciosamente em vez de chamar a API 360dialog e registrar erro. Cobre o caso de
+        // workers de fila já em execução (dialog:consume) que não sabem que o número foi
+        // desativado depois de iniciados.
+        if ('' !== $message->whatsAppNumberName) {
+            $number = $this->whatsAppNumberRepository->findOneBy(['name' => $message->whatsAppNumberName]);
+
+            if (null === $number || !$number->getIsPublished()) {
+                $this->logger->info('DialogHSM: número desativado — envio ignorado', [
+                    'lead_id'            => $message->leadId,
+                    'whats_app_number'   => $message->whatsAppNumberName,
+                ]);
+
+                $result = ['success' => false, 'response' => null, 'error' => 'Número WhatsApp desativado', 'http_status' => null, 'wamid' => null, 'retryable' => false];
+
+                try {
+                    $this->logMessage($message->leadId, $message->templateName, $message->phone, $message->whatsAppNumberName, $result, $message->campaignId, $message->campaignEventId, $message->queueLogId, $skipHousekeeping);
+                } catch (\Throwable $e) {
+                    $this->logger->warning('DialogHSM: Falha ao registrar log da mensagem', [
+                        'lead_id' => $message->leadId,
+                        'error'   => $e->getMessage(),
+                    ]);
+                }
+
+                return $result;
             }
         }
 
