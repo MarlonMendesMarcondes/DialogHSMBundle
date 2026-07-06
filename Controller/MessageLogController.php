@@ -45,8 +45,13 @@ class MessageLogController extends FormController
         try {
             $integration = $this->integrationsHelper->getIntegration(DialogHSMIntegration::NAME);
             $apiKeys     = $integration->getIntegrationConfiguration()->getApiKeys() ?? [];
+            $raw         = (int) ($apiKeys['log_max_records'] ?? self::DEFAULT_MAX_LOGS);
 
-            return max(1_000, min(1_000_000, (int) ($apiKeys['log_max_records'] ?? self::DEFAULT_MAX_LOGS)));
+            if ($raw <= 0) {
+                return 0; // 0 = sem limite (limpeza desabilitada), mesma convenção de SendWhatsAppMessageHandler e MessageLogRepository::prune()
+            }
+
+            return max(1_000, min(1_000_000, $raw));
         } catch (\Throwable) {
             return self::DEFAULT_MAX_LOGS;
         }
