@@ -3,9 +3,11 @@
 declare(strict_types=1);
 
 use Doctrine\ORM\EntityManagerInterface;
+use Mautic\CampaignBundle\Executioner\RealTimeExecutioner;
 use Mautic\LeadBundle\Entity\Lead;
 use Mautic\LeadBundle\Entity\LeadRepository;
 use Mautic\LeadBundle\Model\LeadModel;
+use Mautic\LeadBundle\Tracker\ContactTracker;
 use Mautic\PointBundle\Model\PointModel;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
@@ -31,6 +33,8 @@ class WebhookProcessorTest extends TestCase
     private LeadEventLogWriter&MockObject $eventLogWriter;
     private PointModel&MockObject $pointModel;
     private RedisContactCache&MockObject $contactCache;
+    private RealTimeExecutioner&MockObject $realTimeExecutioner;
+    private ContactTracker&MockObject $contactTracker;
     private LoggerInterface&MockObject $logger;
     private WebhookProcessor $processor;
 
@@ -41,15 +45,17 @@ class WebhookProcessorTest extends TestCase
             ->onlyMethods(['findByPhoneNumber'])
             ->getMock();
 
-        $this->logRepository  = $this->createMock(MessageLogRepository::class);
-        $this->em             = $this->createMock(EntityManagerInterface::class);
-        $this->dispatcher     = $this->createMock(EventDispatcherInterface::class);
-        $this->leadModel      = $this->createMock(LeadModel::class);
-        $this->eventLogWriter = $this->createMock(LeadEventLogWriter::class);
-        $this->pointModel     = $this->createMock(PointModel::class);
-        $this->contactCache   = $this->createMock(RedisContactCache::class);
-        $this->logger         = $this->createMock(LoggerInterface::class);
-        $this->processor      = new WebhookProcessor(
+        $this->logRepository       = $this->createMock(MessageLogRepository::class);
+        $this->em                  = $this->createMock(EntityManagerInterface::class);
+        $this->dispatcher          = $this->createMock(EventDispatcherInterface::class);
+        $this->leadModel           = $this->createMock(LeadModel::class);
+        $this->eventLogWriter      = $this->createMock(LeadEventLogWriter::class);
+        $this->pointModel          = $this->createMock(PointModel::class);
+        $this->contactCache        = $this->createMock(RedisContactCache::class);
+        $this->realTimeExecutioner = $this->createMock(RealTimeExecutioner::class);
+        $this->contactTracker      = $this->createMock(ContactTracker::class);
+        $this->logger              = $this->createMock(LoggerInterface::class);
+        $this->processor           = new WebhookProcessor(
             $this->numberRepository,
             $this->logRepository,
             $this->em,
@@ -58,6 +64,8 @@ class WebhookProcessorTest extends TestCase
             $this->eventLogWriter,
             $this->pointModel,
             $this->contactCache,
+            $this->realTimeExecutioner,
+            $this->contactTracker,
             $this->logger,
         );
     }
@@ -251,6 +259,152 @@ class WebhookProcessorTest extends TestCase
         ]));
 
         $this->assertSame(MessageLog::STATUS_READ, $log->getStatus());
+    }
+
+    // =========================================================================
+    // processStatus — decisões de campanha (delivered / read)
+    // =========================================================================
+
+    public function testDeliveredStatusTriggersCampaignDecision(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_SENT);
+        $log->setLeadId(42);
+        $log->setCampaignEventId(7);
+
+        $lead = $this->createMock(Lead::class);
+        $this->leadModel->method('getEntity')->with(42)->willReturn($lead);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+
+        $this->contactTracker->expects($this->atLeastOnce())
+            ->method('setTrackedContact')
+            ->with($lead);
+        $this->realTimeExecutioner->expects($this->once())
+            ->method('execute')
+            ->with('dialoghsm.decision_delivered', $log, 'whatsapp', null);
+
+        $this->processor->process('+5511999999999', $this->makePayload([
+            $this->makeStatusEntry('wamid.abc', 'delivered'),
+        ]));
+    }
+
+    public function testReadStatusTriggersCampaignDecision(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_DELIVERED);
+        $log->setLeadId(42);
+        $log->setCampaignEventId(7);
+
+        $lead = $this->createMock(Lead::class);
+        $this->leadModel->method('getEntity')->with(42)->willReturn($lead);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+
+        $this->contactTracker->expects($this->atLeastOnce())
+            ->method('setTrackedContact')
+            ->with($lead);
+        $this->realTimeExecutioner->expects($this->once())
+            ->method('execute')
+            ->with('dialoghsm.decision_read', $log, 'whatsapp', null);
+
+        $this->processor->process('+5511999999999', $this->makePayload([
+            $this->makeStatusEntry('wamid.abc', 'read'),
+        ]));
+    }
+
+    public function testSentStatusDoesNotTriggerCampaignDecision(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_QUEUED);
+        $log->setLeadId(42);
+        $log->setCampaignEventId(7);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+
+        $this->realTimeExecutioner->expects($this->never())->method('execute');
+
+        $this->processor->process('+5511999999999', $this->makePayload([
+            $this->makeStatusEntry('wamid.abc', 'sent'),
+        ]));
+    }
+
+    public function testFailedStatusDoesNotTriggerCampaignDecision(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_SENT);
+        $log->setLeadId(42);
+        $log->setCampaignEventId(7);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+
+        $this->realTimeExecutioner->expects($this->never())->method('execute');
+
+        $this->processor->process('+5511999999999', $this->makePayload([
+            $this->makeStatusEntry('wamid.abc', 'failed'),
+        ]));
+    }
+
+    public function testDeliveredStatusDoesNotTriggerDecisionWhenLogHasNoCampaignEventId(): void
+    {
+        // Log sem campaignEventId (ex.: mensagem enviada fora de uma campanha) —
+        // não há nó de decisão para avançar.
+        $log = $this->makeLog(MessageLog::STATUS_SENT);
+        $log->setLeadId(42);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+        $this->leadModel->method('getEntity')->willReturn($this->createMock(Lead::class));
+
+        // updateLeadStatus() já chama leadModel->getEntity() independentemente de campaignEventId;
+        // o que importa aqui é que o decision engine NÃO seja acionado sem um nó de campanha.
+        $this->realTimeExecutioner->expects($this->never())->method('execute');
+
+        $this->processor->process('+5511999999999', $this->makePayload([
+            $this->makeStatusEntry('wamid.abc', 'delivered'),
+        ]));
+    }
+
+    public function testReadStatusDoesNotTriggerDecisionWhenLeadNotFound(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_DELIVERED);
+        $log->setLeadId(42);
+        $log->setCampaignEventId(7);
+
+        $this->leadModel->method('getEntity')->with(42)->willReturn(null);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+
+        $this->realTimeExecutioner->expects($this->never())->method('execute');
+
+        $this->processor->process('+5511999999999', $this->makePayload([
+            $this->makeStatusEntry('wamid.abc', 'read'),
+        ]));
+    }
+
+    public function testCampaignDecisionExceptionDoesNotBreakWebhookFlow(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_SENT);
+        $log->setLeadId(42);
+        $log->setCampaignEventId(7);
+
+        $lead = $this->createMock(Lead::class);
+        $this->leadModel->method('getEntity')->with(42)->willReturn($lead);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+
+        $this->realTimeExecutioner->method('execute')
+            ->willThrowException(new \RuntimeException('campaign engine boom'));
+        $this->logger->expects($this->atLeastOnce())->method('error');
+
+        // Não deve lançar exceção nem impedir o fluxo do webhook.
+        $this->processor->process('+5511999999999', $this->makePayload([
+            $this->makeStatusEntry('wamid.abc', 'delivered'),
+        ]));
+
+        $this->assertSame(MessageLog::STATUS_DELIVERED, $log->getStatus());
     }
 
     public function testReadFromFailedIsNoOp(): void
@@ -1453,6 +1607,8 @@ class WebhookProcessorTest extends TestCase
             $this->eventLogWriter,
             $this->pointModel,
             $this->contactCache,
+            $this->realTimeExecutioner,
+            $this->contactTracker,
             $this->logger,
             '',
             $redis,
@@ -1501,6 +1657,62 @@ class WebhookProcessorTest extends TestCase
         $this->pointModel->expects($this->once())
             ->method('triggerAction')
             ->with('dialoghsm.message_replied', null, null, $lead, true);
+
+        $processor = $this->makeProcessorWithRedis($redis);
+        $processor->process('+5511999999999', $this->makeInboundPayload('5511888888888'));
+    }
+
+    public function testReplyTriggersCampaignDecisionWhenLogHasCampaignEventId(): void
+    {
+        $lead = $this->createMock(Lead::class);
+        $lead->method('getId')->willReturn(77);
+        $repo = $this->makeLeadRepo([$lead]);
+        $log  = $this->makeHsmLog(77);
+        $log->setCampaignEventId(7);
+
+        $this->leadModel->method('getEntity')->with(77)->willReturn($lead);
+
+        $redis = $this->createMock(\Redis::class);
+        $redis->method('get')->willReturn(false);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->em->method('getRepository')->willReturn($repo);
+        $this->em->method('persist');
+        $this->em->method('flush');
+        $this->logRepository->method('findMostRecentForLead')
+            ->with(77, $this->isInstanceOf(\DateTimeInterface::class))
+            ->willReturn($log);
+
+        $this->contactTracker->expects($this->atLeastOnce())
+            ->method('setTrackedContact')
+            ->with($lead);
+        $this->realTimeExecutioner->expects($this->once())
+            ->method('execute')
+            ->with('dialoghsm.decision_replied', $log, 'whatsapp', null);
+
+        $processor = $this->makeProcessorWithRedis($redis);
+        $processor->process('+5511999999999', $this->makeInboundPayload('5511888888888'));
+    }
+
+    public function testReplyDoesNotTriggerCampaignDecisionWhenLogHasNoCampaignEventId(): void
+    {
+        $lead = $this->createMock(Lead::class);
+        $lead->method('getId')->willReturn(77);
+        $repo = $this->makeLeadRepo([$lead]);
+        $log  = $this->makeHsmLog(77); // sem campaignEventId — resposta a envio fora de campanha
+
+        $redis = $this->createMock(\Redis::class);
+        $redis->method('get')->willReturn(false);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->em->method('getRepository')->willReturn($repo);
+        $this->em->method('persist');
+        $this->em->method('flush');
+        $this->logRepository->method('findMostRecentForLead')
+            ->with(77, $this->isInstanceOf(\DateTimeInterface::class))
+            ->willReturn($log);
+
+        $this->realTimeExecutioner->expects($this->never())->method('execute');
 
         $processor = $this->makeProcessorWithRedis($redis);
         $processor->process('+5511999999999', $this->makeInboundPayload('5511888888888'));
@@ -1565,6 +1777,8 @@ class WebhookProcessorTest extends TestCase
             $this->eventLogWriter,
             $this->pointModel,
             $this->contactCache,
+            $this->realTimeExecutioner,
+            $this->contactTracker,
             $this->logger,
             '',
             $redis,

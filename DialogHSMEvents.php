@@ -9,4 +9,5 @@ final class DialogHSMEvents
     public const ON_CAMPAIGN_TRIGGER_ACTION         = 'mautic.dialoghsm.on_campaign_trigger_action';
     public const ON_CAMPAIGN_TRIGGER_ACTION_QUEUE   = 'mautic.dialoghsm.on_campaign_trigger_action_queue';
     public const ON_MARKETING_MESSAGE_SEND          = 'mautic.dialoghsm.on_marketing_message_send';
+    public const ON_CAMPAIGN_TRIGGER_DECISION       = 'mautic.dialoghsm.on_campaign_trigger_decision';
 }

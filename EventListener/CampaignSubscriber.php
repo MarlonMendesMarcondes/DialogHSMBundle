@@ -7,6 +7,7 @@ namespace MauticPlugin\DialogHSMBundle\EventListener;
 use Doctrine\ORM\EntityManagerInterface;
 use Mautic\CampaignBundle\CampaignEvents;
 use Mautic\CampaignBundle\Event\CampaignBuilderEvent;
+use Mautic\CampaignBundle\Event\CampaignExecutionEvent;
 use Mautic\CampaignBundle\Event\PendingEvent;
 use Mautic\IntegrationsBundle\Helper\IntegrationsHelper;
 use Mautic\LeadBundle\Helper\TokenHelper;
@@ -53,6 +54,7 @@ class CampaignSubscriber implements EventSubscriberInterface
             CampaignEvents::CAMPAIGN_ON_BUILD                 => ['onCampaignBuild', 0],
             DialogHSMEvents::ON_CAMPAIGN_TRIGGER_ACTION       => ['onCampaignTriggerAction', 0],
             DialogHSMEvents::ON_CAMPAIGN_TRIGGER_ACTION_QUEUE => ['onCampaignTriggerActionQueue', 0],
+            DialogHSMEvents::ON_CAMPAIGN_TRIGGER_DECISION     => ['onCampaignTriggerDecision', 0],
         ];
     }
 
@@ -94,6 +96,84 @@ class CampaignSubscriber implements EventSubscriberInterface
                 'timelineTemplate' => '@DialogHSM/Timeline/campaign_action.html.twig',
             ]
         );
+
+        $sendActionTypes = [
+            'dialoghsm.send_whatsapp',
+            'dialoghsm.send_whatsapp_queue',
+            'dialoghsm.send_whatsapp_message',
+        ];
+
+        $event->addDecision(
+            'dialoghsm.decision_delivered',
+            [
+                'label'                  => 'dialoghsm.campaign.decision_delivered',
+                'description'            => 'dialoghsm.campaign.decision_delivered.tooltip',
+                'eventName'              => DialogHSMEvents::ON_CAMPAIGN_TRIGGER_DECISION,
+                'channel'                => 'whatsapp',
+                'connectionRestrictions' => [
+                    'source' => ['action' => $sendActionTypes],
+                ],
+            ]
+        );
+
+        $event->addDecision(
+            'dialoghsm.decision_read',
+            [
+                'label'                  => 'dialoghsm.campaign.decision_read',
+                'description'            => 'dialoghsm.campaign.decision_read.tooltip',
+                'eventName'              => DialogHSMEvents::ON_CAMPAIGN_TRIGGER_DECISION,
+                'channel'                => 'whatsapp',
+                'connectionRestrictions' => [
+                    'source' => ['action' => $sendActionTypes],
+                ],
+            ]
+        );
+
+        $event->addDecision(
+            'dialoghsm.decision_replied',
+            [
+                'label'                  => 'dialoghsm.campaign.decision_replied',
+                'description'            => 'dialoghsm.campaign.decision_replied.tooltip',
+                'eventName'              => DialogHSMEvents::ON_CAMPAIGN_TRIGGER_DECISION,
+                'channel'                => 'whatsapp',
+                'connectionRestrictions' => [
+                    'source' => ['action' => $sendActionTypes],
+                ],
+            ]
+        );
+    }
+
+    private const DECISION_KEYS = [
+        'dialoghsm.decision_delivered',
+        'dialoghsm.decision_read',
+        'dialoghsm.decision_replied',
+    ];
+
+    public function onCampaignTriggerDecision(CampaignExecutionEvent $event): CampaignExecutionEvent
+    {
+        $matchesContext = false;
+        foreach (self::DECISION_KEYS as $decisionKey) {
+            if ($event->checkContext($decisionKey)) {
+                $matchesContext = true;
+                break;
+            }
+        }
+
+        if (!$matchesContext) {
+            return $event->setResult(false);
+        }
+
+        $log = $event->getEventDetails();
+        if (!$log instanceof MessageLog) {
+            return $event->setResult(false);
+        }
+
+        $eventParent = $event->getEvent()['parent'] ?? null;
+        if (empty($eventParent) || (int) $eventParent['id'] !== (int) $log->getCampaignEventId()) {
+            return $event->setResult(false);
+        }
+
+        return $event->setResult(true);
     }
 
     public function onCampaignTriggerAction(PendingEvent $event): void

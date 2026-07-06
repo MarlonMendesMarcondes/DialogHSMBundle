@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace MauticPlugin\DialogHSMBundle\Service;
 
 use Doctrine\ORM\EntityManagerInterface;
+use Mautic\CampaignBundle\Executioner\RealTimeExecutioner;
 use Mautic\LeadBundle\Entity\Lead;
 use Mautic\LeadBundle\Entity\LeadRepository;
 use Mautic\LeadBundle\Model\LeadModel;
+use Mautic\LeadBundle\Tracker\ContactTracker;
 use Mautic\PointBundle\Model\PointModel;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
@@ -32,6 +34,8 @@ class WebhookProcessor
         private readonly LeadEventLogWriter $eventLogWriter,
         private readonly PointModel $pointModel,
         private readonly RedisContactCache $contactCache,
+        private readonly RealTimeExecutioner $realTimeExecutioner,
+        private readonly ContactTracker $contactTracker,
         private readonly LoggerInterface $logger,
         private readonly string $redisDsn = '',
         private readonly ?\Redis $redisOverride = null,
@@ -131,6 +135,14 @@ class WebhookProcessor
         $this->updateCampaignActionMetadata($log);
         $this->updateLeadStatus($log, $status);
         $this->triggerPointAction($log, $status);
+
+        if (MessageLog::STATUS_DELIVERED === $status) {
+            $this->triggerCampaignDecision($log, 'dialoghsm.decision_delivered');
+        }
+
+        if (MessageLog::STATUS_READ === $status) {
+            $this->triggerCampaignDecision($log, 'dialoghsm.decision_read');
+        }
 
         if (MessageLog::STATUS_FAILED === $status) {
             $this->dispatcher->dispatch(new WebhookMessageFailedEvent($log));
@@ -233,6 +245,34 @@ class WebhookProcessor
             $this->pointModel->triggerAction($pointAction, null, null, $lead, true);
         } catch (\Throwable) {
             // falha silenciosa — não interrompe o fluxo do webhook
+        }
+    }
+
+    /**
+     * Avança contatos parados no nó de decisão de campanha "Leu mensagem" / "Respondeu mensagem".
+     * ContactTracker::setTrackedContact é necessário porque RealTimeExecutioner normalmente
+     * resolve o contato via cookie de sessão HTTP — aqui a requisição é server-to-server (webhook).
+     */
+    private function triggerCampaignDecision(MessageLog $log, string $decisionKey): void
+    {
+        if (null === $log->getCampaignEventId() || null === $log->getLeadId()) {
+            return;
+        }
+
+        try {
+            $lead = $this->leadModel->getEntity($log->getLeadId());
+            if (null === $lead) {
+                return;
+            }
+
+            $this->contactTracker->setTrackedContact($lead);
+            $this->realTimeExecutioner->execute($decisionKey, $log, 'whatsapp', null);
+        } catch (\Throwable $e) {
+            $this->logger->error('DialogHSM: falha ao avançar decisão de campanha', [
+                'decisionKey' => $decisionKey,
+                'logId'       => $log->getId(),
+                'error'       => $e->getMessage(),
+            ]);
         }
     }
 
@@ -475,6 +515,8 @@ class WebhookProcessor
                 'message' => $e->getMessage(),
             ]);
         }
+
+        $this->triggerCampaignDecision($log, 'dialoghsm.decision_replied');
     }
 
     private function getRedis(): ?\Redis
