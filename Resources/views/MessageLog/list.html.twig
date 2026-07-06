@@ -10,7 +10,11 @@
             <div class="list-toolbar-container">
                 <div class="toolbar-action-buttons">
                     <span class="label label-default" style="font-size:13px; padding: 6px 12px;">
-                        {{ totalItems }} / {{ maxLogs }} {{ 'dialoghsm.log.list.counter'|trans }}
+                        {% if maxLogs > 0 %}
+                            {{ totalItems }} / {{ maxLogs }} {{ 'dialoghsm.log.list.counter'|trans }}
+                        {% else %}
+                            {{ totalItems }} {{ 'dialoghsm.log.list.counter'|trans }}
+                        {% endif %}
                     </span>
                     <a href="{{ path('mautic_dialoghsm_log_purge_queued') }}"
                        class="btn btn-danger btn-sm" style="margin-left: 8px;">
