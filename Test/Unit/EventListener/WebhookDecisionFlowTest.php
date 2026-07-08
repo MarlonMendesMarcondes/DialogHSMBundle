@@ -123,6 +123,26 @@ class WebhookDecisionFlowTest extends TestCase
         ];
     }
 
+    private function makeButtonClickPayload(string $from, string $contextWamid, string $buttonPayload): array
+    {
+        return [
+            'entry' => [[
+                'changes' => [[
+                    'value' => [
+                        'messages' => [[
+                            'from'      => $from,
+                            'id'        => 'wamid.inbound.button',
+                            'type'      => 'button',
+                            'timestamp' => '1700000001',
+                            'context'   => ['id' => $contextWamid],
+                            'button'    => ['payload' => $buttonPayload, 'text' => $buttonPayload],
+                        ]],
+                    ],
+                ]],
+            ]],
+        ];
+    }
+
     /**
      * Captura os argumentos passados a RealTimeExecutioner::execute() e os devolve
      * como um CampaignExecutionEvent, exatamente como o RealTimeExecutioner real
@@ -310,5 +330,90 @@ class WebhookDecisionFlowTest extends TestCase
 
         $mismatchedEvent = $this->buildDecisionEvent($decisionKey, $passthrough, 999);
         $this->assertFalse($subscriber->onCampaignTriggerDecision($mismatchedEvent)->getResult());
+    }
+
+    /**
+     * Um clique em quick-reply button (webhook type=button) dispara DUAS decisões
+     * independentes a partir do mesmo payload: "respondeu" (genérico, mesmo path de
+     * texto livre) e "clicou no botão" (específico, com o payload do botão capturado).
+     * A Meta contabiliza as duas métricas separadamente — este teste garante que o
+     * plugin também produz os dois eventos, sem um atropelar o outro.
+     */
+    public function testWebhookButtonClickTriggersBothRepliedAndButtonClickedDecisions(): void
+    {
+        $log = new MessageLog();
+        $log->setLeadId(1);
+        $log->setCampaignEventId(20);
+        $log->setWamid('wamid.original.hsm');
+        $log->setStatus(MessageLog::STATUS_DELIVERED);
+
+        [$processor, $rte, $logRepo, $leadModel] = $this->makeWebhookProcessor();
+        $logRepo->method('findByWamid')->with('wamid.original.hsm')->willReturn($log);
+
+        $lead = $this->createMock(Lead::class);
+        $lead->method('getId')->willReturn(1);
+        $leadModel->method('getEntity')->with(1)->willReturn($lead);
+
+        $captured = [];
+        $rte->expects($this->exactly(2))
+            ->method('execute')
+            ->willReturnCallback(function (string $type, $passthrough, ?string $channel, ?int $channelId) use (&$captured) {
+                $captured[] = [$type, $passthrough, $channel, $channelId];
+
+                return null;
+            });
+
+        $processor->process(
+            '+5511999999999',
+            $this->makeButtonClickPayload('5511888888888', 'wamid.original.hsm', 'Quero vaga no Plantão!')
+        );
+
+        $this->assertCount(2, $captured);
+        $decisionKeys = array_column($captured, 0);
+        $this->assertContains('dialoghsm.decision_replied', $decisionKeys);
+        $this->assertContains('dialoghsm.decision_button_clicked', $decisionKeys);
+
+        $this->assertSame('Quero vaga no Plantão!', $log->getButtonPayload());
+        $this->assertNotNull($log->getDateButtonClicked());
+
+        $subscriber = $this->makeSubscriber();
+
+        foreach ($captured as [$decisionKey, $passthrough]) {
+            $matchingEvent = $this->buildDecisionEvent($decisionKey, $passthrough, 20);
+            $this->assertTrue(
+                $subscriber->onCampaignTriggerDecision($matchingEvent)->getResult(),
+                "Decisão '$decisionKey' deveria passar para o nó correto"
+            );
+
+            $mismatchedEvent = $this->buildDecisionEvent($decisionKey, $passthrough, 999);
+            $this->assertFalse(
+                $subscriber->onCampaignTriggerDecision($mismatchedEvent)->getResult(),
+                "Decisão '$decisionKey' não deveria avançar contatos de um nó de envio diferente"
+            );
+        }
+    }
+
+    public function testWebhookButtonClickIsIdempotentWhenAlreadyRecorded(): void
+    {
+        $log = new MessageLog();
+        $log->setLeadId(1);
+        $log->setCampaignEventId(20);
+        $log->setWamid('wamid.original.hsm');
+        $log->setStatus(MessageLog::STATUS_DELIVERED);
+        $log->setDateReplied(new \DateTime('2026-01-01 00:00:00'));
+        $log->setDateButtonClicked(new \DateTime('2026-01-01 00:00:00'));
+
+        [$processor, $rte, $logRepo, $leadModel] = $this->makeWebhookProcessor();
+        $logRepo->method('findByWamid')->with('wamid.original.hsm')->willReturn($log);
+        $leadModel->method('getEntity')->with(1)->willReturn($this->createMock(Lead::class));
+
+        $rte->expects($this->never())->method('execute');
+
+        $processor->process(
+            '+5511999999999',
+            $this->makeButtonClickPayload('5511888888888', 'wamid.original.hsm', 'Quero vaga no Plantão!')
+        );
+
+        $this->assertSame('2026-01-01', $log->getDateButtonClicked()->format('Y-m-d'));
     }
 }

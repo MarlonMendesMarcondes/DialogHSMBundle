@@ -38,6 +38,10 @@
         <dt>{{ 'dialoghsm.log.date_replied'|trans }}</dt>
         <dd>{{ (item.date_replied ~ ' UTC')|date('d/m/Y H:i') }}</dd>
     {% endif %}
+    {% if item.button_payload is defined and item.button_payload %}
+        <dt>{{ 'dialoghsm.log.status.button_clicked'|trans }}</dt>
+        <dd>{{ item.button_payload }}</dd>
+    {% endif %}
     {% if item.error_message is defined and item.error_message %}
         <dt>{{ 'dialoghsm.log.error'|trans }}</dt>
         <dd class="text-danger small">

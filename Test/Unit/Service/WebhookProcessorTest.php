@@ -1351,7 +1351,7 @@ class WebhookProcessorTest extends TestCase
         ];
     }
 
-    private function makeInboundPayloadWithContext(string $from, string $contextWamid): array
+    private function makeInboundPayloadWithContext(string $from, string $contextWamid, string $type = 'text'): array
     {
         return [
             'entry' => [[
@@ -1360,7 +1360,7 @@ class WebhookProcessorTest extends TestCase
                         'messages' => [[
                             'from'      => $from,
                             'id'        => 'wamid.inbound.reply',
-                            'type'      => 'text',
+                            'type'      => $type,
                             'timestamp' => '1700000001',
                             'context'   => ['id' => $contextWamid],
                         ]],
@@ -1555,9 +1555,34 @@ class WebhookProcessorTest extends TestCase
 
         $this->eventLogWriter->expects($this->once())
             ->method('writeReply')
-            ->with($lead, '5511888888888', $this->isInstanceOf(\DateTimeInterface::class), $this->isInstanceOf(MessageLog::class));
+            ->with($lead, '5511888888888', $this->isInstanceOf(\DateTimeInterface::class), $this->isInstanceOf(MessageLog::class), 'text');
 
         $this->processor->process('+5511999999999', $this->makeInboundPayload('5511888888888'));
+    }
+
+    /**
+     * Happy path: type=button (mesmo em Scenario B) propaga reply_type='button' até o
+     * writeReply — necessário para distinguir "respondeu por texto" de "respondeu clicando
+     * no botão" direto no lead_event_log, sem precisar cruzar com ACTION_BUTTON_CLICKED.
+     */
+    public function testInboundButtonTypeWritesReplyWithButtonReplyType(): void
+    {
+        $lead = $this->createMock(Lead::class);
+        $lead->method('getId')->willReturn(77);
+        $repo = $this->makeLeadRepo([$lead]);
+        $log  = $this->makeHsmLog(77);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->em->method('getRepository')->willReturn($repo);
+        $this->em->method('persist');
+        $this->em->method('flush');
+        $this->logRepository->method('findMostRecentForLead')->willReturn($log);
+
+        $this->eventLogWriter->expects($this->once())
+            ->method('writeReply')
+            ->with($lead, '5511888888888', $this->isInstanceOf(\DateTimeInterface::class), $this->isInstanceOf(MessageLog::class), 'button');
+
+        $this->processor->process('+5511999999999', $this->makeInboundPayload('5511888888888', 'button'));
     }
 
     public function testInboundWithNoHsmLogDoesNotWriteReply(): void
@@ -1851,6 +1876,33 @@ class WebhookProcessorTest extends TestCase
         $this->processor->process(
             '+5511999999999',
             $this->makeInboundPayloadWithContext('5511888888888', 'wamid.original.hsm')
+        );
+    }
+
+    /**
+     * Happy path: clique em quick-reply button sempre chega com context.id (Scenario A) —
+     * reply_type='button' deve propagar corretamente também por esse caminho, não só
+     * pelo fallback de texto livre (Scenario B).
+     */
+    public function testInboundContextIdWithButtonTypeWritesReplyWithButtonReplyType(): void
+    {
+        $lead   = $this->createMock(Lead::class);
+        $lead->method('getId')->willReturn(77);
+        $hsmLog = $this->makeHsmLog(77);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->leadModel->method('getEntity')->with(77)->willReturn($lead);
+        $this->logRepository->method('findByWamid')->with('wamid.original.hsm')->willReturn($hsmLog);
+        $this->em->method('persist');
+        $this->em->method('flush');
+
+        $this->eventLogWriter->expects($this->once())
+            ->method('writeReply')
+            ->with($lead, '5511888888888', $this->isInstanceOf(\DateTimeInterface::class), $hsmLog, 'button');
+
+        $this->processor->process(
+            '+5511999999999',
+            $this->makeInboundPayloadWithContext('5511888888888', 'wamid.original.hsm', 'button')
         );
     }
 

@@ -520,6 +520,52 @@ class LeadEventLogWriterTest extends TestCase
         $this->assertSame('2025-06-26 17:30:00', $captured->getProperties()['date_replied']);
     }
 
+    // =========================================================================
+    // writeReply — reply_type (direto vs botão)
+    // =========================================================================
+
+    public function testWriteReplyDefaultsReplyTypeToTextWhenOmitted(): void
+    {
+        $this->stubExistsReply(false);
+        $captured = null;
+        $this->eventLogRepo->method('saveEntity')
+            ->willReturnCallback(function (LeadEventLog $e) use (&$captured): void {
+                $captured = $e;
+            });
+
+        $this->writer->writeReply($this->makeLead(99), '5511888888888', new \DateTime(), $this->makeHsmLogMock(77));
+
+        $this->assertSame('text', $captured->getProperties()['reply_type']);
+    }
+
+    public function testWriteReplySetsReplyTypeButtonWhenPassed(): void
+    {
+        $this->stubExistsReply(false);
+        $captured = null;
+        $this->eventLogRepo->method('saveEntity')
+            ->willReturnCallback(function (LeadEventLog $e) use (&$captured): void {
+                $captured = $e;
+            });
+
+        $this->writer->writeReply($this->makeLead(99), '5511888888888', new \DateTime(), $this->makeHsmLogMock(77), LeadEventLogWriter::REPLY_TYPE_BUTTON);
+
+        $this->assertSame('button', $captured->getProperties()['reply_type']);
+    }
+
+    public function testWriteReplySetsReplyTypeTextExplicitly(): void
+    {
+        $this->stubExistsReply(false);
+        $captured = null;
+        $this->eventLogRepo->method('saveEntity')
+            ->willReturnCallback(function (LeadEventLog $e) use (&$captured): void {
+                $captured = $e;
+            });
+
+        $this->writer->writeReply($this->makeLead(99), '5511888888888', new \DateTime(), $this->makeHsmLogMock(77), LeadEventLogWriter::REPLY_TYPE_TEXT);
+
+        $this->assertSame('text', $captured->getProperties()['reply_type']);
+    }
+
     public function testWriteReplyOmitsSenderNameWhenNull(): void
     {
         $this->stubExistsReply(false);
@@ -561,6 +607,98 @@ class LeadEventLogWriterTest extends TestCase
         $this->writer->writeReply($this->makeLead(99), '5511888888888', new \DateTime(), $this->makeHsmLogMock(77));
 
         $this->assertArrayNotHasKey('date_sent', $captured->getProperties());
+    }
+
+    // =========================================================================
+    // writeButtonClick — clique em quick-reply button
+    // =========================================================================
+
+    public function testWriteButtonClickCallsSaveEntityWhenEventDoesNotExist(): void
+    {
+        $this->connection->method('fetchOne')->willReturn(false);
+
+        $this->eventLogRepo->expects($this->once())->method('saveEntity')
+            ->with($this->isInstanceOf(LeadEventLog::class));
+
+        $this->writer->writeButtonClick($this->makeLog(77), 'Quero vaga no Plantão!', new \DateTime());
+    }
+
+    public function testWriteButtonClickCallsDetachAfterSave(): void
+    {
+        $this->connection->method('fetchOne')->willReturn(false);
+
+        $this->eventLogRepo->expects($this->once())->method('detachEntity');
+
+        $this->writer->writeButtonClick($this->makeLog(77), 'Quero vaga no Plantão!', new \DateTime());
+    }
+
+    public function testWriteButtonClickSkipsWhenEventAlreadyExists(): void
+    {
+        $this->connection->method('fetchOne')->willReturn('123');
+
+        $this->eventLogRepo->expects($this->never())->method('saveEntity');
+
+        $this->writer->writeButtonClick($this->makeLog(77), 'Quero vaga no Plantão!', new \DateTime());
+    }
+
+    public function testWriteButtonClickSkipsWhenLogIdIsZero(): void
+    {
+        $this->eventLogRepo->expects($this->never())->method('saveEntity');
+
+        $this->writer->writeButtonClick($this->makeLog(0), 'Quero vaga no Plantão!', new \DateTime());
+    }
+
+    public function testWriteButtonClickSetsActionButtonClicked(): void
+    {
+        $this->connection->method('fetchOne')->willReturn(false);
+        $captured = null;
+        $this->eventLogRepo->method('saveEntity')
+            ->willReturnCallback(function (LeadEventLog $e) use (&$captured): void {
+                $captured = $e;
+            });
+
+        $this->writer->writeButtonClick($this->makeLog(77), 'Quero vaga no Plantão!', new \DateTime());
+
+        $this->assertSame(LeadEventLogWriter::ACTION_BUTTON_CLICKED, $captured->getAction());
+    }
+
+    public function testWriteButtonClickSetsObjectIdFromLog(): void
+    {
+        $this->connection->method('fetchOne')->willReturn(false);
+        $captured = null;
+        $this->eventLogRepo->method('saveEntity')
+            ->willReturnCallback(function (LeadEventLog $e) use (&$captured): void {
+                $captured = $e;
+            });
+
+        $this->writer->writeButtonClick($this->makeLog(77), 'Quero vaga no Plantão!', new \DateTime());
+
+        $this->assertSame(77, $captured->getObjectId());
+    }
+
+    public function testWriteButtonClickSetsButtonPayloadInProperties(): void
+    {
+        $this->connection->method('fetchOne')->willReturn(false);
+        $captured = null;
+        $this->eventLogRepo->method('saveEntity')
+            ->willReturnCallback(function (LeadEventLog $e) use (&$captured): void {
+                $captured = $e;
+            });
+
+        $this->writer->writeButtonClick($this->makeLog(77), 'Quero vaga no Plantão!', new \DateTime());
+
+        $this->assertSame('Quero vaga no Plantão!', $captured->getProperties()['button_payload']);
+    }
+
+    public function testWriteButtonClickExistenceCheckUsesButtonClickedAction(): void
+    {
+        $this->connection->expects($this->once())->method('fetchOne')
+            ->with($this->anything(), $this->callback(
+                fn (array $params) => $params['action'] === LeadEventLogWriter::ACTION_BUTTON_CLICKED
+            ))
+            ->willReturn(false);
+
+        $this->writer->writeButtonClick($this->makeLog(77), 'Quero vaga no Plantão!', new \DateTime());
     }
 
 }

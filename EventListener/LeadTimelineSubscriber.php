@@ -72,6 +72,14 @@ class LeadTimelineSubscriber implements EventSubscriberInterface
             $grouped[$row['action']][] = $row;
         }
 
+        // Clique em botão é uma resposta — concatena no evento "replied" do mesmo
+        // MessageLog (object_id) em vez de aparecer como entrada própria na timeline.
+        $buttonClickByObjectId = [];
+        foreach ($grouped[LeadEventLogWriter::ACTION_BUTTON_CLICKED] ?? [] as $row) {
+            $buttonClickByObjectId[$row['object_id']] = $row['properties'];
+        }
+        unset($grouped[LeadEventLogWriter::ACTION_BUTTON_CLICKED]);
+
         foreach (self::STATUS_CONFIG as $status => $cfg) {
             $eventTypeKey  = 'dialoghsm.'.$status;
             $eventTypeName = $this->translator->trans('dialoghsm.log.status.'.$status);
@@ -95,10 +103,20 @@ class LeadTimelineSubscriber implements EventSubscriberInterface
                 $timestamp = \DateTime::createFromFormat('Y-m-d H:i:s', $row['date_added'], $utcZone)
                     ?: new \DateTime($row['date_added'], $utcZone);
 
+                $eventLabel    = !empty($props['template_name']) ? $eventTypeName.' — '.$props['template_name'] : $eventTypeName;
+                $buttonPayload = LeadEventLogWriter::ACTION_REPLIED === $status
+                    ? ($buttonClickByObjectId[$row['object_id']]['button_payload'] ?? null)
+                    : null;
+
+                if (null !== $buttonPayload) {
+                    $eventLabel            .= ' — '.$this->translator->trans('dialoghsm.log.status.button_clicked').': '.$buttonPayload;
+                    $props['button_payload'] = $buttonPayload;
+                }
+
                 $event->addEvent([
                     'event'           => $eventTypeKey,
                     'eventId'         => $eventTypeKey.$row['id'],
-                    'eventLabel'      => !empty($props['template_name']) ? $eventTypeName.' — '.$props['template_name'] : $eventTypeName,
+                    'eventLabel'      => $eventLabel,
                     'eventType'       => $eventTypeName,
                     'timestamp'       => $timestamp,
                     'extra'           => $props,
@@ -113,15 +131,19 @@ class LeadTimelineSubscriber implements EventSubscriberInterface
     /**
      * @param array<string, mixed> $options
      *
-     * @return array<int, array{id: string, action: string, date_added: string, properties: array<string, mixed>}>
+     * @return array<int, array{id: string, action: string, object_id: int, date_added: string, properties: array<string, mixed>}>
      */
     private function queryEventLog(int $leadId, array $options): array
     {
         $conn  = $this->em->getConnection();
         $table = $this->em->getClassMetadata(LeadEventLog::class)->getTableName();
 
+        // ACTION_BUTTON_CLICKED não está em STATUS_CONFIG (é concatenado no evento "replied"),
+        // mas ainda precisa ser buscado aqui para fazer esse merge.
+        $actions = array_merge(array_keys(self::STATUS_CONFIG), [LeadEventLogWriter::ACTION_BUTTON_CLICKED]);
+
         $qb = $conn->createQueryBuilder()
-            ->select('el.id, el.action, el.date_added, el.properties')
+            ->select('el.id, el.action, el.object_id, el.date_added, el.properties')
             ->from($table, 'el')
             ->where('el.lead_id = :leadId')
             ->andWhere('el.bundle = :bundle')
@@ -130,7 +152,7 @@ class LeadTimelineSubscriber implements EventSubscriberInterface
             ->setParameter('leadId', $leadId)
             ->setParameter('bundle', LeadEventLogWriter::BUNDLE)
             ->setParameter('object', LeadEventLogWriter::OBJECT)
-            ->setParameter('actions', array_keys(self::STATUS_CONFIG), ArrayParameterType::STRING)
+            ->setParameter('actions', $actions, ArrayParameterType::STRING)
             ->orderBy('el.date_added', 'DESC');
 
         if (!empty($options['fromDate'])) {

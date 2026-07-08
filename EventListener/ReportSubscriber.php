@@ -25,6 +25,8 @@ class ReportSubscriber implements EventSubscriberInterface
     public const GRAPH_PIE_STATUS              = 'dialoghsm.graph.pie.status_distribution';
     public const GRAPH_TABLE_TOP_TEMPLATES     = 'dialoghsm.graph.table.top_templates';
     public const GRAPH_TABLE_TOP_READ_RATE     = 'dialoghsm.graph.table.top_read_rate';
+    public const GRAPH_PIE_REPLY_TYPE          = 'dialoghsm.graph.pie.reply_type';
+    public const GRAPH_TABLE_BUTTON_CLICKS     = 'dialoghsm.graph.table.button_clicks';
 
     public static function getSubscribedEvents(): array
     {
@@ -184,6 +186,8 @@ class ReportSubscriber implements EventSubscriberInterface
         $event->addGraph(self::CONTEXT, 'pie',   self::GRAPH_PIE_STATUS);
         $event->addGraph(self::CONTEXT, 'table', self::GRAPH_TABLE_TOP_TEMPLATES);
         $event->addGraph(self::CONTEXT, 'table', self::GRAPH_TABLE_TOP_READ_RATE);
+        $event->addGraph(self::CONTEXT, 'pie',   self::GRAPH_PIE_REPLY_TYPE);
+        $event->addGraph(self::CONTEXT, 'table', self::GRAPH_TABLE_BUTTON_CLICKS);
     }
 
     public function onReportGenerate(ReportGeneratorEvent $event): void
@@ -458,6 +462,71 @@ class ReportSubscriber implements EventSubscriberInterface
                         $delLabel     => round((int) $r['delivered_plus'] / (int) $r['sent_plus'] * 100, 1).'%',
                         $readLabel    => round((int) $r['read_count']     / (int) $r['sent_plus'] * 100, 1).'%',
                         $repliedLabel => round((int) $r['replied_count']  / (int) $r['sent_plus'] * 100, 1).'%',
+                    ], $rows, array_keys($rows));
+
+                    $event->setGraph($g, ['data' => $data, 'name' => $g]);
+                    break;
+
+                case self::GRAPH_PIE_REPLY_TYPE:
+                    $conn = $event->getQueryBuilder()->getConnection();
+                    $sq   = clone $qb;
+                    $sq->select(
+                        'SUM('.self::ML.'.date_replied IS NOT NULL AND '.self::ML.'.date_button_clicked IS NULL) AS text_only',
+                        'SUM('.self::ML.'.date_button_clicked IS NOT NULL)                                       AS button_click'
+                    );
+
+                    $row     = $conn->fetchAssociative($sq->getSQL(), $sq->getParameters());
+                    $buckets = [
+                        'text_only'    => (int) ($row['text_only']    ?? 0),
+                        'button_click' => (int) ($row['button_click'] ?? 0),
+                    ];
+
+                    $pie = new PieChart();
+                    $pie->setDataset($options['translator']->trans('dialoghsm.report.graph.reply_type.text'),   $buckets['text_only']);
+                    $pie->setDataset($options['translator']->trans('dialoghsm.report.graph.reply_type.button'), $buckets['button_click']);
+
+                    $pieRender                                    = $pie->render();
+                    $pieRender['labels']                          = array_keys($buckets);
+                    $pieRender['datasets'][0]['backgroundColor']  = [
+                        'rgba(2,117,216,0.8)',    // texto  #0275d8
+                        'rgba(232,62,140,0.8)',   // botão  #e83e8c
+                    ];
+                    $event->setGraph($g, ['data' => $pieRender, 'name' => $g]);
+                    break;
+
+                case self::GRAPH_TABLE_BUTTON_CLICKS:
+                    // Denominador da taxa: total enviado no escopo já filtrado (campanha/data),
+                    // não por rótulo de botão — mesma semântica do painel da Meta.
+                    $sqTotal    = clone $qb;
+                    $sqTotal->select('SUM('.self::ML.'.status IN (\'sent\',\'delivered\',\'read\')) AS sent_plus');
+                    $totalSent  = (int) ($event->getQueryBuilder()->getConnection()
+                        ->fetchAssociative($sqTotal->getSQL(), $sqTotal->getParameters())['sent_plus'] ?? 0);
+
+                    $sq = clone $qb;
+                    $sq->select(
+                        self::ML.'.button_payload AS rotulo',
+                        'COUNT(*) AS total_cliques'
+                    )
+                    ->andWhere(self::ML.'.date_button_clicked IS NOT NULL')
+                    ->groupBy(self::ML.'.button_payload')
+                    ->orderBy('total_cliques', 'DESC')
+                    ->setMaxResults(10);
+
+                    $rows = $event->getQueryBuilder()->getConnection()
+                        ->fetchAllAssociative($sq->getSQL(), $sq->getParameters());
+
+                    $rotuloLabel = $options['translator']->trans('dialoghsm.report.column.button_payload');
+                    $tipoLabel   = $options['translator']->trans('dialoghsm.report.column.button_type');
+                    $totalLabel  = $options['translator']->trans('dialoghsm.report.column.button_click_count');
+                    $taxaLabel   = $options['translator']->trans('dialoghsm.report.graph.click_rate_pct');
+                    $tipoValue   = $options['translator']->trans('dialoghsm.report.value.quick_reply');
+
+                    $data = array_map(fn ($r, $i) => [
+                        'id'         => $i + 1,
+                        $rotuloLabel => $r['rotulo'],
+                        $tipoLabel   => $tipoValue,
+                        $totalLabel  => (int) $r['total_cliques'],
+                        $taxaLabel   => $totalSent > 0 ? round((int) $r['total_cliques'] / $totalSent * 100, 1).'%' : '0%',
                     ], $rows, array_keys($rows));
 
                     $event->setGraph($g, ['data' => $data, 'name' => $g]);

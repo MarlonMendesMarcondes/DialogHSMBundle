@@ -141,12 +141,26 @@ class CampaignSubscriber implements EventSubscriberInterface
                 ],
             ]
         );
+
+        $event->addDecision(
+            'dialoghsm.decision_button_clicked',
+            [
+                'label'                  => 'dialoghsm.campaign.decision_button_clicked',
+                'description'            => 'dialoghsm.campaign.decision_button_clicked.tooltip',
+                'eventName'              => DialogHSMEvents::ON_CAMPAIGN_TRIGGER_DECISION,
+                'channel'                => 'whatsapp',
+                'connectionRestrictions' => [
+                    'source' => ['action' => $sendActionTypes],
+                ],
+            ]
+        );
     }
 
     private const DECISION_KEYS = [
         'dialoghsm.decision_delivered',
         'dialoghsm.decision_read',
         'dialoghsm.decision_replied',
+        'dialoghsm.decision_button_clicked',
     ];
 
     public function onCampaignTriggerDecision(CampaignExecutionEvent $event): CampaignExecutionEvent

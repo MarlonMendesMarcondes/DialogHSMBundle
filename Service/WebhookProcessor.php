@@ -311,9 +311,16 @@ class WebhookProcessor
 
             $persisted = $contextId !== null
                 // Scenario A: resposta direta ao HSM — correlação precisa via wamid
-                ? $this->processInboundDirect($from, $contextId)
+                ? $this->processInboundDirect($from, $contextId, $type)
                 // Scenario B: texto livre — correlação por telefone + janela de 24h
-                : $this->processInboundFreeText($from, $receivedAt);
+                : $this->processInboundFreeText($from, $receivedAt, $type);
+
+            // Clique em quick-reply button: distinto da resposta genérica acima.
+            // A Meta contabiliza clique de botão separadamente de "respondeu" —
+            // todo clique gera uma resposta, mas nem toda resposta é um clique.
+            if ('button' === $type && null !== $contextId) {
+                $this->processButtonClick($contextId, $messageData, $receivedAt);
+            }
 
             if ($persisted && $inboundWamid) {
                 $redis = $this->getRedis();
@@ -336,7 +343,7 @@ class WebhookProcessor
      * Scenario A: context.id presente — localiza o MessageLog exato pelo wamid do HSM original.
      * Cache key usa o contextId para não bloquear respostas a outros HSMs do mesmo contato.
      */
-    private function processInboundDirect(string $from, string $contextId): bool
+    private function processInboundDirect(string $from, string $contextId, string $type = 'text'): bool
     {
         $redis    = $this->getRedis();
         $cacheKey = self::REPLIED_CACHE_PREFIX . $contextId;
@@ -360,7 +367,7 @@ class WebhookProcessor
         }
 
         $now = new \DateTime();
-        $this->persistReply($log, $lead, $from, $now);
+        $this->persistReply($log, $lead, $from, $now, $type);
 
         if ($redis !== null) {
             $redis->setEx($cacheKey, self::REPLIED_CACHE_TTL, '1');
@@ -382,7 +389,7 @@ class WebhookProcessor
      * chega antes do setLastSent do próximo HSM (race entre worker e webhook).
      * A idempotência é garantida por date_replied IS NULL na query e pelo check explícito.
      */
-    private function processInboundFreeText(string $from, \DateTimeInterface $receivedAt): bool
+    private function processInboundFreeText(string $from, \DateTimeInterface $receivedAt, string $type = 'text'): bool
     {
         // Fast path: Redis tem o wamid do último HSM → lookup indexado, sem query complexa.
         // Tenta também com o número normalizado (BR: 12→13 dígitos, adiciona o 9º dígito).
@@ -439,7 +446,7 @@ class WebhookProcessor
                     'cachedWamid' => $cachedWamid,
                     'leadId'      => $lead->getId(),
                 ]);
-                $this->persistReply($log, $lead, $from, new \DateTime());
+                $this->persistReply($log, $lead, $from, new \DateTime(), $type);
                 $this->contactCache->markReplied($from);
 
                 return true;
@@ -486,7 +493,7 @@ class WebhookProcessor
             'wamid'  => $log->getWamid(),
             'leadId' => $lead->getId(),
         ]);
-        $this->persistReply($log, $lead, $from, new \DateTime());
+        $this->persistReply($log, $lead, $from, new \DateTime(), $type);
         foreach ($this->getBRPhoneCandidates($from) as $candidate) {
             $this->contactCache->markReplied($candidate);
         }
@@ -494,7 +501,41 @@ class WebhookProcessor
         return true;
     }
 
-    private function persistReply(MessageLog $log, Lead $lead, string $from, \DateTime $now): void
+    /**
+     * @param array<string, mixed> $messageData
+     */
+    private function processButtonClick(string $contextId, array $messageData, \DateTimeInterface $receivedAt): void
+    {
+        $buttonPayload = $messageData['button']['payload'] ?? $messageData['button']['text'] ?? null;
+        if (null === $buttonPayload || '' === $buttonPayload) {
+            return;
+        }
+
+        $log = $this->logRepository->findByWamid($contextId);
+        if (null === $log || null === $log->getLeadId() || null !== $log->getDateButtonClicked()) {
+            return; // não encontrado, sem lead, ou já registrado (idempotência)
+        }
+
+        $buttonPayload = mb_substr($buttonPayload, 0, 255);
+
+        $log->setButtonPayload($buttonPayload);
+        $log->setDateButtonClicked(\DateTime::createFromInterface($receivedAt));
+        $this->em->persist($log);
+        $this->em->flush();
+
+        try {
+            $this->eventLogWriter->writeButtonClick($log, $buttonPayload, $receivedAt);
+        } catch (\Throwable $e) {
+            $this->logger->error('DialogHSM: falha ao registrar clique de botão', [
+                'logId' => $log->getId(),
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        $this->triggerCampaignDecision($log, 'dialoghsm.decision_button_clicked');
+    }
+
+    private function persistReply(MessageLog $log, Lead $lead, string $from, \DateTime $now, string $type = 'text'): void
     {
         $log->setDateReplied($now);
         $this->em->persist($log);
@@ -505,7 +546,7 @@ class WebhookProcessor
         // antes do retorno), o Redis ficaria com replied=0 mesmo com date_replied já no MySQL.
         try {
             $this->pointModel->triggerAction('dialoghsm.message_replied', null, null, $lead, true);
-            $this->eventLogWriter->writeReply($lead, $from, $now, $log);
+            $this->eventLogWriter->writeReply($lead, $from, $now, $log, $type);
             $this->leadModel->setFieldValues($lead, ['dialoghsm_last_reply' => $now]);
             $this->leadModel->saveEntity($lead);
         } catch (\Throwable $e) {

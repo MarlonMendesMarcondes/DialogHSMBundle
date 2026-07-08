@@ -668,4 +668,97 @@ class ReportSubscriberTest extends TestCase
         $this->assertStringContainsString('2,117,216',  $captured['datasets'][1]['borderColor']); // read     #0275d8
         $this->assertStringContainsString('111,66,193', $captured['datasets'][2]['borderColor']); // replied  #6f42c1
     }
+
+    // =========================================================================
+    // onReportGraphGenerate — PIE reply type (texto vs clique no botão)
+    // =========================================================================
+
+    public function testPieReplyTypeCallsSetGraphWithDataAndName(): void
+    {
+        $event = $this->makeGraphEvent(true, ReportSubscriber::GRAPH_PIE_REPLY_TYPE);
+        $event->expects($this->once())->method('setGraph')
+            ->with(
+                ReportSubscriber::GRAPH_PIE_REPLY_TYPE,
+                $this->callback(fn ($d) => isset($d['data']) && isset($d['name']))
+            );
+
+        $this->subscriber->onReportGraphGenerate($event);
+    }
+
+    public function testPieReplyTypeBucketsTextAndButtonSeparately(): void
+    {
+        $fetchOneRow = ['text_only' => 30, 'button_click' => 12];
+
+        $captured = null;
+        $event    = $this->makeGraphEvent(true, ReportSubscriber::GRAPH_PIE_REPLY_TYPE, [], $fetchOneRow);
+        $event->method('setGraph')
+            ->willReturnCallback(function (string $g, array $data) use (&$captured): void {
+                $captured = $data;
+            });
+
+        $this->subscriber->onReportGraphGenerate($event);
+
+        $datasets = $captured['data']['datasets'][0]['data'];
+        $this->assertSame(30, $datasets[0], 'text_only bucket');
+        $this->assertSame(12, $datasets[1], 'button_click bucket');
+    }
+
+    // =========================================================================
+    // onReportGraphGenerate — TABLE button clicks (formato do painel da Meta)
+    // =========================================================================
+
+    public function testTableButtonClicksCallsSetGraphWithDataKey(): void
+    {
+        $event = $this->makeGraphEvent(true, ReportSubscriber::GRAPH_TABLE_BUTTON_CLICKS, [], ['sent_plus' => 0]);
+        $event->expects($this->once())->method('setGraph')
+            ->with(
+                ReportSubscriber::GRAPH_TABLE_BUTTON_CLICKS,
+                $this->callback(fn ($d) => isset($d['data']) && isset($d['name']))
+            );
+
+        $this->subscriber->onReportGraphGenerate($event);
+    }
+
+    public function testTableButtonClicksCalculatesClickRate(): void
+    {
+        $rows = [
+            ['rotulo' => 'Quero vaga no Plantão!', 'total_cliques' => 40],
+            ['rotulo' => 'Saber sobre as ofertas',  'total_cliques' => 10],
+        ];
+
+        $captured = null;
+        $event    = $this->makeGraphEvent(true, ReportSubscriber::GRAPH_TABLE_BUTTON_CLICKS, $rows, ['sent_plus' => 200]);
+        $event->method('setGraph')
+            ->willReturnCallback(function (string $g, array $data) use (&$captured): void {
+                $captured = $data;
+            });
+
+        $this->subscriber->onReportGraphGenerate($event);
+
+        $this->assertCount(2, $captured['data']);
+        $row0Values = array_values($captured['data'][0]);
+        $this->assertContains('Quero vaga no Plantão!', $row0Values);
+        $this->assertContains(40, $row0Values);
+        $this->assertContains('20%', $row0Values); // 40/200
+
+        $row1Values = array_values($captured['data'][1]);
+        $this->assertContains('Saber sobre as ofertas', $row1Values);
+        $this->assertContains(10, $row1Values);
+        $this->assertContains('5%', $row1Values); // 10/200
+    }
+
+    public function testTableButtonClicksHandlesZeroSentWithoutDivisionError(): void
+    {
+        $rows     = [['rotulo' => 'Botão X', 'total_cliques' => 5]];
+        $captured = null;
+        $event    = $this->makeGraphEvent(true, ReportSubscriber::GRAPH_TABLE_BUTTON_CLICKS, $rows, ['sent_plus' => 0]);
+        $event->method('setGraph')
+            ->willReturnCallback(function (string $g, array $data) use (&$captured): void {
+                $captured = $data;
+            });
+
+        $this->subscriber->onReportGraphGenerate($event);
+
+        $this->assertContains('0%', array_values($captured['data'][0]));
+    }
 }
