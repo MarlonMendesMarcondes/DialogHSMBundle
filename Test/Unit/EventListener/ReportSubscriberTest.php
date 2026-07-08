@@ -96,6 +96,7 @@ class ReportSubscriberTest extends TestCase
         $this->assertArrayHasKey('ml.date_sent', $columns);
         $this->assertArrayHasKey('ml.date_delivered', $columns);
         $this->assertArrayHasKey('ml.date_read', $columns);
+        $this->assertArrayHasKey('ml.date_replied', $columns);
         $this->assertArrayHasKey('ml.lead_id', $columns);
         $this->assertArrayHasKey('ml.error_message', $columns);
         $this->assertArrayNotHasKey('ml.wamid', $columns, 'wamid é dado sensível e não deve aparecer nos relatórios');
@@ -137,10 +138,31 @@ class ReportSubscriberTest extends TestCase
         $this->assertArrayHasKey('failed_count', $columns);
         $this->assertArrayHasKey('delivery_rate', $columns);
         $this->assertArrayHasKey('read_rate', $columns);
+        $this->assertArrayHasKey('replied_count', $columns);
+        $this->assertArrayHasKey('reply_rate', $columns);
 
         $this->assertStringContainsString('SUM', $columns['sent_count']['formula']);
         $this->assertStringContainsString('NULLIF', $columns['delivery_rate']['formula']);
         $this->assertStringContainsString('NULLIF', $columns['read_rate']['formula']);
+        $this->assertStringContainsString('date_replied', $columns['replied_count']['formula']);
+        $this->assertStringContainsString('NULLIF', $columns['reply_rate']['formula']);
+    }
+
+    public function testOnReportBuilderFiltersContainDateReplied(): void
+    {
+        $captured = null;
+        $event    = $this->makeBuilderEvent(contextMatches: true);
+        $event->method('addTable')
+            ->willReturnCallback(function (string $ctx, array $data) use (&$captured) {
+                $captured = $data;
+                return null;
+            });
+
+        $this->subscriber->onReportBuilder($event);
+
+        $filters = $captured['filters'];
+        $this->assertArrayHasKey('ml.date_replied', $filters);
+        $this->assertSame('datetime', $filters['ml.date_replied']['type']);
     }
 
     public function testOnReportBuilderDeliveryRateFormulaCoversDeliveredAndRead(): void
@@ -555,8 +577,8 @@ class ReportSubscriberTest extends TestCase
     public function testTableTopReadRateCalculatesPercentages(): void
     {
         $rows = [
-            ['template' => 'tpl_x', 'sent_plus' => 200, 'delivered_plus' => 160, 'read_count' => 80],
-            ['template' => 'tpl_y', 'sent_plus' => 100, 'delivered_plus' => 50,  'read_count' => 10],
+            ['template' => 'tpl_x', 'sent_plus' => 200, 'delivered_plus' => 160, 'read_count' => 80, 'replied_count' => 40],
+            ['template' => 'tpl_y', 'sent_plus' => 100, 'delivered_plus' => 50,  'read_count' => 10, 'replied_count' => 5],
         ];
 
         $captured = null;
@@ -569,14 +591,16 @@ class ReportSubscriberTest extends TestCase
         $this->subscriber->onReportGraphGenerate($event);
 
         $this->assertCount(2, $captured['data']);
-        // tpl_x: delivery=160/200=80%, read=80/200=40%
+        // tpl_x: delivery=160/200=80%, read=80/200=40%, replied=40/200=20%
         $row0Values = array_values($captured['data'][0]);
         $this->assertContains('80%', $row0Values);
         $this->assertContains('40%', $row0Values);
-        // tpl_y: delivery=50/100=50%, read=10/100=10%
+        $this->assertContains('20%', $row0Values);
+        // tpl_y: delivery=50/100=50%, read=10/100=10%, replied=5/100=5%
         $row1Values = array_values($captured['data'][1]);
         $this->assertContains('50%', $row1Values);
         $this->assertContains('10%', $row1Values);
+        $this->assertContains('5%', $row1Values);
     }
 
     // =========================================================================
@@ -623,13 +647,13 @@ class ReportSubscriberTest extends TestCase
         $event->expects($this->once())->method('setGraph')
             ->with(
                 ReportSubscriber::GRAPH_LINE_DELIVERY_RATE,
-                $this->callback(fn ($d) => isset($d['datasets']) && count($d['datasets']) === 2)
+                $this->callback(fn ($d) => isset($d['datasets']) && count($d['datasets']) === 3)
             );
 
         $this->subscriber->onReportGraphGenerate($event);
     }
 
-    public function testLineDeliveryRateAppliesTwoColors(): void
+    public function testLineDeliveryRateAppliesThreeColors(): void
     {
         $captured = null;
         $event    = $this->makeGraphEvent(true, ReportSubscriber::GRAPH_LINE_DELIVERY_RATE);
@@ -642,5 +666,6 @@ class ReportSubscriberTest extends TestCase
 
         $this->assertStringContainsString('23,162,184', $captured['datasets'][0]['borderColor']); // delivery #17a2b8
         $this->assertStringContainsString('2,117,216',  $captured['datasets'][1]['borderColor']); // read     #0275d8
+        $this->assertStringContainsString('111,66,193', $captured['datasets'][2]['borderColor']); // replied  #6f42c1
     }
 }
