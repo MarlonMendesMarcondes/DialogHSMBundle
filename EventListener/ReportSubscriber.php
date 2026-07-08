@@ -67,6 +67,10 @@ class ReportSubscriber implements EventSubscriberInterface
                 'label' => 'dialoghsm.report.column.date_read',
                 'type'  => 'datetime',
             ],
+            self::ML.'.date_replied' => [
+                'label' => 'dialoghsm.report.column.date_replied',
+                'type'  => 'datetime',
+            ],
             self::ML.'.lead_id' => [
                 'label' => 'dialoghsm.report.column.lead_id',
                 'type'  => 'int',
@@ -115,6 +119,18 @@ class ReportSubscriber implements EventSubscriberInterface
                 'type'    => 'string',
                 'formula' => 'CONCAT(IFNULL(ROUND(SUM('.self::ML.'.status = \'read\') / NULLIF(SUM('.self::ML.'.status IN (\'sent\', \'delivered\', \'read\')), 0) * 100, 1), 0), \'%\')',
             ],
+            'replied_count' => [
+                'alias'   => 'replied_count',
+                'label'   => 'dialoghsm.report.column.replied_count',
+                'type'    => 'int',
+                'formula' => 'SUM('.self::ML.'.date_replied IS NOT NULL)',
+            ],
+            'reply_rate' => [
+                'alias'   => 'reply_rate',
+                'label'   => 'dialoghsm.report.column.reply_rate',
+                'type'    => 'string',
+                'formula' => 'CONCAT(IFNULL(ROUND(SUM('.self::ML.'.date_replied IS NOT NULL) / NULLIF(SUM('.self::ML.'.status IN (\'sent\', \'delivered\', \'read\')), 0) * 100, 1), 0), \'%\')',
+            ],
         ];
 
         $filters = [
@@ -140,6 +156,10 @@ class ReportSubscriber implements EventSubscriberInterface
             ],
             self::ML.'.date_sent' => [
                 'label' => 'dialoghsm.report.column.date_sent',
+                'type'  => 'datetime',
+            ],
+            self::ML.'.date_replied' => [
+                'label' => 'dialoghsm.report.column.date_replied',
                 'type'  => 'datetime',
             ],
             self::ML.'.lead_id' => [
@@ -359,7 +379,8 @@ class ReportSubscriber implements EventSubscriberInterface
                         'DATE('.self::ML.'.date_sent) AS day',
                         'SUM('.self::ML.'.status IN (\'sent\',\'delivered\',\'read\')) AS sent_plus',
                         'SUM('.self::ML.'.status IN (\'delivered\',\'read\'))          AS del_plus',
-                        'SUM('.self::ML.'.status = \'read\')                           AS read_cnt'
+                        'SUM('.self::ML.'.status = \'read\')                           AS read_cnt',
+                        'SUM('.self::ML.'.date_replied IS NOT NULL)                    AS replied_cnt'
                     )
                     ->groupBy('DATE('.self::ML.'.date_sent)')
                     ->orderBy('day', 'ASC');
@@ -367,15 +388,16 @@ class ReportSubscriber implements EventSubscriberInterface
                     $rateRows = $conn->fetchAllAssociative($sqRt->getSQL(), $sqRt->getParameters());
                     $rateMap  = array_column($rateRows, null, 'day');
 
-                    $bDelRate = $bReadRate = [];
+                    $bDelRate = $bReadRate = $bReplyRate = [];
                     $cur = (clone $options['dateFrom'])->setTime(0, 0, 0);
                     $end = (clone $options['dateTo'])->setTime(0, 0, 0);
                     while ($cur <= $end) {
                         $d   = $cur->format('Y-m-d');
                         $r   = $rateMap[$d] ?? [];
                         $s   = (int) ($r['sent_plus'] ?? 0);
-                        $bDelRate[]  = $s > 0 ? round((int) ($r['del_plus']  ?? 0) / $s * 100, 1) : 0;
-                        $bReadRate[] = $s > 0 ? round((int) ($r['read_cnt']  ?? 0) / $s * 100, 1) : 0;
+                        $bDelRate[]   = $s > 0 ? round((int) ($r['del_plus']     ?? 0) / $s * 100, 1) : 0;
+                        $bReadRate[]  = $s > 0 ? round((int) ($r['read_cnt']     ?? 0) / $s * 100, 1) : 0;
+                        $bReplyRate[] = $s > 0 ? round((int) ($r['replied_cnt']  ?? 0) / $s * 100, 1) : 0;
                         $cur->modify('+1 day');
                     }
 
@@ -383,11 +405,13 @@ class ReportSubscriber implements EventSubscriberInterface
                     $trans     = $options['translator'];
                     $rateChart->setDataset($trans->trans('dialoghsm.report.graph.delivery_rate_pct'), $bDelRate);
                     $rateChart->setDataset($trans->trans('dialoghsm.report.graph.read_rate_pct'),     $bReadRate);
+                    $rateChart->setDataset($trans->trans('dialoghsm.report.graph.reply_rate_pct'),    $bReplyRate);
 
                     $rateData = $rateChart->render();
                     $palette  = [
-                        ['r' => 23, 'g' => 162, 'b' => 184],  // delivery #17a2b8
-                        ['r' => 2,  'g' => 117, 'b' => 216],  // read     #0275d8
+                        ['r' => 23,  'g' => 162, 'b' => 184],  // delivery #17a2b8
+                        ['r' => 2,   'g' => 117, 'b' => 216],  // read     #0275d8
+                        ['r' => 111, 'g' => 66,  'b' => 193],  // replied  #6f42c1
                     ];
                     foreach ($palette as $i => $rgb) {
                         if (!isset($rateData['datasets'][$i])) {
@@ -410,7 +434,8 @@ class ReportSubscriber implements EventSubscriberInterface
                         'COUNT(*) AS total',
                         'SUM('.self::ML.'.status IN (\'sent\',\'delivered\',\'read\')) AS sent_plus',
                         'SUM('.self::ML.'.status IN (\'delivered\',\'read\'))          AS delivered_plus',
-                        'SUM('.self::ML.'.status = \'read\')                           AS read_count'
+                        'SUM('.self::ML.'.status = \'read\')                           AS read_count',
+                        'SUM('.self::ML.'.date_replied IS NOT NULL)                   AS replied_count'
                     )
                     ->groupBy(self::ML.'.template_name')
                     ->having('SUM('.self::ML.'.status IN (\'sent\',\'delivered\',\'read\')) > 0')
@@ -420,17 +445,19 @@ class ReportSubscriber implements EventSubscriberInterface
                     $rows = $event->getQueryBuilder()->getConnection()
                         ->fetchAllAssociative($sq->getSQL(), $sq->getParameters());
 
-                    $tplLabel  = $options['translator']->trans('dialoghsm.report.column.template_name');
-                    $sentLabel = $options['translator']->trans('dialoghsm.report.column.sent_count');
-                    $delLabel  = $options['translator']->trans('dialoghsm.report.graph.delivery_rate_pct');
-                    $readLabel = $options['translator']->trans('dialoghsm.report.graph.read_rate_pct');
+                    $tplLabel     = $options['translator']->trans('dialoghsm.report.column.template_name');
+                    $sentLabel    = $options['translator']->trans('dialoghsm.report.column.sent_count');
+                    $delLabel     = $options['translator']->trans('dialoghsm.report.graph.delivery_rate_pct');
+                    $readLabel    = $options['translator']->trans('dialoghsm.report.graph.read_rate_pct');
+                    $repliedLabel = $options['translator']->trans('dialoghsm.report.graph.reply_rate_pct');
 
                     $data = array_map(fn ($r, $i) => [
-                        'id'       => $i + 1,
-                        $tplLabel  => $r['template'],
-                        $sentLabel => (int) $r['sent_plus'],
-                        $delLabel  => round((int) $r['delivered_plus'] / (int) $r['sent_plus'] * 100, 1).'%',
-                        $readLabel => round((int) $r['read_count']     / (int) $r['sent_plus'] * 100, 1).'%',
+                        'id'          => $i + 1,
+                        $tplLabel     => $r['template'],
+                        $sentLabel    => (int) $r['sent_plus'],
+                        $delLabel     => round((int) $r['delivered_plus'] / (int) $r['sent_plus'] * 100, 1).'%',
+                        $readLabel    => round((int) $r['read_count']     / (int) $r['sent_plus'] * 100, 1).'%',
+                        $repliedLabel => round((int) $r['replied_count']  / (int) $r['sent_plus'] * 100, 1).'%',
                     ], $rows, array_keys($rows));
 
                     $event->setGraph($g, ['data' => $data, 'name' => $g]);
