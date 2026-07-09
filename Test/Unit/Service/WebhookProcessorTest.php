@@ -1522,7 +1522,10 @@ class WebhookProcessorTest extends TestCase
         $this->processor->process('+5511999999999', $this->makeInboundPayload('5511888888888'));
 
         $this->assertArrayHasKey('dialoghsm_last_reply', $capturedFields);
-        $this->assertInstanceOf(\DateTimeInterface::class, $capturedFields['dialoghsm_last_reply']);
+        // LeadModel::setFieldValues() roda os valores por rotinas de limpeza (str_replace)
+        // que esperam string, não objeto DateTime — precisa ser formatado antes de passar.
+        $this->assertIsString($capturedFields['dialoghsm_last_reply']);
+        $this->assertNotFalse(strtotime($capturedFields['dialoghsm_last_reply']));
     }
 
     public function testInboundSetsDateRepliedOnMessageLog(): void

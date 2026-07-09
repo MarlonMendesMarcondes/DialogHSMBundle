@@ -562,14 +562,20 @@ class WebhookProcessor
         try {
             $this->pointModel->triggerAction('dialoghsm.message_replied', null, null, $lead, true);
             $this->eventLogWriter->writeReply($lead, $from, $now, $log, $type);
-            $this->leadModel->setFieldValues($lead, ['dialoghsm_last_reply' => $now]);
+            $this->leadModel->setFieldValues($lead, ['dialoghsm_last_reply' => $now->format('Y-m-d H:i:s')]);
             $this->leadModel->saveEntity($lead);
         } catch (\Throwable $e) {
-            $this->logger->error('DialogHSM: persistReply side-effects failed after flush', [
-                'from'    => $from,
-                'logId'   => $log->getId(),
-                'message' => $e->getMessage(),
-            ]);
+            // O próprio logger pode falhar (ex.: permissão de arquivo no servidor) — nunca deixar
+            // isso escapar e abortar o restante do método (campaign decision + webhook nativo).
+            try {
+                $this->logger->error('DialogHSM: persistReply side-effects failed after flush', [
+                    'from'    => $from,
+                    'logId'   => $log->getId(),
+                    'message' => $e->getMessage(),
+                ]);
+            } catch (\Throwable) {
+                // sem log disponível — segue o fluxo mesmo assim
+            }
         }
 
         $this->triggerCampaignDecision($log, 'dialoghsm.decision_replied');
