@@ -629,10 +629,39 @@ class CampaignSubscriber implements EventSubscriberInterface
      *   "+55 44 999067833"     → "+5544999067833"
      *   "+55 (11) 9.8765-4321" → "+5511987654321"
      *   "+5511abc9999"         → "+5511abc9999"   (mantido, será rejeitado pelo E.164)
+     *
+     * Números brasileiros sem código de país são completados automaticamente com "+55"
+     * — cadastro/import de lead raramente inclui o "+55", e esse plugin serve só IES
+     * brasileiras. Só se aplica a strings 100% numéricas (sem "+", sem letra), com
+     * quantidade de dígitos plausível para DDD+número (10-11) ou 55+DDD+número (12-13):
+     *   "44988291870"    (11 dígitos, sem código de país) → "+5544988291870"
+     *   "4433221100"     (10 dígitos, fixo/celular antigo) → "+554433221100"
+     *   "5544988291870"  (13 dígitos, "55" sem o "+")       → "+5544988291870"
+     * Números fora desses tamanhos (ou com "+"/letras) passam intocados — a validação
+     * E.164 em isValidE164() decide se rejeita.
+     *
+     * TODO(2026-07-09): assume Brasil-only de propósito (qualquer 10-11 dígitos é tratado
+     * como BR, sem validar DDD real). Revisar antes de atender clientes fora do Brasil —
+     * precisa virar configurável (código de país por WhatsAppNumber/integração, ou
+     * libphonenumber).
      */
     private function normalizePhone(string $phone): string
     {
-        return preg_replace('/[ \-().]/u', '', trim($phone)) ?? $phone;
+        $cleaned = preg_replace('/[ \-().]/u', '', trim($phone)) ?? $phone;
+
+        if ('' === $cleaned || str_starts_with($cleaned, '+') || !ctype_digit($cleaned)) {
+            return $cleaned;
+        }
+
+        if (preg_match('/^55\d{10,11}$/', $cleaned)) {
+            return '+'.$cleaned;
+        }
+
+        if (preg_match('/^\d{10,11}$/', $cleaned)) {
+            return '+55'.$cleaned;
+        }
+
+        return $cleaned;
     }
 
     /**

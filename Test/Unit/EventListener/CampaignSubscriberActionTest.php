@@ -404,7 +404,10 @@ class CampaignSubscriberActionTest extends TestCase
             ->method('getEntity')
             ->willReturn($this->buildWhatsAppNumber());
 
-        $contact = $this->buildContact(phone: '5511999999999');
+        // "5511999999999" não serve mais de exemplo aqui — normalizePhone() agora completa
+        // esse formato ("55" + DDD + número, sem "+") automaticamente para "+5511999999999".
+        // Usamos um telefone com letras, que continua genuinamente inválido.
+        $contact = $this->buildContact(phone: '+5511abc9999');
         $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
 
         $event->expects($this->once())
@@ -1392,6 +1395,11 @@ class CampaignSubscriberActionTest extends TestCase
             'com espaços brasil celular'      => ['+55 11 99999 9999'],
             'com traços'                      => ['+55-11-99999-9999'],
             'com parênteses e espaços'        => ['+55 (11) 98765-4321'],
+            // BR sem "+55" — completado automaticamente (normalizePhone), caso real de IES
+            '11 dígitos sem código de país'   => ['44988291870'],
+            '11 dígitos sem código de país 2' => ['44991380510'],
+            '10 dígitos sem código de país'   => ['4433221100'],
+            '"55" sem o "+" na frente'        => ['5511999999999'],
         ];
     }
 
@@ -1512,14 +1520,16 @@ class CampaignSubscriberActionTest extends TestCase
     public static function invalidE164Provider(): array
     {
         return [
-            'vazio'           => [''],
-            'sem +'           => ['5511999999999'],
-            'só +'            => ['+'],
-            'apenas zeros'    => ['+0000000'],
-            'começa com +0'   => ['+0123456789'],
-            'curto demais'    => ['+12345'],
-            'longo demais'    => ['+1234567890123456'],
-            'letras'          => ['+5511abc9999'],
+            'vazio'                    => [''],
+            'só +'                     => ['+'],
+            'apenas zeros'             => ['+0000000'],
+            'começa com +0'            => ['+0123456789'],
+            'curto demais'             => ['+12345'],
+            'longo demais'             => ['+1234567890123456'],
+            'letras'                   => ['+5511abc9999'],
+            // dígitos-só, mas fora do range plausível de BR (não é 10/11 nem 55+10/11)
+            'dígitos-só, 9 dígitos'    => ['123456789'],
+            'dígitos-só, muito longo'  => ['123456789012345'],
         ];
     }
 
@@ -1549,6 +1559,34 @@ class CampaignSubscriberActionTest extends TestCase
 
         $this->assertNotNull($capturedBatch);
         $this->assertSame('+5544999067833', $capturedBatch->items[0]->phone);
+    }
+
+    /**
+     * Caso real reportado por uma IES: números salvos no cadastro do lead sem o "+55"
+     * (ex: "44988291870") eram rejeitados como invalid_phone antes desta mudança — agora
+     * são completados automaticamente e o disparo segue normalmente.
+     */
+    public function testBrazilianPhoneWithoutCountryCodeIsCompletedAutomatically(): void
+    {
+        $this->enableIntegration();
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
+
+        $capturedBatch = null;
+        $this->mockDirectBatchHandler
+            ->method('__invoke')
+            ->willReturnCallback(function (SendWhatsAppDirectBatchMessage $batch) use (&$capturedBatch): void {
+                $capturedBatch = $batch;
+            });
+
+        $contact = $this->buildContact('44988291870', 1);
+        $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
+
+        $event->expects($this->never())->method('fail');
+
+        $this->subscriber->onCampaignTriggerAction($event);
+
+        $this->assertNotNull($capturedBatch);
+        $this->assertSame('+5544988291870', $capturedBatch->items[0]->phone);
     }
 
     // -------------------------------------------------------------------------

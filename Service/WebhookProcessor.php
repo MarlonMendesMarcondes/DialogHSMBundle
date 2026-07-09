@@ -615,9 +615,16 @@ class WebhookProcessor
     }
 
     /**
-     * Retorna variações do número para lidar com o 9º dígito brasileiro.
+     * Retorna variações do número para lidar com o 9º dígito brasileiro e com o
+     * campo `mobile` do lead tendo sido cadastrado sem o código de país.
      * A 360dialog envia números no formato antigo (12 dígitos: 55+DDD+8 dígitos),
-     * mas o Mautic pode ter gravado no formato novo (13 dígitos: 55+DDD+9+8 dígitos).
+     * mas o Mautic pode ter gravado no formato novo (13 dígitos: 55+DDD+9+8 dígitos)
+     * — ou até sem o "55" na frente (import/cadastro manual sem o +55).
+     *
+     * Não escreve nada no lead — só gera candidatos adicionais pra busca em
+     * `findLeadByMobile()` e nas chaves do cache Redis, de forma isolada.
+     *
+     * TODO(2026-07-09): assume Brasil-only de propósito (só ativa quando o número já começa com "55"). Ver Roadmap "Generalizar normalização de telefone para além do Brasil" antes de atender clientes fora do Brasil.
      *
      * @return string[]
      */
@@ -626,18 +633,36 @@ class WebhookProcessor
         $clean      = ltrim($phone, '+');
         $candidates = [$clean, '+' . $clean];
 
+        if (!str_starts_with($clean, '55')) {
+            return array_unique($candidates);
+        }
+
         // BR 12→13: adiciona o 9 após o DDD (ex: 554499067833 → 5544999067833)
-        if (12 === strlen($clean) && str_starts_with($clean, '55')) {
+        if (12 === strlen($clean)) {
             $with9 = '55' . substr($clean, 2, 2) . '9' . substr($clean, 4);
             $candidates[] = $with9;
             $candidates[] = '+' . $with9;
         }
 
         // BR 13→12: remove o 9 após o DDD (ex: 5544999067833 → 554499067833)
-        if (13 === strlen($clean) && str_starts_with($clean, '55')) {
+        if (13 === strlen($clean)) {
             $without9 = '55' . substr($clean, 2, 2) . substr($clean, 5);
             $candidates[] = $without9;
             $candidates[] = '+' . $without9;
+        }
+
+        // Sem código de país — cobre lead.mobile salvo como "44988291870" em vez de
+        // "+5544988291870". Gera as duas variações do 9º dígito também, pois não
+        // sabemos em qual formato o contato foi cadastrado.
+        if (in_array(strlen($clean), [12, 13], true)) {
+            $bare = substr($clean, 2);
+            $candidates[] = $bare;
+
+            if (11 === strlen($bare)) {
+                $candidates[] = substr($bare, 0, 2) . substr($bare, 3);
+            } elseif (10 === strlen($bare)) {
+                $candidates[] = substr($bare, 0, 2) . '9' . substr($bare, 2);
+            }
         }
 
         return array_unique($candidates);

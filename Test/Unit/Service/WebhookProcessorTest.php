@@ -2203,6 +2203,82 @@ class WebhookProcessorTest extends TestCase
     }
 
     /**
+     * Scenario B fallback DB: lead.mobile foi cadastrado SEM o código de país
+     * (ex: "44988291870" em vez de "+5544988291870" — caso real reportado por uma IES).
+     * findLeadByMobile deve encontrar o lead mesmo assim, via o candidato "bare"
+     * (sem "55") que getBRPhoneCandidates agora gera — sem precisar reescrever
+     * o campo mobile do contato.
+     */
+    public function testScenarioBDBFallbackFindsLeadWithMobileStoredWithoutCountryCode(): void
+    {
+        $lead = $this->createMock(Lead::class);
+        $lead->method('getId')->willReturn(89);
+        $log  = $this->makeHsmLog(89);
+
+        // Repositório só encontra o lead pelo formato "bare" (sem "55"), 11 dígitos
+        $repo = $this->getMockBuilder(LeadRepository::class)
+            ->disableOriginalConstructor()
+            ->onlyMethods(['getLeadsByFieldValue'])
+            ->getMock();
+
+        $repo->method('getLeadsByFieldValue')
+            ->willReturnCallback(function (string $field, string $phone) use ($lead): array {
+                return '44988291870' === $phone ? [$lead] : [];
+            });
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->em->method('getRepository')->willReturn($repo);
+        $this->em->method('persist');
+        $this->em->method('flush');
+        $this->logRepository->method('findMostRecentForLead')
+            ->with(89, $this->isInstanceOf(\DateTimeInterface::class))
+            ->willReturn($log);
+
+        $this->pointModel->expects($this->once())
+            ->method('triggerAction')
+            ->with('dialoghsm.message_replied', null, null, $lead, true);
+
+        // 360dialog sempre envia o "from" com código de país (13 dígitos)
+        $this->processor->process('+5511999999999', $this->makeInboundPayload('5544988291870'));
+    }
+
+    /**
+     * Mesmo cenário, mas o número do lead foi salvo sem "55" E sem o 9º dígito
+     * (ex: "4433221100", formato antigo de fixo/celular).
+     */
+    public function testScenarioBDBFallbackFindsLeadWithMobileStoredWithoutCountryCodeAndWithout9thDigit(): void
+    {
+        $lead = $this->createMock(Lead::class);
+        $lead->method('getId')->willReturn(90);
+        $log  = $this->makeHsmLog(90);
+
+        $repo = $this->getMockBuilder(LeadRepository::class)
+            ->disableOriginalConstructor()
+            ->onlyMethods(['getLeadsByFieldValue'])
+            ->getMock();
+
+        $repo->method('getLeadsByFieldValue')
+            ->willReturnCallback(function (string $field, string $phone) use ($lead): array {
+                return '4433221100' === $phone ? [$lead] : [];
+            });
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->em->method('getRepository')->willReturn($repo);
+        $this->em->method('persist');
+        $this->em->method('flush');
+        $this->logRepository->method('findMostRecentForLead')
+            ->with(90, $this->isInstanceOf(\DateTimeInterface::class))
+            ->willReturn($log);
+
+        $this->pointModel->expects($this->once())
+            ->method('triggerAction')
+            ->with('dialoghsm.message_replied', null, null, $lead, true);
+
+        // 360dialog envia com o 9º dígito e código de país (13 dígitos)
+        $this->processor->process('+5511999999999', $this->makeInboundPayload('5544933221100'));
+    }
+
+    /**
      * Scenario B fallback DB: após registrar o reply, markReplied é chamado para
      * todos os candidatos (formatos 12 e 13 dígitos) para evitar duplicação futura.
      */
