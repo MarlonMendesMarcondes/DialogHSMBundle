@@ -10,6 +10,7 @@ use Mautic\LeadBundle\Entity\Lead;
 use Mautic\LeadBundle\Model\LeadModel;
 use Mautic\LeadBundle\Tracker\ContactTracker;
 use Mautic\PointBundle\Model\PointModel;
+use Mautic\WebhookBundle\Model\WebhookModel;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
@@ -83,6 +84,7 @@ class WebhookDecisionFlowTest extends TestCase
             $realTimeExecutioner,
             $this->createMock(ContactTracker::class),
             $this->createMock(LoggerInterface::class),
+            $this->createMock(WebhookModel::class),
         );
 
         return [$processor, $realTimeExecutioner, $logRepository, $leadModel];

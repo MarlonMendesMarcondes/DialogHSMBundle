@@ -9,6 +9,7 @@ use Mautic\LeadBundle\Entity\LeadRepository;
 use Mautic\LeadBundle\Model\LeadModel;
 use Mautic\LeadBundle\Tracker\ContactTracker;
 use Mautic\PointBundle\Model\PointModel;
+use Mautic\WebhookBundle\Model\WebhookModel;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
@@ -36,6 +37,7 @@ class WebhookProcessorTest extends TestCase
     private RealTimeExecutioner&MockObject $realTimeExecutioner;
     private ContactTracker&MockObject $contactTracker;
     private LoggerInterface&MockObject $logger;
+    private WebhookModel&MockObject $webhookModel;
     private WebhookProcessor $processor;
 
     protected function setUp(): void
@@ -55,6 +57,7 @@ class WebhookProcessorTest extends TestCase
         $this->realTimeExecutioner = $this->createMock(RealTimeExecutioner::class);
         $this->contactTracker      = $this->createMock(ContactTracker::class);
         $this->logger              = $this->createMock(LoggerInterface::class);
+        $this->webhookModel        = $this->createMock(WebhookModel::class);
         $this->processor           = new WebhookProcessor(
             $this->numberRepository,
             $this->logRepository,
@@ -67,6 +70,7 @@ class WebhookProcessorTest extends TestCase
             $this->realTimeExecutioner,
             $this->contactTracker,
             $this->logger,
+            $this->webhookModel,
         );
     }
 
@@ -1635,6 +1639,7 @@ class WebhookProcessorTest extends TestCase
             $this->realTimeExecutioner,
             $this->contactTracker,
             $this->logger,
+            $this->webhookModel,
             '',
             $redis,
         );
@@ -1805,6 +1810,7 @@ class WebhookProcessorTest extends TestCase
             $this->realTimeExecutioner,
             $this->contactTracker,
             $this->logger,
+            $this->webhookModel,
             '',
             $redis,
         ))->process('+5511999999999', $this->makeInboundPayload('5511888888888'));

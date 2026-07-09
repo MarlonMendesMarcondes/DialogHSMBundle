@@ -11,6 +11,8 @@ use Mautic\LeadBundle\Entity\LeadRepository;
 use Mautic\LeadBundle\Model\LeadModel;
 use Mautic\LeadBundle\Tracker\ContactTracker;
 use Mautic\PointBundle\Model\PointModel;
+use Mautic\WebhookBundle\Model\WebhookModel;
+use MauticPlugin\DialogHSMBundle\DialogHSMEvents;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumberRepository;
@@ -37,6 +39,7 @@ class WebhookProcessor
         private readonly RealTimeExecutioner $realTimeExecutioner,
         private readonly ContactTracker $contactTracker,
         private readonly LoggerInterface $logger,
+        private readonly WebhookModel $webhookModel,
         private readonly string $redisDsn = '',
         private readonly ?\Redis $redisOverride = null,
     ) {}
@@ -146,6 +149,17 @@ class WebhookProcessor
 
         if (MessageLog::STATUS_FAILED === $status) {
             $this->dispatcher->dispatch(new WebhookMessageFailedEvent($log));
+        }
+
+        $webhookEventKey = match ($status) {
+            MessageLog::STATUS_SENT      => DialogHSMEvents::WEBHOOK_MESSAGE_SENT,
+            MessageLog::STATUS_DELIVERED => DialogHSMEvents::WEBHOOK_MESSAGE_DELIVERED,
+            MessageLog::STATUS_READ      => DialogHSMEvents::WEBHOOK_MESSAGE_READ,
+            MessageLog::STATUS_FAILED    => DialogHSMEvents::WEBHOOK_MESSAGE_FAILED,
+            default                      => null,
+        };
+        if (null !== $webhookEventKey) {
+            $this->queueMessageWebhook($webhookEventKey, $log);
         }
     }
 
@@ -533,6 +547,7 @@ class WebhookProcessor
         }
 
         $this->triggerCampaignDecision($log, 'dialoghsm.decision_button_clicked');
+        $this->queueMessageWebhook(DialogHSMEvents::WEBHOOK_MESSAGE_BUTTON_CLICKED, $log);
     }
 
     private function persistReply(MessageLog $log, Lead $lead, string $from, \DateTime $now, string $type = 'text'): void
@@ -558,6 +573,48 @@ class WebhookProcessor
         }
 
         $this->triggerCampaignDecision($log, 'dialoghsm.decision_replied');
+        $this->queueMessageWebhook(DialogHSMEvents::WEBHOOK_MESSAGE_REPLIED, $log);
+    }
+
+    /**
+     * Enfileira o payload de webhook nativo do Mautic (WebhookBundle) para o tipo de
+     * evento informado. Construído manualmente a partir dos getters de MessageLog em vez
+     * de passar a entidade direto — MessageLog não tem anotações JMS/API de serialização,
+     * então repassá-la ao serializer do WebhookModel resultaria em payload vazio ou quebrado.
+     */
+    private function queueMessageWebhook(string $eventKey, MessageLog $log): void
+    {
+        try {
+            $this->webhookModel->queueWebhooksByType($eventKey, array_filter([
+                'wamid'             => $log->getWamid(),
+                'leadId'            => $log->getLeadId(),
+                'campaignId'        => $log->getCampaignId(),
+                'phoneNumber'       => $log->getPhoneNumber(),
+                'senderName'        => $log->getSenderName(),
+                'templateName'      => $log->getTemplateName(),
+                'status'            => $log->getStatus(),
+                'buttonPayload'     => $log->getButtonPayload(),
+                'errorMessage'      => $log->getErrorMessage(),
+                'webhookErrorCode'  => $log->getWebhookErrorCode(),
+                'dateSent'          => $this->formatUtc($log->getDateSent()),
+                'dateDelivered'     => $this->formatUtc($log->getDateDelivered()),
+                'dateRead'          => $this->formatUtc($log->getDateRead()),
+                'dateReplied'       => $this->formatUtc($log->getDateReplied()),
+                'dateButtonClicked' => $this->formatUtc($log->getDateButtonClicked()),
+            ], static fn ($v) => null !== $v && '' !== $v));
+        } catch (\Throwable $e) {
+            $this->logger->error('DialogHSM: falha ao enfileirar webhook nativo', [
+                'eventKey' => $eventKey,
+                'logId'    => $log->getId(),
+                'error'    => $e->getMessage(),
+            ]);
+        }
+    }
+
+    private function formatUtc(?\DateTimeInterface $dt): ?string
+    {
+        return null === $dt ? null :
+            \DateTime::createFromInterface($dt)->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d\TH:i:s\Z');
     }
 
     private function getRedis(): ?\Redis
