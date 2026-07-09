@@ -116,7 +116,6 @@ class WebhookProcessorNativeWebhookTest extends TestCase
             ->with(
                 DialogHSMEvents::WEBHOOK_MESSAGE_SENT,
                 $this->callback(function (array $payload) {
-                    $this->assertSame('wamid.abc', $payload['wamid']);
                     $this->assertSame('sent', $payload['status']);
                     $this->assertSame('template_teste', $payload['templateName']);
                     $this->assertArrayNotHasKey('errorMessage', $payload);
@@ -137,6 +136,45 @@ class WebhookProcessorNativeWebhookTest extends TestCase
         $this->webhookModel->expects($this->once())
             ->method('queueWebhooksByType')
             ->with(DialogHSMEvents::WEBHOOK_MESSAGE_DELIVERED, $this->isType('array'));
+
+        $this->processor->process('+5511999999999', $this->makeStatusPayload('wamid.abc', 'delivered'));
+    }
+
+    public function testDeliveredStatusWebhookIncludesEmailAndCustomFields(): void
+    {
+        // Plataforma de CS precisa de email + custom fields do lead, não do wamid interno.
+        $log = $this->makeLog(MessageLog::STATUS_SENT);
+        $log->setLeadId(321);
+
+        $lead = $this->createMock(Lead::class);
+        $lead->method('getEmail')->willReturn('contato@exemplo.com');
+        $lead->method('getProfileFields')->willReturn([
+            'id'          => 321,
+            'firstname'   => 'Marlon',
+            'curso'       => 'Tecnologo em Marketing',
+        ]);
+
+        $leadRepo = $this->createMock(LeadRepository::class);
+        $leadRepo->method('getFieldValues')->with(321)->willReturn(['core' => []]);
+
+        $this->leadModel->method('getEntity')->with(321)->willReturn($lead);
+        $this->leadModel->method('getRepository')->willReturn($leadRepo);
+        $this->logRepository->method('findByWamid')->willReturn($log);
+
+        $this->webhookModel->expects($this->once())
+            ->method('queueWebhooksByType')
+            ->with(
+                DialogHSMEvents::WEBHOOK_MESSAGE_DELIVERED,
+                $this->callback(function (array $payload) {
+                    $this->assertSame('contato@exemplo.com', $payload['email']);
+                    $this->assertSame([
+                        'firstname' => 'Marlon',
+                        'curso'     => 'Tecnologo em Marketing',
+                    ], $payload['customFields'], 'o campo "id" deve ser removido — já vai em leadId');
+
+                    return true;
+                })
+            );
 
         $this->processor->process('+5511999999999', $this->makeStatusPayload('wamid.abc', 'delivered'));
     }
@@ -285,6 +323,39 @@ class WebhookProcessorNativeWebhookTest extends TestCase
 
         $this->assertSame(200, $result, 'Exceção do WebhookModel não deve derrubar o processamento do webhook');
         $this->assertSame(MessageLog::STATUS_DELIVERED, $log->getStatus(), 'O status do log já deve ter sido persistido antes da falha do webhook');
+    }
+
+    public function testLeadEnrichmentFailureDoesNotBreakStatusWebhook(): void
+    {
+        // getRepository()->getFieldValues() lança — o webhook ainda deve disparar com os
+        // campos básicos (email/customFields simplesmente ficam de fora).
+        $log = $this->makeLog(MessageLog::STATUS_SENT);
+        $log->setLeadId(321);
+
+        $leadRepo = $this->createMock(LeadRepository::class);
+        $leadRepo->method('getFieldValues')->willThrowException(new \RuntimeException('DB indisponível'));
+
+        $lead = $this->createMock(Lead::class);
+        $this->leadModel->method('getEntity')->with(321)->willReturn($lead);
+        $this->leadModel->method('getRepository')->willReturn($leadRepo);
+        $this->logRepository->method('findByWamid')->willReturn($log);
+
+        $this->webhookModel->expects($this->once())
+            ->method('queueWebhooksByType')
+            ->with(
+                DialogHSMEvents::WEBHOOK_MESSAGE_DELIVERED,
+                $this->callback(function (array $payload) {
+                    $this->assertArrayNotHasKey('email', $payload);
+                    $this->assertArrayNotHasKey('customFields', $payload);
+                    $this->assertSame('delivered', $payload['status']);
+
+                    return true;
+                })
+            );
+
+        $result = $this->processor->process('+5511999999999', $this->makeStatusPayload('wamid.abc', 'delivered'));
+
+        $this->assertSame(200, $result);
     }
 
     // =========================================================================

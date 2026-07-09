@@ -590,10 +590,24 @@ class WebhookProcessor
      */
     private function queueMessageWebhook(string $eventKey, MessageLog $log): void
     {
+        // Enriquecimento com email/custom fields é best-effort: uma falha aqui (lead sem
+        // custom fields carregados, etc.) não pode impedir o disparo dos campos básicos.
+        try {
+            [$email, $customFields] = $this->getLeadEmailAndCustomFields($log->getLeadId());
+        } catch (\Throwable $e) {
+            $email        = null;
+            $customFields = [];
+            $this->logger->warning('DialogHSM: falha ao enriquecer webhook com dados do lead', [
+                'leadId' => $log->getLeadId(),
+                'error'  => $e->getMessage(),
+            ]);
+        }
+
         try {
             $this->webhookModel->queueWebhooksByType($eventKey, array_filter([
-                'wamid'             => $log->getWamid(),
                 'leadId'            => $log->getLeadId(),
+                'email'             => $email,
+                'customFields'      => $customFields,
                 'campaignId'        => $log->getCampaignId(),
                 'phoneNumber'       => $log->getPhoneNumber(),
                 'senderName'        => $log->getSenderName(),
@@ -607,7 +621,7 @@ class WebhookProcessor
                 'dateRead'          => $this->formatUtc($log->getDateRead()),
                 'dateReplied'       => $this->formatUtc($log->getDateReplied()),
                 'dateButtonClicked' => $this->formatUtc($log->getDateButtonClicked()),
-            ], static fn ($v) => null !== $v && '' !== $v));
+            ], static fn ($v) => null !== $v && '' !== $v && [] !== $v));
         } catch (\Throwable $e) {
             $this->logger->error('DialogHSM: falha ao enfileirar webhook nativo', [
                 'eventKey' => $eventKey,
@@ -615,6 +629,28 @@ class WebhookProcessor
                 'error'    => $e->getMessage(),
             ]);
         }
+    }
+
+    /**
+     * @return array{0: ?string, 1: array<string, mixed>}
+     */
+    private function getLeadEmailAndCustomFields(?int $leadId): array
+    {
+        if (null === $leadId) {
+            return [null, []];
+        }
+
+        $lead = $this->leadModel->getEntity($leadId);
+        if (null === $lead) {
+            return [null, []];
+        }
+
+        $lead->setFields($this->leadModel->getRepository()->getFieldValues($leadId));
+
+        $customFields = $lead->getProfileFields();
+        unset($customFields['id']);
+
+        return [$lead->getEmail(), $customFields];
     }
 
     private function formatUtc(?\DateTimeInterface $dt): ?string
