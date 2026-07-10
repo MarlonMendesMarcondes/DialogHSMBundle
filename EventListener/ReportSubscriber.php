@@ -25,6 +25,8 @@ class ReportSubscriber implements EventSubscriberInterface
     public const GRAPH_PIE_STATUS              = 'dialoghsm.graph.pie.status_distribution';
     public const GRAPH_TABLE_TOP_TEMPLATES     = 'dialoghsm.graph.table.top_templates';
     public const GRAPH_TABLE_TOP_READ_RATE     = 'dialoghsm.graph.table.top_read_rate';
+    public const GRAPH_TABLE_LATEST_TEMPLATES  = 'dialoghsm.graph.table.latest_templates';
+    public const GRAPH_TABLE_LATEST_VOLUME     = 'dialoghsm.graph.table.latest_templates_volume';
     public const GRAPH_PIE_REPLY_TYPE          = 'dialoghsm.graph.pie.reply_type';
     public const GRAPH_TABLE_BUTTON_CLICKS     = 'dialoghsm.graph.table.button_clicks';
 
@@ -186,6 +188,8 @@ class ReportSubscriber implements EventSubscriberInterface
         $event->addGraph(self::CONTEXT, 'pie',   self::GRAPH_PIE_STATUS);
         $event->addGraph(self::CONTEXT, 'table', self::GRAPH_TABLE_TOP_TEMPLATES);
         $event->addGraph(self::CONTEXT, 'table', self::GRAPH_TABLE_TOP_READ_RATE);
+        $event->addGraph(self::CONTEXT, 'table', self::GRAPH_TABLE_LATEST_TEMPLATES);
+        $event->addGraph(self::CONTEXT, 'table', self::GRAPH_TABLE_LATEST_VOLUME);
         $event->addGraph(self::CONTEXT, 'pie',   self::GRAPH_PIE_REPLY_TYPE);
         $event->addGraph(self::CONTEXT, 'table', self::GRAPH_TABLE_BUTTON_CLICKS);
     }
@@ -375,6 +379,48 @@ class ReportSubscriber implements EventSubscriberInterface
                     $event->setGraph($g, ['data' => $data, 'name' => $g]);
                     break;
 
+                case self::GRAPH_TABLE_LATEST_VOLUME:
+                    $sq = clone $qb;
+                    $sq->select(
+                        self::ML.'.template_name AS template',
+                        'MAX('.self::ML.'.date_sent)                                   AS last_sent',
+                        'SUM('.self::ML.'.status IN (\'sent\',\'delivered\',\'read\')) AS sent',
+                        'SUM('.self::ML.'.status IN (\'delivered\',\'read\'))          AS delivered',
+                        'SUM('.self::ML.'.status = \'read\')                           AS `read`',
+                        'SUM('.self::ML.'.date_replied IS NOT NULL)                    AS replied',
+                        'SUM('.self::ML.'.status IN (\'failed\',\'dlq\'))              AS failed'
+                    )
+                    ->groupBy(self::ML.'.template_name')
+                    ->orderBy('MAX('.self::ML.'.date_sent)', 'DESC')
+                    ->setMaxResults(10);
+
+                    $rows = $event->getQueryBuilder()->getConnection()
+                        ->fetchAllAssociative($sq->getSQL(), $sq->getParameters());
+
+                    $tplLabel       = $options['translator']->trans('dialoghsm.report.column.template_name');
+                    $lastSentDate   = $options['translator']->trans('dialoghsm.report.column.date_sent');
+                    $lastSentTime   = $options['translator']->trans('dialoghsm.report.column.last_sent_time');
+                    $sentLabel      = $options['translator']->trans('dialoghsm.report.column.sent_count');
+                    $deliveredLabel = $options['translator']->trans('dialoghsm.report.graph.delivered');
+                    $readLabel      = $options['translator']->trans('dialoghsm.report.graph.read');
+                    $repliedLabel   = $options['translator']->trans('dialoghsm.report.graph.replied');
+                    $failedLabel    = $options['translator']->trans('dialoghsm.report.column.failed_count');
+
+                    $data = array_map(fn ($r, $i) => [
+                        'id'            => $i + 1,
+                        $tplLabel       => $r['template'],
+                        $lastSentDate   => self::formatLastSentDate($r['last_sent']),
+                        $lastSentTime   => self::formatLastSentTime($r['last_sent']),
+                        $sentLabel      => (int) $r['sent'],
+                        $deliveredLabel => (int) $r['delivered'],
+                        $readLabel      => (int) $r['read'],
+                        $repliedLabel   => (int) ($r['replied'] ?? 0),
+                        $failedLabel    => (int) $r['failed'],
+                    ], $rows, array_keys($rows));
+
+                    $event->setGraph($g, ['data' => $data, 'name' => $g]);
+                    break;
+
                 case self::GRAPH_LINE_DELIVERY_RATE:
                     $conn  = $event->getQueryBuilder()->getConnection();
                     $sqRt  = clone $qb;
@@ -466,6 +512,46 @@ class ReportSubscriber implements EventSubscriberInterface
                     $event->setGraph($g, ['data' => $data, 'name' => $g]);
                     break;
 
+                case self::GRAPH_TABLE_LATEST_TEMPLATES:
+                    $sq = clone $qb;
+                    $sq->select(
+                        self::ML.'.template_name AS template',
+                        'MAX('.self::ML.'.date_sent)                                   AS last_sent',
+                        'SUM('.self::ML.'.status IN (\'sent\',\'delivered\',\'read\')) AS sent_plus',
+                        'SUM('.self::ML.'.status IN (\'delivered\',\'read\'))          AS delivered_plus',
+                        'SUM('.self::ML.'.status = \'read\')                           AS read_count',
+                        'SUM('.self::ML.'.date_replied IS NOT NULL)                   AS replied_count'
+                    )
+                    ->groupBy(self::ML.'.template_name')
+                    ->having('SUM('.self::ML.'.status IN (\'sent\',\'delivered\',\'read\')) > 0')
+                    ->orderBy('MAX('.self::ML.'.date_sent)', 'DESC')
+                    ->setMaxResults(10);
+
+                    $rows = $event->getQueryBuilder()->getConnection()
+                        ->fetchAllAssociative($sq->getSQL(), $sq->getParameters());
+
+                    $tplLabel      = $options['translator']->trans('dialoghsm.report.column.template_name');
+                    $lastSentDate  = $options['translator']->trans('dialoghsm.report.column.date_sent');
+                    $lastSentTime  = $options['translator']->trans('dialoghsm.report.column.last_sent_time');
+                    $sentLabel     = $options['translator']->trans('dialoghsm.report.column.sent_count');
+                    $delLabel      = $options['translator']->trans('dialoghsm.report.graph.delivery_rate_pct');
+                    $readLabel     = $options['translator']->trans('dialoghsm.report.graph.read_rate_pct');
+                    $repliedLabel  = $options['translator']->trans('dialoghsm.report.graph.reply_rate_pct');
+
+                    $data = array_map(fn ($r, $i) => [
+                        'id'           => $i + 1,
+                        $tplLabel      => $r['template'],
+                        $lastSentDate  => self::formatLastSentDate($r['last_sent']),
+                        $lastSentTime  => self::formatLastSentTime($r['last_sent']),
+                        $sentLabel     => (int) $r['sent_plus'],
+                        $delLabel      => round((int) $r['delivered_plus'] / (int) $r['sent_plus'] * 100, 1).'%',
+                        $readLabel     => round((int) $r['read_count']     / (int) $r['sent_plus'] * 100, 1).'%',
+                        $repliedLabel  => round((int) $r['replied_count']  / (int) $r['sent_plus'] * 100, 1).'%',
+                    ], $rows, array_keys($rows));
+
+                    $event->setGraph($g, ['data' => $data, 'name' => $g]);
+                    break;
+
                 case self::GRAPH_PIE_REPLY_TYPE:
                     $conn = $event->getQueryBuilder()->getConnection();
                     $sq   = clone $qb;
@@ -530,6 +616,33 @@ class ReportSubscriber implements EventSubscriberInterface
                     $event->setGraph($g, ['data' => $data, 'name' => $g]);
                     break;
             }
+        }
+    }
+
+    /**
+     * Data e hora vão em colunas separadas — em colunas estreitas de tabela, o navegador
+     * quebra a linha no espaço entre elas e cola visualmente os dois valores (ex.: "2026-06-2617:58").
+     */
+    private static function formatLastSentDate(?string $value): string
+    {
+        return self::formatLastSent($value, 'd/m/Y');
+    }
+
+    private static function formatLastSentTime(?string $value): string
+    {
+        return self::formatLastSent($value, 'H:i');
+    }
+
+    private static function formatLastSent(?string $value, string $format): string
+    {
+        if (!$value) {
+            return '';
+        }
+
+        try {
+            return (new \DateTime($value))->format($format);
+        } catch (\Exception) {
+            return $value;
         }
     }
 }
