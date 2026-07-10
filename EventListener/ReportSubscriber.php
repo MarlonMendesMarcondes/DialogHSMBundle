@@ -327,7 +327,6 @@ class ReportSubscriber implements EventSubscriberInterface
                     $pie->setDataset($options['translator']->trans('dialoghsm.report.graph.failed'),    $buckets['failed']);
 
                     $pieRender                               = $pie->render();
-                    $pieRender['labels']                     = array_keys($buckets);
                     $pieRender['datasets'][0]['backgroundColor'] = [
                         'rgba(92,184,92,0.8)',    // sent
                         'rgba(23,162,184,0.8)',   // delivered
@@ -486,7 +485,6 @@ class ReportSubscriber implements EventSubscriberInterface
                     $pie->setDataset($options['translator']->trans('dialoghsm.report.graph.reply_type.button'), $buckets['button_click']);
 
                     $pieRender                                    = $pie->render();
-                    $pieRender['labels']                          = array_keys($buckets);
                     $pieRender['datasets'][0]['backgroundColor']  = [
                         'rgba(2,117,216,0.8)',    // texto  #0275d8
                         'rgba(232,62,140,0.8)',   // botão  #e83e8c
