@@ -34,6 +34,28 @@ class CampaignSubscriber implements EventSubscriberInterface
 {
     private const WEBHOOK_TIMEOUT_SECONDS = 120;
 
+    /**
+     * Códigos de erro da Meta que indicam restrição de qualidade/entrega ou opt-out do
+     * contato, não uma falha técnica do nosso lado. Não devem contar para o limite de
+     * 10% de falha que o Mautic core usa para desativar a campanha automaticamente
+     * (Mautic\CampaignBundle\EventListener\CampaignEventSubscriber::onEventFailed).
+     *
+     * IMPORTANTE: esses códigos chegam via webhook (MessageLog::getWebhookErrorCode()),
+     * não via HTTP status do envio síncrono. A 360dialog aceita a mensagem no envio
+     * (http_status_code=200) e só depois a Meta recusa a entrega, reportada
+     * assincronamente pelo webhook. Por isso a checagem abaixo usa getWebhookErrorCode()
+     * e nunca getHttpStatusCode() — falhas técnicas reais (payload malformado, permissão,
+     * template inexistente) têm http_status_code 400/403/404/401 com webhook_error_code
+     * nulo (falham no próprio envio, nunca chegam a gerar callback de webhook), então
+     * nunca colidem com estes códigos.
+     */
+    private const META_RESTRICTION_CODES = [
+        131049, // Not delivered to maintain healthy ecosystem engagement
+        130472, // User's number is part of an experiment
+        131050, // Recipient chose to stop receiving marketing messages (opt-out)
+        131026, // Message undeliverable (recipient phone off/unreachable/not on WhatsApp/blocked number)
+    ];
+
     public function __construct(
         private IntegrationsHelper $integrationsHelper,
         private MessageBusInterface $bus,
@@ -457,6 +479,12 @@ class CampaignSubscriber implements EventSubscriberInterface
         }
 
         if (MessageLog::STATUS_FAILED === $status || MessageLog::STATUS_DLQ === $status) {
+            if (in_array($log->getWebhookErrorCode(), self::META_RESTRICTION_CODES, true)) {
+                $event->passWithError($campaignLog, 'dialoghsm.campaign.error.meta_restricted');
+
+                return;
+            }
+
             $event->fail($campaignLog, 'dialoghsm.campaign.error.webhook_failed');
 
             return;
