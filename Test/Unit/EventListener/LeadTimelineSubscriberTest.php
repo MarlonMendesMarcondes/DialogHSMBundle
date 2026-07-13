@@ -63,11 +63,12 @@ class LeadTimelineSubscriberTest extends TestCase
         $this->connection->method('createQueryBuilder')->willReturn($qb);
     }
 
-    private function makeRow(string $action, string $dateAdded = '2026-01-15 10:00:00', array $props = []): array
+    private function makeRow(string $action, string $dateAdded = '2026-01-15 10:00:00', array $props = [], int $objectId = 1): array
     {
         return [
             'id'         => random_int(1, 9999),
             'action'     => $action,
+            'object_id'  => $objectId,
             'date_added' => $dateAdded,
             'properties' => json_encode(array_merge([
                 'template_name' => 'tpl_test',
@@ -131,6 +132,20 @@ class LeadTimelineSubscriberTest extends TestCase
         $this->subscriber->onTimelineGenerate($event);
     }
 
+    public function testButtonClickedNeverRegistersItsOwnEventType(): void
+    {
+        $event         = $this->makeTimelineEvent(applicable: false);
+        $registeredKeys = [];
+        $event->method('addEventType')
+            ->willReturnCallback(function (string $key) use (&$registeredKeys): void {
+                $registeredKeys[] = $key;
+            });
+
+        $this->subscriber->onTimelineGenerate($event);
+
+        $this->assertNotContains('dialoghsm.button_clicked', $registeredKeys);
+    }
+
     // =========================================================================
     // Early-exit paths
     // =========================================================================
@@ -163,9 +178,16 @@ class LeadTimelineSubscriberTest extends TestCase
 
         $event = $this->makeTimelineEvent();
 
+        $counterKeys = [];
+        $event->method('addToCounter')
+            ->willReturnCallback(function (string $key) use (&$counterKeys): void {
+                $counterKeys[] = $key;
+            });
         $event->expects($this->exactly(7))->method('addToCounter');
 
         $this->subscriber->onTimelineGenerate($event);
+
+        $this->assertNotContains('dialoghsm.button_clicked', $counterKeys, 'button_clicked não deve ter contador próprio');
     }
 
     public function testCounterReflectsActualRowCount(): void
@@ -337,5 +359,117 @@ class LeadTimelineSubscriberTest extends TestCase
         $this->subscriber->onTimelineGenerate($event);
 
         $this->assertSame('dialoghsm.log.status.failed', $captured['eventLabel']);
+    }
+
+    // =========================================================================
+    // Concatenação de button_clicked dentro do evento "replied"
+    // =========================================================================
+
+    private function makeRepliedEvent(): LeadTimelineEvent&MockObject
+    {
+        $event = $this->getMockBuilder(LeadTimelineEvent::class)
+            ->disableOriginalConstructor()
+            ->onlyMethods(['addEventType', 'isApplicable', 'getLeadId', 'getQueryOptions', 'addToCounter', 'isEngagementCount', 'addEvent'])
+            ->getMock();
+        $event->method('isApplicable')->willReturnCallback(fn ($t) => 'dialoghsm.replied' === $t);
+        $event->method('getLeadId')->willReturn(42);
+        $event->method('isEngagementCount')->willReturn(false);
+        $event->method('getQueryOptions')->willReturn(['paginated' => true, 'limit' => 25, 'start' => 0]);
+
+        return $event;
+    }
+
+    /**
+     * Happy path: clique em botão (mesmo object_id do MessageLog) deve ser concatenado
+     * no eventLabel e nas propriedades extra do evento "replied" — sem virar entrada própria.
+     */
+    public function testButtonClickIsConcatenatedIntoRepliedEventLabel(): void
+    {
+        $this->mockRows([
+            $this->makeRow(LeadEventLogWriter::ACTION_REPLIED, '2026-01-15 10:00:00', ['template_name' => 'tpl_x'], objectId: 1),
+            $this->makeRow(LeadEventLogWriter::ACTION_BUTTON_CLICKED, '2026-01-15 10:00:00', ['button_payload' => 'Quero vaga no Plantão!'], objectId: 1),
+        ]);
+
+        $event    = $this->makeRepliedEvent();
+        $captured = null;
+        $event->method('addEvent')->willReturnCallback(function (array $e) use (&$captured): void {
+            $captured = $e;
+        });
+        $event->expects($this->once())->method('addEvent');
+
+        $this->subscriber->onTimelineGenerate($event);
+
+        $this->assertStringContainsString('Quero vaga no Plantão!', $captured['eventLabel']);
+        $this->assertStringContainsString('dialoghsm.log.status.button_clicked', $captured['eventLabel']);
+        $this->assertSame('Quero vaga no Plantão!', $captured['extra']['button_payload']);
+        $this->assertSame('dialoghsm.replied', $captured['event'], 'não deve virar um evento próprio "button_clicked"');
+    }
+
+    /**
+     * Bad path: clique em botão de um MessageLog DIFERENTE (object_id não bate) não deve
+     * vazar para o eventLabel de uma resposta não relacionada.
+     */
+    public function testButtonClickWithDifferentObjectIdIsNotMerged(): void
+    {
+        $this->mockRows([
+            $this->makeRow(LeadEventLogWriter::ACTION_REPLIED, '2026-01-15 10:00:00', ['template_name' => 'tpl_x'], objectId: 1),
+            $this->makeRow(LeadEventLogWriter::ACTION_BUTTON_CLICKED, '2026-01-15 10:00:00', ['button_payload' => 'Botão de outra mensagem'], objectId: 2),
+        ]);
+
+        $event    = $this->makeRepliedEvent();
+        $captured = null;
+        $event->method('addEvent')->willReturnCallback(function (array $e) use (&$captured): void {
+            $captured = $e;
+        });
+
+        $this->subscriber->onTimelineGenerate($event);
+
+        $this->assertStringNotContainsString('Botão de outra mensagem', $captured['eventLabel']);
+        $this->assertArrayNotHasKey('button_payload', $captured['extra']);
+    }
+
+    /**
+     * Bad path: entry de button_clicked malformada (sem button_payload nas properties)
+     * não deve quebrar a renderização do evento "replied" — apenas não concatena nada.
+     */
+    public function testMalformedButtonClickPropertiesDoesNotBreakRepliedEvent(): void
+    {
+        $this->mockRows([
+            $this->makeRow(LeadEventLogWriter::ACTION_REPLIED, '2026-01-15 10:00:00', ['template_name' => 'tpl_x'], objectId: 1),
+            $this->makeRow(LeadEventLogWriter::ACTION_BUTTON_CLICKED, '2026-01-15 10:00:00', [], objectId: 1),
+        ]);
+
+        $event    = $this->makeRepliedEvent();
+        $captured = null;
+        $event->method('addEvent')->willReturnCallback(function (array $e) use (&$captured): void {
+            $captured = $e;
+        });
+
+        $this->subscriber->onTimelineGenerate($event);
+
+        $this->assertSame('dialoghsm.log.status.replied — tpl_x', $captured['eventLabel']);
+        $this->assertArrayNotHasKey('button_payload', $captured['extra']);
+    }
+
+    /**
+     * Happy path (baseline): resposta sem nenhum clique de botão associado
+     * mantém o label simples, sem concatenação.
+     */
+    public function testReplyWithoutButtonClickHasPlainLabel(): void
+    {
+        $this->mockRows([
+            $this->makeRow(LeadEventLogWriter::ACTION_REPLIED, '2026-01-15 10:00:00', ['template_name' => 'tpl_x'], objectId: 1),
+        ]);
+
+        $event    = $this->makeRepliedEvent();
+        $captured = null;
+        $event->method('addEvent')->willReturnCallback(function (array $e) use (&$captured): void {
+            $captured = $e;
+        });
+
+        $this->subscriber->onTimelineGenerate($event);
+
+        $this->assertSame('dialoghsm.log.status.replied — tpl_x', $captured['eventLabel']);
+        $this->assertArrayNotHasKey('button_payload', $captured['extra']);
     }
 }

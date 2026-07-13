@@ -604,6 +604,174 @@ class ReportSubscriberTest extends TestCase
     }
 
     // =========================================================================
+    // onReportGraphGenerate — TABLE latest templates (por taxa)
+    // =========================================================================
+
+    public function testTableLatestTemplatesCalculatesPercentages(): void
+    {
+        $rows = [
+            ['template' => 'tpl_x', 'last_sent' => '2026-07-10 10:00:00', 'sent_plus' => 200, 'delivered_plus' => 160, 'read_count' => 80, 'replied_count' => 40],
+            ['template' => 'tpl_y', 'last_sent' => '2026-07-09 10:00:00', 'sent_plus' => 100, 'delivered_plus' => 50,  'read_count' => 10, 'replied_count' => 5],
+        ];
+
+        $captured = null;
+        $event    = $this->makeGraphEvent(true, ReportSubscriber::GRAPH_TABLE_LATEST_TEMPLATES, $rows);
+        $event->method('setGraph')
+            ->willReturnCallback(function (string $g, array $data) use (&$captured): void {
+                $captured = $data;
+            });
+
+        $this->subscriber->onReportGraphGenerate($event);
+
+        $this->assertCount(2, $captured['data']);
+        // tpl_x: delivery=160/200=80%, read=80/200=40%, replied=40/200=20%
+        $row0Values = array_values($captured['data'][0]);
+        $this->assertContains('10/07/2026', $row0Values);
+        $this->assertContains('10:00', $row0Values);
+        $this->assertContains('80%', $row0Values);
+        $this->assertContains('40%', $row0Values);
+        $this->assertContains('20%', $row0Values);
+        // tpl_y: delivery=50/100=50%, read=10/100=10%, replied=5/100=5%
+        $row1Values = array_values($captured['data'][1]);
+        $this->assertContains('09/07/2026', $row1Values);
+        $this->assertContains('10:00', $row1Values);
+        $this->assertContains('50%', $row1Values);
+        $this->assertContains('10%', $row1Values);
+        $this->assertContains('5%', $row1Values);
+    }
+
+    public function testTableLatestTemplatesCallsSetGraphWithDataKey(): void
+    {
+        $rows = [
+            ['template' => 'tpl_a', 'last_sent' => '2026-07-10 10:00:00', 'sent_plus' => 10, 'delivered_plus' => 8, 'read_count' => 4, 'replied_count' => 1],
+        ];
+
+        $event = $this->makeGraphEvent(true, ReportSubscriber::GRAPH_TABLE_LATEST_TEMPLATES, $rows);
+        $event->expects($this->once())->method('setGraph')
+            ->with(
+                ReportSubscriber::GRAPH_TABLE_LATEST_TEMPLATES,
+                $this->callback(fn ($d) => isset($d['data']) && isset($d['name']))
+            );
+
+        $this->subscriber->onReportGraphGenerate($event);
+    }
+
+    // =========================================================================
+    // onReportGraphGenerate — TABLE latest templates (por volume)
+    // =========================================================================
+
+    public function testTableLatestVolumeCallsSetGraphWithDataKey(): void
+    {
+        $rows = [
+            ['template' => 'tpl_a', 'last_sent' => '2026-07-10 10:00:00', 'sent' => 100, 'delivered' => 80, 'read' => 40, 'replied' => 12, 'failed' => 5],
+            ['template' => 'tpl_b', 'last_sent' => '2026-07-09 10:00:00', 'sent' => 50,  'delivered' => 30, 'read' => 10, 'replied' => 3,  'failed' => 2],
+        ];
+
+        $captured = null;
+        $event    = $this->makeGraphEvent(true, ReportSubscriber::GRAPH_TABLE_LATEST_VOLUME, $rows);
+        $event->method('setGraph')
+            ->willReturnCallback(function (string $g, array $data) use (&$captured): void {
+                $captured = $data;
+            });
+
+        $this->subscriber->onReportGraphGenerate($event);
+
+        $this->assertArrayHasKey('data', $captured);
+        $this->assertArrayHasKey('name', $captured);
+        $this->assertCount(2, $captured['data']);
+        $this->assertSame(1, $captured['data'][0]['id']);
+        $this->assertSame(2, $captured['data'][1]['id']);
+    }
+
+    public function testTableLatestVolumeKeepsRawCounts(): void
+    {
+        $rows = [
+            ['template' => 'tpl_a', 'last_sent' => '2026-07-10 10:00:00', 'sent' => 100, 'delivered' => 80, 'read' => 40, 'replied' => 12, 'failed' => 5],
+        ];
+
+        $captured = null;
+        $event    = $this->makeGraphEvent(true, ReportSubscriber::GRAPH_TABLE_LATEST_VOLUME, $rows);
+        $event->method('setGraph')
+            ->willReturnCallback(function (string $g, array $data) use (&$captured): void {
+                $captured = $data;
+            });
+
+        $this->subscriber->onReportGraphGenerate($event);
+
+        $row0Values = array_values($captured['data'][0]);
+        $this->assertContains('tpl_a', $row0Values);
+        $this->assertContains('10/07/2026', $row0Values);
+        $this->assertContains('10:00', $row0Values);
+        $this->assertContains(100, $row0Values);
+        $this->assertContains(80, $row0Values);
+        $this->assertContains(40, $row0Values);
+        $this->assertContains(12, $row0Values);
+        $this->assertContains(5, $row0Values);
+    }
+
+    public function testTableLatestVolumeDefaultsRepliedToZeroWhenMissing(): void
+    {
+        $rows = [
+            ['template' => 'tpl_a', 'last_sent' => '2026-07-10 10:00:00', 'sent' => 100, 'delivered' => 80, 'read' => 40, 'failed' => 5],
+        ];
+
+        $captured = null;
+        $event    = $this->makeGraphEvent(true, ReportSubscriber::GRAPH_TABLE_LATEST_VOLUME, $rows);
+        $event->method('setGraph')
+            ->willReturnCallback(function (string $g, array $data) use (&$captured): void {
+                $captured = $data;
+            });
+
+        $this->subscriber->onReportGraphGenerate($event);
+
+        $this->assertContains(0, array_values($captured['data'][0]));
+    }
+
+    public function testTableLatestVolumeSplitsDateAndTimeIntoSeparateColumns(): void
+    {
+        // Data e hora vão em colunas separadas — evita que o navegador quebre a linha
+        // no espaço entre elas e cole visualmente os dois valores (ex.: "2026-06-2617:58").
+        $rows = [
+            ['template' => 'tpl_a', 'last_sent' => '2026-06-26 17:58:20', 'sent' => 100, 'delivered' => 80, 'read' => 40, 'replied' => 12, 'failed' => 5],
+        ];
+
+        $captured = null;
+        $event    = $this->makeGraphEvent(true, ReportSubscriber::GRAPH_TABLE_LATEST_VOLUME, $rows);
+        $event->method('setGraph')
+            ->willReturnCallback(function (string $g, array $data) use (&$captured): void {
+                $captured = $data;
+            });
+
+        $this->subscriber->onReportGraphGenerate($event);
+
+        $row0Values = array_values($captured['data'][0]);
+        $this->assertContains('26/06/2026', $row0Values);
+        $this->assertContains('17:58', $row0Values);
+        $this->assertNotContains('2026-06-26 17:58:20', $row0Values, 'não deve mais expor a string crua');
+    }
+
+    public function testTableLatestVolumeHandlesNullLastSentGracefully(): void
+    {
+        $rows = [
+            ['template' => 'tpl_a', 'last_sent' => null, 'sent' => 10, 'delivered' => 8, 'read' => 4, 'replied' => 1, 'failed' => 0],
+        ];
+
+        $captured = null;
+        $event    = $this->makeGraphEvent(true, ReportSubscriber::GRAPH_TABLE_LATEST_VOLUME, $rows);
+        $event->method('setGraph')
+            ->willReturnCallback(function (string $g, array $data) use (&$captured): void {
+                $captured = $data;
+            });
+
+        $this->subscriber->onReportGraphGenerate($event);
+
+        $row0Values = array_values($captured['data'][0]);
+        // Data e hora ausentes (null) devem virar string vazia, sem quebrar o cálculo
+        $emptyCount = count(array_filter($row0Values, fn ($v) => $v === ''));
+        $this->assertSame(2, $emptyCount, 'coluna de data e coluna de hora devem estar vazias');
+    }
+
+    // =========================================================================
     // onReportGraphGenerate — LINE sends per day
     // =========================================================================
 
@@ -667,5 +835,98 @@ class ReportSubscriberTest extends TestCase
         $this->assertStringContainsString('23,162,184', $captured['datasets'][0]['borderColor']); // delivery #17a2b8
         $this->assertStringContainsString('2,117,216',  $captured['datasets'][1]['borderColor']); // read     #0275d8
         $this->assertStringContainsString('111,66,193', $captured['datasets'][2]['borderColor']); // replied  #6f42c1
+    }
+
+    // =========================================================================
+    // onReportGraphGenerate — PIE reply type (texto vs clique no botão)
+    // =========================================================================
+
+    public function testPieReplyTypeCallsSetGraphWithDataAndName(): void
+    {
+        $event = $this->makeGraphEvent(true, ReportSubscriber::GRAPH_PIE_REPLY_TYPE);
+        $event->expects($this->once())->method('setGraph')
+            ->with(
+                ReportSubscriber::GRAPH_PIE_REPLY_TYPE,
+                $this->callback(fn ($d) => isset($d['data']) && isset($d['name']))
+            );
+
+        $this->subscriber->onReportGraphGenerate($event);
+    }
+
+    public function testPieReplyTypeBucketsTextAndButtonSeparately(): void
+    {
+        $fetchOneRow = ['text_only' => 30, 'button_click' => 12];
+
+        $captured = null;
+        $event    = $this->makeGraphEvent(true, ReportSubscriber::GRAPH_PIE_REPLY_TYPE, [], $fetchOneRow);
+        $event->method('setGraph')
+            ->willReturnCallback(function (string $g, array $data) use (&$captured): void {
+                $captured = $data;
+            });
+
+        $this->subscriber->onReportGraphGenerate($event);
+
+        $datasets = $captured['data']['datasets'][0]['data'];
+        $this->assertSame(30, $datasets[0], 'text_only bucket');
+        $this->assertSame(12, $datasets[1], 'button_click bucket');
+    }
+
+    // =========================================================================
+    // onReportGraphGenerate — TABLE button clicks (formato do painel da Meta)
+    // =========================================================================
+
+    public function testTableButtonClicksCallsSetGraphWithDataKey(): void
+    {
+        $event = $this->makeGraphEvent(true, ReportSubscriber::GRAPH_TABLE_BUTTON_CLICKS, [], ['sent_plus' => 0]);
+        $event->expects($this->once())->method('setGraph')
+            ->with(
+                ReportSubscriber::GRAPH_TABLE_BUTTON_CLICKS,
+                $this->callback(fn ($d) => isset($d['data']) && isset($d['name']))
+            );
+
+        $this->subscriber->onReportGraphGenerate($event);
+    }
+
+    public function testTableButtonClicksCalculatesClickRate(): void
+    {
+        $rows = [
+            ['rotulo' => 'Quero vaga no Plantão!', 'total_cliques' => 40],
+            ['rotulo' => 'Saber sobre as ofertas',  'total_cliques' => 10],
+        ];
+
+        $captured = null;
+        $event    = $this->makeGraphEvent(true, ReportSubscriber::GRAPH_TABLE_BUTTON_CLICKS, $rows, ['sent_plus' => 200]);
+        $event->method('setGraph')
+            ->willReturnCallback(function (string $g, array $data) use (&$captured): void {
+                $captured = $data;
+            });
+
+        $this->subscriber->onReportGraphGenerate($event);
+
+        $this->assertCount(2, $captured['data']);
+        $row0Values = array_values($captured['data'][0]);
+        $this->assertContains('Quero vaga no Plantão!', $row0Values);
+        $this->assertContains(40, $row0Values);
+        $this->assertContains('20%', $row0Values); // 40/200
+
+        $row1Values = array_values($captured['data'][1]);
+        $this->assertContains('Saber sobre as ofertas', $row1Values);
+        $this->assertContains(10, $row1Values);
+        $this->assertContains('5%', $row1Values); // 10/200
+    }
+
+    public function testTableButtonClicksHandlesZeroSentWithoutDivisionError(): void
+    {
+        $rows     = [['rotulo' => 'Botão X', 'total_cliques' => 5]];
+        $captured = null;
+        $event    = $this->makeGraphEvent(true, ReportSubscriber::GRAPH_TABLE_BUTTON_CLICKS, $rows, ['sent_plus' => 0]);
+        $event->method('setGraph')
+            ->willReturnCallback(function (string $g, array $data) use (&$captured): void {
+                $captured = $data;
+            });
+
+        $this->subscriber->onReportGraphGenerate($event);
+
+        $this->assertContains('0%', array_values($captured['data'][0]));
     }
 }

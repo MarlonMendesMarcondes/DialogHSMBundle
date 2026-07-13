@@ -412,7 +412,10 @@ class CampaignSubscriberActionTest extends TestCase
             ->method('getEntity')
             ->willReturn($this->buildWhatsAppNumber());
 
-        $contact = $this->buildContact(phone: '5511999999999');
+        // "5511999999999" não serve mais de exemplo aqui — normalizePhone() agora completa
+        // esse formato ("55" + DDD + número, sem "+") automaticamente para "+5511999999999".
+        // Usamos um telefone com letras, que continua genuinamente inválido.
+        $contact = $this->buildContact(phone: '+5511abc9999');
         $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
 
         $event->expects($this->once())
@@ -1400,6 +1403,11 @@ class CampaignSubscriberActionTest extends TestCase
             'com espaços brasil celular'      => ['+55 11 99999 9999'],
             'com traços'                      => ['+55-11-99999-9999'],
             'com parênteses e espaços'        => ['+55 (11) 98765-4321'],
+            // BR sem "+55" — completado automaticamente (normalizePhone), caso real de IES
+            '11 dígitos sem código de país'   => ['44988291870'],
+            '11 dígitos sem código de país 2' => ['44991380510'],
+            '10 dígitos sem código de país'   => ['4433221100'],
+            '"55" sem o "+" na frente'        => ['5511999999999'],
         ];
     }
 
@@ -1520,14 +1528,16 @@ class CampaignSubscriberActionTest extends TestCase
     public static function invalidE164Provider(): array
     {
         return [
-            'vazio'           => [''],
-            'sem +'           => ['5511999999999'],
-            'só +'            => ['+'],
-            'apenas zeros'    => ['+0000000'],
-            'começa com +0'   => ['+0123456789'],
-            'curto demais'    => ['+12345'],
-            'longo demais'    => ['+1234567890123456'],
-            'letras'          => ['+5511abc9999'],
+            'vazio'                    => [''],
+            'só +'                     => ['+'],
+            'apenas zeros'             => ['+0000000'],
+            'começa com +0'            => ['+0123456789'],
+            'curto demais'             => ['+12345'],
+            'longo demais'             => ['+1234567890123456'],
+            'letras'                   => ['+5511abc9999'],
+            // dígitos-só, mas fora do range plausível de BR (não é 10/11 nem 55+10/11)
+            'dígitos-só, 9 dígitos'    => ['123456789'],
+            'dígitos-só, muito longo'  => ['123456789012345'],
         ];
     }
 
@@ -1557,6 +1567,34 @@ class CampaignSubscriberActionTest extends TestCase
 
         $this->assertNotNull($capturedBatch);
         $this->assertSame('+5544999067833', $capturedBatch->items[0]->phone);
+    }
+
+    /**
+     * Caso real reportado por uma IES: números salvos no cadastro do lead sem o "+55"
+     * (ex: "44988291870") eram rejeitados como invalid_phone antes desta mudança — agora
+     * são completados automaticamente e o disparo segue normalmente.
+     */
+    public function testBrazilianPhoneWithoutCountryCodeIsCompletedAutomatically(): void
+    {
+        $this->enableIntegration();
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
+
+        $capturedBatch = null;
+        $this->mockDirectBatchHandler
+            ->method('__invoke')
+            ->willReturnCallback(function (SendWhatsAppDirectBatchMessage $batch) use (&$capturedBatch): void {
+                $capturedBatch = $batch;
+            });
+
+        $contact = $this->buildContact('44988291870', 1);
+        $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
+
+        $event->expects($this->never())->method('fail');
+
+        $this->subscriber->onCampaignTriggerAction($event);
+
+        $this->assertNotNull($capturedBatch);
+        $this->assertSame('+5544988291870', $capturedBatch->items[0]->phone);
     }
 
     // -------------------------------------------------------------------------
@@ -1744,6 +1782,234 @@ class CampaignSubscriberActionTest extends TestCase
 
         $event->expects($this->never())->method('pass');
         $event->expects($this->once())->method('fail');
+        $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
+
+        $subscriber->onCampaignTriggerAction($event);
+    }
+
+    // -------------------------------------------------------------------------
+    // Testes: restrição Meta (131049/130472/131050) → passWithError() em vez de fail()
+    // -------------------------------------------------------------------------
+
+    /**
+     * @return iterable<string, array{int}>
+     */
+    public static function metaRestrictionCodeProvider(): iterable
+    {
+        yield 'healthy ecosystem engagement' => [131049];
+        yield 'user is part of an experiment' => [130472];
+        yield 'recipient opted out of marketing' => [131050];
+        yield 'message undeliverable' => [131026];
+    }
+
+    /**
+     * Status 'failed' com código de restrição Meta conhecido →
+     * passWithError() é chamado, fail() NUNCA é chamado (não deve contar para o
+     * limite de 10% de CampaignEventSubscriber::onEventFailed do core).
+     *
+     * @dataProvider metaRestrictionCodeProvider
+     */
+    public function testReExecutionWithFailedStatusAndMetaRestrictionCodeCallsPassWithError(int $webhookErrorCode): void
+    {
+        $this->enableIntegration();
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
+
+        $log = new MessageLog();
+        $log->setStatus(MessageLog::STATUS_FAILED);
+        $log->setDateSent(new \DateTime());
+        $log->setWebhookErrorCode($webhookErrorCode);
+
+        $subscriber = $this->makeReExecutionSubscriber($log);
+
+        $contact = $this->buildContact('+5511999999999', 1);
+        $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
+
+        $event->expects($this->never())->method('pass');
+        $event->expects($this->never())->method('fail');
+        $event->expects($this->once())->method('passWithError')
+            ->with($this->anything(), 'dialoghsm.campaign.error.meta_restricted');
+        $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
+
+        $subscriber->onCampaignTriggerAction($event);
+    }
+
+    /**
+     * Status 'dlq' com código de restrição Meta conhecido também deve
+     * resultar em passWithError(), não só o status 'failed'.
+     *
+     * @dataProvider metaRestrictionCodeProvider
+     */
+    public function testReExecutionWithDlqStatusAndMetaRestrictionCodeCallsPassWithError(int $webhookErrorCode): void
+    {
+        $this->enableIntegration();
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
+
+        $log = new MessageLog();
+        $log->setStatus(MessageLog::STATUS_DLQ);
+        $log->setDateSent(new \DateTime());
+        $log->setWebhookErrorCode($webhookErrorCode);
+
+        $subscriber = $this->makeReExecutionSubscriber($log);
+
+        $contact = $this->buildContact('+5511999999999', 1);
+        $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
+
+        $event->expects($this->never())->method('pass');
+        $event->expects($this->never())->method('fail');
+        $event->expects($this->once())->method('passWithError')
+            ->with($this->anything(), 'dialoghsm.campaign.error.meta_restricted');
+        $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
+
+        $subscriber->onCampaignTriggerAction($event);
+    }
+
+    /**
+     * Status 'failed' com código de erro técnico (não é restrição Meta) →
+     * continua chamando fail() normalmente, preservando a trava de segurança do
+     * Mautic core para bugs reais (ex: payload malformado, permissão, API key inválida).
+     */
+    public function testReExecutionWithFailedStatusAndTechnicalErrorCodeStillCallsFail(): void
+    {
+        $this->enableIntegration();
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
+
+        $log = new MessageLog();
+        $log->setStatus(MessageLog::STATUS_FAILED);
+        $log->setDateSent(new \DateTime());
+        $log->setWebhookErrorCode(132001); // HTTP 404: Template name does not exist
+
+        $subscriber = $this->makeReExecutionSubscriber($log);
+
+        $contact = $this->buildContact('+5511999999999', 1);
+        $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
+
+        $event->expects($this->never())->method('pass');
+        $event->expects($this->never())->method('passWithError');
+        $event->expects($this->once())->method('fail')
+            ->with($this->anything(), 'dialoghsm.campaign.error.webhook_failed');
+        $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
+
+        $subscriber->onCampaignTriggerAction($event);
+    }
+
+    /**
+     * Status 'failed' sem nenhum webhook_error_code (null) → continua
+     * chamando fail() normalmente, não deve ser tratado como restrição Meta por engano.
+     */
+    public function testReExecutionWithFailedStatusAndNullErrorCodeStillCallsFail(): void
+    {
+        $this->enableIntegration();
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
+
+        $log = new MessageLog();
+        $log->setStatus(MessageLog::STATUS_FAILED);
+        $log->setDateSent(new \DateTime());
+        $log->setWebhookErrorCode(null);
+
+        $subscriber = $this->makeReExecutionSubscriber($log);
+
+        $contact = $this->buildContact('+5511999999999', 1);
+        $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
+
+        $event->expects($this->never())->method('pass');
+        $event->expects($this->never())->method('passWithError');
+        $event->expects($this->once())->method('fail')
+            ->with($this->anything(), 'dialoghsm.campaign.error.webhook_failed');
+        $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
+
+        $subscriber->onCampaignTriggerAction($event);
+    }
+
+    /**
+     * http_status_code=200 (envio síncrono aceito pela 360dialog) sozinho
+     * NUNCA deve disparar passWithError() — só o webhook_error_code importa. Aqui o
+     * status é 'failed' com http_status_code=200 mas um webhook_error_code que NÃO
+     * está na lista de restrição Meta (ex: 131000 "Something went wrong", visto nos
+     * dados reais) → continua chamando fail() normalmente.
+     */
+    public function testHttp200AloneDoesNotTriggerPassWithErrorWithoutRestrictionCode(): void
+    {
+        $this->enableIntegration();
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
+
+        $log = new MessageLog();
+        $log->setStatus(MessageLog::STATUS_FAILED);
+        $log->setDateSent(new \DateTime());
+        $log->setHttpStatusCode(200);
+        $log->setWebhookErrorCode(131000); // "Something went wrong" — não é restrição Meta
+
+        $subscriber = $this->makeReExecutionSubscriber($log);
+
+        $contact = $this->buildContact('+5511999999999', 1);
+        $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
+
+        $event->expects($this->never())->method('pass');
+        $event->expects($this->never())->method('passWithError');
+        $event->expects($this->once())->method('fail')
+            ->with($this->anything(), 'dialoghsm.campaign.error.webhook_failed');
+        $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
+
+        $subscriber->onCampaignTriggerAction($event);
+    }
+
+    /**
+     * Fronteira do 131026: um código vizinho/parecido (131027, inexistente
+     * na lista) NÃO deve disparar passWithError() — a comparação é estrita (in_array
+     * com $strict=true), então só o código exato 131026 é tratado como restrição Meta.
+     * Evita falso positivo por confusão com códigos próximos da mesma família 1310xx.
+     */
+    public function testReExecutionWithCodeAdjacentTo131026StillCallsFail(): void
+    {
+        $this->enableIntegration();
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
+
+        $log = new MessageLog();
+        $log->setStatus(MessageLog::STATUS_FAILED);
+        $log->setDateSent(new \DateTime());
+        $log->setHttpStatusCode(200);
+        $log->setWebhookErrorCode(131027); // código vizinho, não é 131026
+
+        $subscriber = $this->makeReExecutionSubscriber($log);
+
+        $contact = $this->buildContact('+5511999999999', 1);
+        $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
+
+        $event->expects($this->never())->method('pass');
+        $event->expects($this->never())->method('passWithError');
+        $event->expects($this->once())->method('fail')
+            ->with($this->anything(), 'dialoghsm.campaign.error.webhook_failed');
+        $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
+
+        $subscriber->onCampaignTriggerAction($event);
+    }
+
+    /**
+     * Fronteira do 131026: confirma que o código exato 131026, mesmo
+     * vindo com status 'dlq' (mensagens que esgotaram retry e foram para a DLQ),
+     * continua sendo tratado como restrição Meta, não como falha técnica — a DLQ aqui
+     * só significa "esgotou tentativas", a causa raiz continua sendo entrega recusada
+     * pela Meta, não bug do nosso lado.
+     */
+    public function testReExecutionWithMessageUndeliverableAndHttp200CallsPassWithError(): void
+    {
+        $this->enableIntegration();
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
+
+        $log = new MessageLog();
+        $log->setStatus(MessageLog::STATUS_DLQ);
+        $log->setDateSent(new \DateTime());
+        $log->setHttpStatusCode(200);
+        $log->setWebhookErrorCode(131026);
+
+        $subscriber = $this->makeReExecutionSubscriber($log);
+
+        $contact = $this->buildContact('+5511999999999', 1);
+        $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
+
+        $event->expects($this->never())->method('pass');
+        $event->expects($this->never())->method('fail');
+        $event->expects($this->once())->method('passWithError')
+            ->with($this->anything(), 'dialoghsm.campaign.error.meta_restricted');
         $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
 
         $subscriber->onCampaignTriggerAction($event);

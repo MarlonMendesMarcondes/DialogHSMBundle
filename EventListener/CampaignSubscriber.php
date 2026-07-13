@@ -37,6 +37,28 @@ class CampaignSubscriber implements EventSubscriberInterface
 {
     private const WEBHOOK_TIMEOUT_SECONDS = 120;
 
+    /**
+     * Códigos de erro da Meta que indicam restrição de qualidade/entrega ou opt-out do
+     * contato, não uma falha técnica do nosso lado. Não devem contar para o limite de
+     * 10% de falha que o Mautic core usa para desativar a campanha automaticamente
+     * (Mautic\CampaignBundle\EventListener\CampaignEventSubscriber::onEventFailed).
+     *
+     * IMPORTANTE: esses códigos chegam via webhook (MessageLog::getWebhookErrorCode()),
+     * não via HTTP status do envio síncrono. A 360dialog aceita a mensagem no envio
+     * (http_status_code=200) e só depois a Meta recusa a entrega, reportada
+     * assincronamente pelo webhook. Por isso a checagem abaixo usa getWebhookErrorCode()
+     * e nunca getHttpStatusCode() — falhas técnicas reais (payload malformado, permissão,
+     * template inexistente) têm http_status_code 400/403/404/401 com webhook_error_code
+     * nulo (falham no próprio envio, nunca chegam a gerar callback de webhook), então
+     * nunca colidem com estes códigos.
+     */
+    private const META_RESTRICTION_CODES = [
+        131049, // Not delivered to maintain healthy ecosystem engagement
+        130472, // User's number is part of an experiment
+        131050, // Recipient chose to stop receiving marketing messages (opt-out)
+        131026, // Message undeliverable (recipient phone off/unreachable/not on WhatsApp/blocked number)
+    ];
+
     public function __construct(
         private IntegrationsHelper $integrationsHelper,
         private MessageBusInterface $bus,
@@ -148,12 +170,26 @@ class CampaignSubscriber implements EventSubscriberInterface
                 ],
             ]
         );
+
+        $event->addDecision(
+            'dialoghsm.decision_button_clicked',
+            [
+                'label'                  => 'dialoghsm.campaign.decision_button_clicked',
+                'description'            => 'dialoghsm.campaign.decision_button_clicked.tooltip',
+                'eventName'              => DialogHSMEvents::ON_CAMPAIGN_TRIGGER_DECISION,
+                'channel'                => 'whatsapp',
+                'connectionRestrictions' => [
+                    'source' => ['action' => $sendActionTypes],
+                ],
+            ]
+        );
     }
 
     private const DECISION_KEYS = [
         'dialoghsm.decision_delivered',
         'dialoghsm.decision_read',
         'dialoghsm.decision_replied',
+        'dialoghsm.decision_button_clicked',
     ];
 
     public function onCampaignTriggerDecision(CampaignExecutionEvent $event): CampaignExecutionEvent
@@ -471,6 +507,12 @@ class CampaignSubscriber implements EventSubscriberInterface
         }
 
         if (MessageLog::STATUS_FAILED === $status || MessageLog::STATUS_DLQ === $status) {
+            if (in_array($log->getWebhookErrorCode(), self::META_RESTRICTION_CODES, true)) {
+                $event->passWithError($campaignLog, 'dialoghsm.campaign.error.meta_restricted');
+
+                return;
+            }
+
             $event->fail($campaignLog, 'dialoghsm.campaign.error.webhook_failed');
 
             return;
@@ -678,10 +720,39 @@ class CampaignSubscriber implements EventSubscriberInterface
      *   "+55 44 999067833"     → "+5544999067833"
      *   "+55 (11) 9.8765-4321" → "+5511987654321"
      *   "+5511abc9999"         → "+5511abc9999"   (mantido, será rejeitado pelo E.164)
+     *
+     * Números brasileiros sem código de país são completados automaticamente com "+55"
+     * — cadastro/import de lead raramente inclui o "+55", e esse plugin serve só IES
+     * brasileiras. Só se aplica a strings 100% numéricas (sem "+", sem letra), com
+     * quantidade de dígitos plausível para DDD+número (10-11) ou 55+DDD+número (12-13):
+     *   "44988291870"    (11 dígitos, sem código de país) → "+5544988291870"
+     *   "4433221100"     (10 dígitos, fixo/celular antigo) → "+554433221100"
+     *   "5544988291870"  (13 dígitos, "55" sem o "+")       → "+5544988291870"
+     * Números fora desses tamanhos (ou com "+"/letras) passam intocados — a validação
+     * E.164 em isValidE164() decide se rejeita.
+     *
+     * TODO(2026-07-09): assume Brasil-only de propósito (qualquer 10-11 dígitos é tratado
+     * como BR, sem validar DDD real). Revisar antes de atender clientes fora do Brasil —
+     * precisa virar configurável (código de país por WhatsAppNumber/integração, ou
+     * libphonenumber).
      */
     private function normalizePhone(string $phone): string
     {
-        return preg_replace('/[ \-().]/u', '', trim($phone)) ?? $phone;
+        $cleaned = preg_replace('/[ \-().]/u', '', trim($phone)) ?? $phone;
+
+        if ('' === $cleaned || str_starts_with($cleaned, '+') || !ctype_digit($cleaned)) {
+            return $cleaned;
+        }
+
+        if (preg_match('/^55\d{10,11}$/', $cleaned)) {
+            return '+'.$cleaned;
+        }
+
+        if (preg_match('/^\d{10,11}$/', $cleaned)) {
+            return '+55'.$cleaned;
+        }
+
+        return $cleaned;
     }
 
     /**

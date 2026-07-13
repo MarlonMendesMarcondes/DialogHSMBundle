@@ -117,13 +117,13 @@ class CampaignSubscriberTest extends TestCase
         $this->assertArrayHasKey('label', $opts);
     }
 
-    public function testOnCampaignBuildRegistersDeliveredReadAndRepliedDecisions(): void
+    public function testOnCampaignBuildRegistersDeliveredReadRepliedAndButtonClickedDecisions(): void
     {
         $registeredDecisions = [];
 
         $builderEvent = $this->createMock(CampaignBuilderEvent::class);
         $builderEvent
-            ->expects($this->exactly(3))
+            ->expects($this->exactly(4))
             ->method('addDecision')
             ->willReturnCallback(function (string $key, array $options) use (&$registeredDecisions): void {
                 $registeredDecisions[$key] = $options;
@@ -134,6 +134,7 @@ class CampaignSubscriberTest extends TestCase
         $this->assertArrayHasKey('dialoghsm.decision_delivered', $registeredDecisions);
         $this->assertArrayHasKey('dialoghsm.decision_read', $registeredDecisions);
         $this->assertArrayHasKey('dialoghsm.decision_replied', $registeredDecisions);
+        $this->assertArrayHasKey('dialoghsm.decision_button_clicked', $registeredDecisions);
 
         foreach ($registeredDecisions as $key => $options) {
             $this->assertSame(

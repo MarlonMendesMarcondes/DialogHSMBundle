@@ -38,6 +38,8 @@ class MessageLog
     private ?\DateTimeInterface $dateRead = null;
     private ?\DateTimeInterface $dateReplied = null;
     private ?int $whatsappMessageId = null;
+    private ?string $buttonPayload = null;
+    private ?\DateTimeInterface $dateButtonClicked = null;
 
     /**
      * @param ClassMetadata<self> $metadata
@@ -154,6 +156,19 @@ class MessageLog
         $builder
             ->createField('whatsappMessageId', Types::INTEGER)
             ->columnName('whatsapp_message_id')
+            ->nullable()
+            ->build();
+
+        $builder
+            ->createField('buttonPayload', Types::STRING)
+            ->columnName('button_payload')
+            ->length(255)
+            ->nullable()
+            ->build();
+
+        $builder
+            ->createField('dateButtonClicked', Types::DATETIME_MUTABLE)
+            ->columnName('date_button_clicked')
             ->nullable()
             ->build();
     }
@@ -358,6 +373,30 @@ class MessageLog
     public function getWhatsappMessageId(): ?int
     {
         return $this->whatsappMessageId;
+    }
+
+    public function getButtonPayload(): ?string
+    {
+        return $this->buttonPayload;
+    }
+
+    public function setButtonPayload(?string $buttonPayload): self
+    {
+        $this->buttonPayload = $buttonPayload;
+
+        return $this;
+    }
+
+    public function getDateButtonClicked(): ?\DateTimeInterface
+    {
+        return $this->dateButtonClicked;
+    }
+
+    public function setDateButtonClicked(\DateTimeInterface $dateButtonClicked): self
+    {
+        $this->dateButtonClicked = $dateButtonClicked;
+
+        return $this;
     }
 
     public function setWhatsappMessageId(?int $whatsappMessageId): self

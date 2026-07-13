@@ -9,6 +9,7 @@ use Mautic\LeadBundle\Entity\LeadRepository;
 use Mautic\LeadBundle\Model\LeadModel;
 use Mautic\LeadBundle\Tracker\ContactTracker;
 use Mautic\PointBundle\Model\PointModel;
+use Mautic\WebhookBundle\Model\WebhookModel;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
@@ -36,6 +37,7 @@ class WebhookProcessorTest extends TestCase
     private RealTimeExecutioner&MockObject $realTimeExecutioner;
     private ContactTracker&MockObject $contactTracker;
     private LoggerInterface&MockObject $logger;
+    private WebhookModel&MockObject $webhookModel;
     private WebhookProcessor $processor;
 
     protected function setUp(): void
@@ -55,6 +57,7 @@ class WebhookProcessorTest extends TestCase
         $this->realTimeExecutioner = $this->createMock(RealTimeExecutioner::class);
         $this->contactTracker      = $this->createMock(ContactTracker::class);
         $this->logger              = $this->createMock(LoggerInterface::class);
+        $this->webhookModel        = $this->createMock(WebhookModel::class);
         $this->processor           = new WebhookProcessor(
             $this->numberRepository,
             $this->logRepository,
@@ -67,6 +70,7 @@ class WebhookProcessorTest extends TestCase
             $this->realTimeExecutioner,
             $this->contactTracker,
             $this->logger,
+            $this->webhookModel,
         );
     }
 
@@ -1351,7 +1355,7 @@ class WebhookProcessorTest extends TestCase
         ];
     }
 
-    private function makeInboundPayloadWithContext(string $from, string $contextWamid): array
+    private function makeInboundPayloadWithContext(string $from, string $contextWamid, string $type = 'text'): array
     {
         return [
             'entry' => [[
@@ -1360,7 +1364,7 @@ class WebhookProcessorTest extends TestCase
                         'messages' => [[
                             'from'      => $from,
                             'id'        => 'wamid.inbound.reply',
-                            'type'      => 'text',
+                            'type'      => $type,
                             'timestamp' => '1700000001',
                             'context'   => ['id' => $contextWamid],
                         ]],
@@ -1518,7 +1522,10 @@ class WebhookProcessorTest extends TestCase
         $this->processor->process('+5511999999999', $this->makeInboundPayload('5511888888888'));
 
         $this->assertArrayHasKey('dialoghsm_last_reply', $capturedFields);
-        $this->assertInstanceOf(\DateTimeInterface::class, $capturedFields['dialoghsm_last_reply']);
+        // LeadModel::setFieldValues() roda os valores por rotinas de limpeza (str_replace)
+        // que esperam string, não objeto DateTime — precisa ser formatado antes de passar.
+        $this->assertIsString($capturedFields['dialoghsm_last_reply']);
+        $this->assertNotFalse(strtotime($capturedFields['dialoghsm_last_reply']));
     }
 
     public function testInboundSetsDateRepliedOnMessageLog(): void
@@ -1555,9 +1562,34 @@ class WebhookProcessorTest extends TestCase
 
         $this->eventLogWriter->expects($this->once())
             ->method('writeReply')
-            ->with($lead, '5511888888888', $this->isInstanceOf(\DateTimeInterface::class), $this->isInstanceOf(MessageLog::class));
+            ->with($lead, '5511888888888', $this->isInstanceOf(\DateTimeInterface::class), $this->isInstanceOf(MessageLog::class), 'text');
 
         $this->processor->process('+5511999999999', $this->makeInboundPayload('5511888888888'));
+    }
+
+    /**
+     * Happy path: type=button (mesmo em Scenario B) propaga reply_type='button' até o
+     * writeReply — necessário para distinguir "respondeu por texto" de "respondeu clicando
+     * no botão" direto no lead_event_log, sem precisar cruzar com ACTION_BUTTON_CLICKED.
+     */
+    public function testInboundButtonTypeWritesReplyWithButtonReplyType(): void
+    {
+        $lead = $this->createMock(Lead::class);
+        $lead->method('getId')->willReturn(77);
+        $repo = $this->makeLeadRepo([$lead]);
+        $log  = $this->makeHsmLog(77);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->em->method('getRepository')->willReturn($repo);
+        $this->em->method('persist');
+        $this->em->method('flush');
+        $this->logRepository->method('findMostRecentForLead')->willReturn($log);
+
+        $this->eventLogWriter->expects($this->once())
+            ->method('writeReply')
+            ->with($lead, '5511888888888', $this->isInstanceOf(\DateTimeInterface::class), $this->isInstanceOf(MessageLog::class), 'button');
+
+        $this->processor->process('+5511999999999', $this->makeInboundPayload('5511888888888', 'button'));
     }
 
     public function testInboundWithNoHsmLogDoesNotWriteReply(): void
@@ -1610,6 +1642,7 @@ class WebhookProcessorTest extends TestCase
             $this->realTimeExecutioner,
             $this->contactTracker,
             $this->logger,
+            $this->webhookModel,
             '',
             $redis,
         );
@@ -1780,6 +1813,7 @@ class WebhookProcessorTest extends TestCase
             $this->realTimeExecutioner,
             $this->contactTracker,
             $this->logger,
+            $this->webhookModel,
             '',
             $redis,
         ))->process('+5511999999999', $this->makeInboundPayload('5511888888888'));
@@ -1851,6 +1885,33 @@ class WebhookProcessorTest extends TestCase
         $this->processor->process(
             '+5511999999999',
             $this->makeInboundPayloadWithContext('5511888888888', 'wamid.original.hsm')
+        );
+    }
+
+    /**
+     * Happy path: clique em quick-reply button sempre chega com context.id (Scenario A) —
+     * reply_type='button' deve propagar corretamente também por esse caminho, não só
+     * pelo fallback de texto livre (Scenario B).
+     */
+    public function testInboundContextIdWithButtonTypeWritesReplyWithButtonReplyType(): void
+    {
+        $lead   = $this->createMock(Lead::class);
+        $lead->method('getId')->willReturn(77);
+        $hsmLog = $this->makeHsmLog(77);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->leadModel->method('getEntity')->with(77)->willReturn($lead);
+        $this->logRepository->method('findByWamid')->with('wamid.original.hsm')->willReturn($hsmLog);
+        $this->em->method('persist');
+        $this->em->method('flush');
+
+        $this->eventLogWriter->expects($this->once())
+            ->method('writeReply')
+            ->with($lead, '5511888888888', $this->isInstanceOf(\DateTimeInterface::class), $hsmLog, 'button');
+
+        $this->processor->process(
+            '+5511999999999',
+            $this->makeInboundPayloadWithContext('5511888888888', 'wamid.original.hsm', 'button')
         );
     }
 
@@ -2148,6 +2209,82 @@ class WebhookProcessorTest extends TestCase
 
         // 360dialog envia 12 dígitos; Mautic tem 13 dígitos no banco
         $this->processor->process('+5511999999999', $this->makeInboundPayload('554499067833'));
+    }
+
+    /**
+     * Scenario B fallback DB: lead.mobile foi cadastrado SEM o código de país
+     * (ex: "44988291870" em vez de "+5544988291870" — caso real reportado por uma IES).
+     * findLeadByMobile deve encontrar o lead mesmo assim, via o candidato "bare"
+     * (sem "55") que getBRPhoneCandidates agora gera — sem precisar reescrever
+     * o campo mobile do contato.
+     */
+    public function testScenarioBDBFallbackFindsLeadWithMobileStoredWithoutCountryCode(): void
+    {
+        $lead = $this->createMock(Lead::class);
+        $lead->method('getId')->willReturn(89);
+        $log  = $this->makeHsmLog(89);
+
+        // Repositório só encontra o lead pelo formato "bare" (sem "55"), 11 dígitos
+        $repo = $this->getMockBuilder(LeadRepository::class)
+            ->disableOriginalConstructor()
+            ->onlyMethods(['getLeadsByFieldValue'])
+            ->getMock();
+
+        $repo->method('getLeadsByFieldValue')
+            ->willReturnCallback(function (string $field, string $phone) use ($lead): array {
+                return '44988291870' === $phone ? [$lead] : [];
+            });
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->em->method('getRepository')->willReturn($repo);
+        $this->em->method('persist');
+        $this->em->method('flush');
+        $this->logRepository->method('findMostRecentForLead')
+            ->with(89, $this->isInstanceOf(\DateTimeInterface::class))
+            ->willReturn($log);
+
+        $this->pointModel->expects($this->once())
+            ->method('triggerAction')
+            ->with('dialoghsm.message_replied', null, null, $lead, true);
+
+        // 360dialog sempre envia o "from" com código de país (13 dígitos)
+        $this->processor->process('+5511999999999', $this->makeInboundPayload('5544988291870'));
+    }
+
+    /**
+     * Mesmo cenário, mas o número do lead foi salvo sem "55" E sem o 9º dígito
+     * (ex: "4433221100", formato antigo de fixo/celular).
+     */
+    public function testScenarioBDBFallbackFindsLeadWithMobileStoredWithoutCountryCodeAndWithout9thDigit(): void
+    {
+        $lead = $this->createMock(Lead::class);
+        $lead->method('getId')->willReturn(90);
+        $log  = $this->makeHsmLog(90);
+
+        $repo = $this->getMockBuilder(LeadRepository::class)
+            ->disableOriginalConstructor()
+            ->onlyMethods(['getLeadsByFieldValue'])
+            ->getMock();
+
+        $repo->method('getLeadsByFieldValue')
+            ->willReturnCallback(function (string $field, string $phone) use ($lead): array {
+                return '4433221100' === $phone ? [$lead] : [];
+            });
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->em->method('getRepository')->willReturn($repo);
+        $this->em->method('persist');
+        $this->em->method('flush');
+        $this->logRepository->method('findMostRecentForLead')
+            ->with(90, $this->isInstanceOf(\DateTimeInterface::class))
+            ->willReturn($log);
+
+        $this->pointModel->expects($this->once())
+            ->method('triggerAction')
+            ->with('dialoghsm.message_replied', null, null, $lead, true);
+
+        // 360dialog envia com o 9º dígito e código de país (13 dígitos)
+        $this->processor->process('+5511999999999', $this->makeInboundPayload('5544933221100'));
     }
 
     /**

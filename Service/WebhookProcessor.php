@@ -11,6 +11,8 @@ use Mautic\LeadBundle\Entity\LeadRepository;
 use Mautic\LeadBundle\Model\LeadModel;
 use Mautic\LeadBundle\Tracker\ContactTracker;
 use Mautic\PointBundle\Model\PointModel;
+use Mautic\WebhookBundle\Model\WebhookModel;
+use MauticPlugin\DialogHSMBundle\DialogHSMEvents;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumberRepository;
@@ -37,6 +39,7 @@ class WebhookProcessor
         private readonly RealTimeExecutioner $realTimeExecutioner,
         private readonly ContactTracker $contactTracker,
         private readonly LoggerInterface $logger,
+        private readonly WebhookModel $webhookModel,
         private readonly string $redisDsn = '',
         private readonly ?\Redis $redisOverride = null,
     ) {}
@@ -146,6 +149,17 @@ class WebhookProcessor
 
         if (MessageLog::STATUS_FAILED === $status) {
             $this->dispatcher->dispatch(new WebhookMessageFailedEvent($log));
+        }
+
+        $webhookEventKey = match ($status) {
+            MessageLog::STATUS_SENT      => DialogHSMEvents::WEBHOOK_MESSAGE_SENT,
+            MessageLog::STATUS_DELIVERED => DialogHSMEvents::WEBHOOK_MESSAGE_DELIVERED,
+            MessageLog::STATUS_READ      => DialogHSMEvents::WEBHOOK_MESSAGE_READ,
+            MessageLog::STATUS_FAILED    => DialogHSMEvents::WEBHOOK_MESSAGE_FAILED,
+            default                      => null,
+        };
+        if (null !== $webhookEventKey) {
+            $this->queueMessageWebhook($webhookEventKey, $log);
         }
     }
 
@@ -311,9 +325,16 @@ class WebhookProcessor
 
             $persisted = $contextId !== null
                 // Scenario A: resposta direta ao HSM — correlação precisa via wamid
-                ? $this->processInboundDirect($from, $contextId)
+                ? $this->processInboundDirect($from, $contextId, $type)
                 // Scenario B: texto livre — correlação por telefone + janela de 24h
-                : $this->processInboundFreeText($from, $receivedAt);
+                : $this->processInboundFreeText($from, $receivedAt, $type);
+
+            // Clique em quick-reply button: distinto da resposta genérica acima.
+            // A Meta contabiliza clique de botão separadamente de "respondeu" —
+            // todo clique gera uma resposta, mas nem toda resposta é um clique.
+            if ('button' === $type && null !== $contextId) {
+                $this->processButtonClick($contextId, $messageData, $receivedAt);
+            }
 
             if ($persisted && $inboundWamid) {
                 $redis = $this->getRedis();
@@ -336,7 +357,7 @@ class WebhookProcessor
      * Scenario A: context.id presente — localiza o MessageLog exato pelo wamid do HSM original.
      * Cache key usa o contextId para não bloquear respostas a outros HSMs do mesmo contato.
      */
-    private function processInboundDirect(string $from, string $contextId): bool
+    private function processInboundDirect(string $from, string $contextId, string $type = 'text'): bool
     {
         $redis    = $this->getRedis();
         $cacheKey = self::REPLIED_CACHE_PREFIX . $contextId;
@@ -360,7 +381,7 @@ class WebhookProcessor
         }
 
         $now = new \DateTime();
-        $this->persistReply($log, $lead, $from, $now);
+        $this->persistReply($log, $lead, $from, $now, $type);
 
         if ($redis !== null) {
             $redis->setEx($cacheKey, self::REPLIED_CACHE_TTL, '1');
@@ -382,7 +403,7 @@ class WebhookProcessor
      * chega antes do setLastSent do próximo HSM (race entre worker e webhook).
      * A idempotência é garantida por date_replied IS NULL na query e pelo check explícito.
      */
-    private function processInboundFreeText(string $from, \DateTimeInterface $receivedAt): bool
+    private function processInboundFreeText(string $from, \DateTimeInterface $receivedAt, string $type = 'text'): bool
     {
         // Fast path: Redis tem o wamid do último HSM → lookup indexado, sem query complexa.
         // Tenta também com o número normalizado (BR: 12→13 dígitos, adiciona o 9º dígito).
@@ -439,7 +460,7 @@ class WebhookProcessor
                     'cachedWamid' => $cachedWamid,
                     'leadId'      => $lead->getId(),
                 ]);
-                $this->persistReply($log, $lead, $from, new \DateTime());
+                $this->persistReply($log, $lead, $from, new \DateTime(), $type);
                 $this->contactCache->markReplied($from);
 
                 return true;
@@ -486,7 +507,7 @@ class WebhookProcessor
             'wamid'  => $log->getWamid(),
             'leadId' => $lead->getId(),
         ]);
-        $this->persistReply($log, $lead, $from, new \DateTime());
+        $this->persistReply($log, $lead, $from, new \DateTime(), $type);
         foreach ($this->getBRPhoneCandidates($from) as $candidate) {
             $this->contactCache->markReplied($candidate);
         }
@@ -494,7 +515,42 @@ class WebhookProcessor
         return true;
     }
 
-    private function persistReply(MessageLog $log, Lead $lead, string $from, \DateTime $now): void
+    /**
+     * @param array<string, mixed> $messageData
+     */
+    private function processButtonClick(string $contextId, array $messageData, \DateTimeInterface $receivedAt): void
+    {
+        $buttonPayload = $messageData['button']['payload'] ?? $messageData['button']['text'] ?? null;
+        if (null === $buttonPayload || '' === $buttonPayload) {
+            return;
+        }
+
+        $log = $this->logRepository->findByWamid($contextId);
+        if (null === $log || null === $log->getLeadId() || null !== $log->getDateButtonClicked()) {
+            return; // não encontrado, sem lead, ou já registrado (idempotência)
+        }
+
+        $buttonPayload = mb_substr($buttonPayload, 0, 255);
+
+        $log->setButtonPayload($buttonPayload);
+        $log->setDateButtonClicked(\DateTime::createFromInterface($receivedAt));
+        $this->em->persist($log);
+        $this->em->flush();
+
+        try {
+            $this->eventLogWriter->writeButtonClick($log, $buttonPayload, $receivedAt);
+        } catch (\Throwable $e) {
+            $this->logger->error('DialogHSM: falha ao registrar clique de botão', [
+                'logId' => $log->getId(),
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        $this->triggerCampaignDecision($log, 'dialoghsm.decision_button_clicked');
+        $this->queueMessageWebhook(DialogHSMEvents::WEBHOOK_MESSAGE_BUTTON_CLICKED, $log);
+    }
+
+    private function persistReply(MessageLog $log, Lead $lead, string $from, \DateTime $now, string $type = 'text'): void
     {
         $log->setDateReplied($now);
         $this->em->persist($log);
@@ -505,18 +561,102 @@ class WebhookProcessor
         // antes do retorno), o Redis ficaria com replied=0 mesmo com date_replied já no MySQL.
         try {
             $this->pointModel->triggerAction('dialoghsm.message_replied', null, null, $lead, true);
-            $this->eventLogWriter->writeReply($lead, $from, $now, $log);
-            $this->leadModel->setFieldValues($lead, ['dialoghsm_last_reply' => $now]);
+            $this->eventLogWriter->writeReply($lead, $from, $now, $log, $type);
+            $this->leadModel->setFieldValues($lead, ['dialoghsm_last_reply' => $now->format('Y-m-d H:i:s')]);
             $this->leadModel->saveEntity($lead);
         } catch (\Throwable $e) {
-            $this->logger->error('DialogHSM: persistReply side-effects failed after flush', [
-                'from'    => $from,
-                'logId'   => $log->getId(),
-                'message' => $e->getMessage(),
-            ]);
+            // O próprio logger pode falhar (ex.: permissão de arquivo no servidor) — nunca deixar
+            // isso escapar e abortar o restante do método (campaign decision + webhook nativo).
+            try {
+                $this->logger->error('DialogHSM: persistReply side-effects failed after flush', [
+                    'from'    => $from,
+                    'logId'   => $log->getId(),
+                    'message' => $e->getMessage(),
+                ]);
+            } catch (\Throwable) {
+                // sem log disponível — segue o fluxo mesmo assim
+            }
         }
 
         $this->triggerCampaignDecision($log, 'dialoghsm.decision_replied');
+        $this->queueMessageWebhook(DialogHSMEvents::WEBHOOK_MESSAGE_REPLIED, $log);
+    }
+
+    /**
+     * Enfileira o payload de webhook nativo do Mautic (WebhookBundle) para o tipo de
+     * evento informado. Construído manualmente a partir dos getters de MessageLog em vez
+     * de passar a entidade direto — MessageLog não tem anotações JMS/API de serialização,
+     * então repassá-la ao serializer do WebhookModel resultaria em payload vazio ou quebrado.
+     */
+    private function queueMessageWebhook(string $eventKey, MessageLog $log): void
+    {
+        // Enriquecimento com email/custom fields é best-effort: uma falha aqui (lead sem
+        // custom fields carregados, etc.) não pode impedir o disparo dos campos básicos.
+        try {
+            [$email, $customFields] = $this->getLeadEmailAndCustomFields($log->getLeadId());
+        } catch (\Throwable $e) {
+            $email        = null;
+            $customFields = [];
+            $this->logger->warning('DialogHSM: falha ao enriquecer webhook com dados do lead', [
+                'leadId' => $log->getLeadId(),
+                'error'  => $e->getMessage(),
+            ]);
+        }
+
+        try {
+            $this->webhookModel->queueWebhooksByType($eventKey, array_filter([
+                'leadId'            => $log->getLeadId(),
+                'email'             => $email,
+                'customFields'      => $customFields,
+                'campaignId'        => $log->getCampaignId(),
+                'phoneNumber'       => $log->getPhoneNumber(),
+                'senderName'        => $log->getSenderName(),
+                'templateName'      => $log->getTemplateName(),
+                'status'            => $log->getStatus(),
+                'buttonPayload'     => $log->getButtonPayload(),
+                'errorMessage'      => $log->getErrorMessage(),
+                'webhookErrorCode'  => $log->getWebhookErrorCode(),
+                'dateSent'          => $this->formatUtc($log->getDateSent()),
+                'dateDelivered'     => $this->formatUtc($log->getDateDelivered()),
+                'dateRead'          => $this->formatUtc($log->getDateRead()),
+                'dateReplied'       => $this->formatUtc($log->getDateReplied()),
+                'dateButtonClicked' => $this->formatUtc($log->getDateButtonClicked()),
+            ], static fn ($v) => null !== $v && '' !== $v && [] !== $v));
+        } catch (\Throwable $e) {
+            $this->logger->error('DialogHSM: falha ao enfileirar webhook nativo', [
+                'eventKey' => $eventKey,
+                'logId'    => $log->getId(),
+                'error'    => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * @return array{0: ?string, 1: array<string, mixed>}
+     */
+    private function getLeadEmailAndCustomFields(?int $leadId): array
+    {
+        if (null === $leadId) {
+            return [null, []];
+        }
+
+        $lead = $this->leadModel->getEntity($leadId);
+        if (null === $lead) {
+            return [null, []];
+        }
+
+        $lead->setFields($this->leadModel->getRepository()->getFieldValues($leadId));
+
+        $customFields = $lead->getProfileFields();
+        unset($customFields['id']);
+
+        return [$lead->getEmail(), $customFields];
+    }
+
+    private function formatUtc(?\DateTimeInterface $dt): ?string
+    {
+        return null === $dt ? null :
+            \DateTime::createFromInterface($dt)->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d\TH:i:s\Z');
     }
 
     private function getRedis(): ?\Redis
@@ -574,9 +714,16 @@ class WebhookProcessor
     }
 
     /**
-     * Retorna variações do número para lidar com o 9º dígito brasileiro.
+     * Retorna variações do número para lidar com o 9º dígito brasileiro e com o
+     * campo `mobile` do lead tendo sido cadastrado sem o código de país.
      * A 360dialog envia números no formato antigo (12 dígitos: 55+DDD+8 dígitos),
-     * mas o Mautic pode ter gravado no formato novo (13 dígitos: 55+DDD+9+8 dígitos).
+     * mas o Mautic pode ter gravado no formato novo (13 dígitos: 55+DDD+9+8 dígitos)
+     * — ou até sem o "55" na frente (import/cadastro manual sem o +55).
+     *
+     * Não escreve nada no lead — só gera candidatos adicionais pra busca em
+     * `findLeadByMobile()` e nas chaves do cache Redis, de forma isolada.
+     *
+     * TODO(2026-07-09): assume Brasil-only de propósito (só ativa quando o número já começa com "55"). Ver Roadmap "Generalizar normalização de telefone para além do Brasil" antes de atender clientes fora do Brasil.
      *
      * @return string[]
      */
@@ -585,18 +732,36 @@ class WebhookProcessor
         $clean      = ltrim($phone, '+');
         $candidates = [$clean, '+' . $clean];
 
+        if (!str_starts_with($clean, '55')) {
+            return array_unique($candidates);
+        }
+
         // BR 12→13: adiciona o 9 após o DDD (ex: 554499067833 → 5544999067833)
-        if (12 === strlen($clean) && str_starts_with($clean, '55')) {
+        if (12 === strlen($clean)) {
             $with9 = '55' . substr($clean, 2, 2) . '9' . substr($clean, 4);
             $candidates[] = $with9;
             $candidates[] = '+' . $with9;
         }
 
         // BR 13→12: remove o 9 após o DDD (ex: 5544999067833 → 554499067833)
-        if (13 === strlen($clean) && str_starts_with($clean, '55')) {
+        if (13 === strlen($clean)) {
             $without9 = '55' . substr($clean, 2, 2) . substr($clean, 5);
             $candidates[] = $without9;
             $candidates[] = '+' . $without9;
+        }
+
+        // Sem código de país — cobre lead.mobile salvo como "44988291870" em vez de
+        // "+5544988291870". Gera as duas variações do 9º dígito também, pois não
+        // sabemos em qual formato o contato foi cadastrado.
+        if (in_array(strlen($clean), [12, 13], true)) {
+            $bare = substr($clean, 2);
+            $candidates[] = $bare;
+
+            if (11 === strlen($bare)) {
+                $candidates[] = substr($bare, 0, 2) . substr($bare, 3);
+            } elseif (10 === strlen($bare)) {
+                $candidates[] = substr($bare, 0, 2) . '9' . substr($bare, 2);
+            }
         }
 
         return array_unique($candidates);

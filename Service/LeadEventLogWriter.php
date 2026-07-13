@@ -25,8 +25,12 @@ class LeadEventLogWriter
         $this->eventLogRepository = $repo;
     }
 
-    public const ACTION_REPLIED     = 'replied';
-    public const ACTION_DISPATCHED  = 'dispatched';
+    public const ACTION_REPLIED        = 'replied';
+    public const ACTION_DISPATCHED     = 'dispatched';
+    public const ACTION_BUTTON_CLICKED = 'button_clicked';
+
+    public const REPLY_TYPE_TEXT   = 'text';
+    public const REPLY_TYPE_BUTTON = 'button';
 
     /**
      * Grava um evento em lead_event_log para o status informado.
@@ -66,7 +70,7 @@ class LeadEventLogWriter
      * Requer o MessageLog do disparo original — sem ele, o evento não é registrado.
      * Idempotente: não grava se já existe entry para este log_id + action replied.
      */
-    public function writeReply(Lead $lead, string $fromPhone, \DateTimeInterface $date, MessageLog $log): void
+    public function writeReply(Lead $lead, string $fromPhone, \DateTimeInterface $date, MessageLog $log, string $replyType = self::REPLY_TYPE_TEXT): void
     {
         $logId = (int) $log->getId();
         if ($logId === 0 || $this->exists($logId, self::ACTION_REPLIED)) {
@@ -96,6 +100,49 @@ class LeadEventLogWriter
                 'wamid'         => $log->getWamid(),
                 'date_sent'     => $fmt($log->getDateSent()),
                 'date_replied'  => $fmt($date),
+                // 'text' (direto) ou 'button' (clicou em quick-reply) — evita precisar
+                // cruzar com a entry separada de ACTION_BUTTON_CLICKED só para saber isso.
+                'reply_type'    => $replyType,
+            ], static fn ($v) => $v !== null && $v !== ''));
+
+        $this->eventLogRepository->saveEntity($entry);
+        $this->eventLogRepository->detachEntity($entry);
+    }
+
+    /**
+     * Grava um evento de clique em quick-reply button em lead_event_log.
+     * Distinto de ACTION_REPLIED: a Meta contabiliza clique de botão separadamente
+     * de resposta genérica em texto livre.
+     * Idempotente: não grava se já existe entry para este log_id + action button_clicked.
+     */
+    public function writeButtonClick(MessageLog $log, string $buttonPayload, \DateTimeInterface $date): void
+    {
+        $logId = (int) $log->getId();
+        if ($logId === 0 || $this->exists($logId, self::ACTION_BUTTON_CLICKED)) {
+            return;
+        }
+
+        $lead = $this->em->getReference(Lead::class, $log->getLeadId());
+
+        $fmt = static fn (?\DateTimeInterface $dt): ?string => $dt === null ? null :
+            \DateTime::createFromInterface($dt)->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+
+        $entry = new LeadEventLog();
+        $entry
+            ->setLead($lead)
+            ->setBundle(self::BUNDLE)
+            ->setObject(self::OBJECT)
+            ->setObjectId($logId)
+            ->setAction(self::ACTION_BUTTON_CLICKED)
+            ->setDateAdded($this->normalizeToUtc($date))
+            ->setProperties(array_filter([
+                'button_payload' => $buttonPayload,
+                'template_name'  => $log->getTemplateName(),
+                'sender_name'    => $log->getSenderName(),
+                'campaign_id'    => $log->getCampaignId(),
+                'wamid'          => $log->getWamid(),
+                'date_sent'      => $fmt($log->getDateSent()),
+                'date_clicked'   => $fmt($date),
             ], static fn ($v) => $v !== null && $v !== ''));
 
         $this->eventLogRepository->saveEntity($entry);
