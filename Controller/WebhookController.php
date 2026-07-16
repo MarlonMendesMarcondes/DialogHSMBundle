@@ -19,16 +19,22 @@ class WebhookController extends AbstractController
 
     public function processAction(Request $request, string $phoneNumber): JsonResponse
     {
+        $payload = json_decode($request->getContent(), true) ?? [];
+
         try {
-            $payload = json_decode($request->getContent(), true) ?? [];
-            $this->processor->process($phoneNumber, $payload);
+            $status = $this->processor->process($phoneNumber, $payload);
         } catch (\Throwable $e) {
+            // Falha transitória (DB, Doctrine, etc.): responder erro para que a Meta
+            // reentregue o webhook dentro da janela de retry de 7 dias, em vez de
+            // devolver 200 e descartar o evento silenciosamente.
             $this->logger->error('DialogHSM webhook error: '.$e->getMessage(), [
                 'phone'     => $phoneNumber,
                 'exception' => $e,
             ]);
+
+            return new JsonResponse(null, 503);
         }
 
-        return new JsonResponse(null, 200);
+        return new JsonResponse(null, $status);
     }
 }
