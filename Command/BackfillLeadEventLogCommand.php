@@ -157,7 +157,13 @@ class BackfillLeadEventLogCommand extends Command
     {
         $events = [];
 
-        if (!empty($row['date_sent'])) {
+        // "Enviada" só é real quando a API aceitou a mensagem (retornou wamid).
+        // Sem wamid, o envio foi rejeitado antes de sair (ex: HTTP 400) — não é um "sent" de verdade,
+        // mesmo com date_sent preenchido (date_sent marca a tentativa, não o sucesso).
+        $reallySent = !empty($row['wamid'])
+            && !in_array($row['status'], [MessageLog::STATUS_FAILED, MessageLog::STATUS_DLQ], true);
+
+        if ($reallySent && !empty($row['date_sent'])) {
             $events[] = [MessageLog::STATUS_SENT, $row['date_sent']];
         }
 
