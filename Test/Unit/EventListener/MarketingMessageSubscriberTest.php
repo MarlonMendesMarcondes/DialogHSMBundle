@@ -2,7 +2,12 @@
 
 declare(strict_types=1);
 
+use Doctrine\Common\Collections\ArrayCollection;
 use Doctrine\ORM\EntityManagerInterface;
+use Mautic\CampaignBundle\Entity\Campaign;
+use Mautic\CampaignBundle\Entity\Event as CampaignEvent;
+use Mautic\CampaignBundle\Entity\LeadEventLog;
+use Mautic\CampaignBundle\Event\PendingEvent;
 use Mautic\ChannelBundle\Event\MessageQueueBatchProcessEvent;
 use Mautic\ChannelBundle\Entity\MessageQueue;
 use Mautic\LeadBundle\Entity\Lead;
@@ -96,6 +101,29 @@ class MarketingMessageSubscriberTest extends TestCase
     private function makeBatchEvent(int $messageId, array $queuedMessages): MessageQueueBatchProcessEvent
     {
         return new MessageQueueBatchProcessEvent($queuedMessages, 'whatsapp', $messageId);
+    }
+
+    private function buildPendingEvent(int $messageId, array $contacts = []): PendingEvent&MockObject
+    {
+        $mockCampaign = $this->createMock(Campaign::class);
+        $mockCampaign->method('getId')->willReturn(10);
+
+        $mockCampaignEvent = $this->createMock(CampaignEvent::class);
+        $mockCampaignEvent->method('getProperties')->willReturn(['whatsAppMessage' => $messageId]);
+        $mockCampaignEvent->method('getId')->willReturn(20);
+        $mockCampaignEvent->method('getCampaign')->willReturn($mockCampaign);
+
+        $mockLog     = $this->createMock(LeadEventLog::class);
+        $mockPending = $this->createMock(ArrayCollection::class);
+        $mockPending->method('get')->willReturn($mockLog);
+
+        $mockPendingEvent = $this->createMock(PendingEvent::class);
+        $mockPendingEvent->method('checkContext')->with('dialoghsm.send_whatsapp_message')->willReturn(true);
+        $mockPendingEvent->method('getEvent')->willReturn($mockCampaignEvent);
+        $mockPendingEvent->method('getContacts')->willReturn($contacts);
+        $mockPendingEvent->method('getPending')->willReturn($mockPending);
+
+        return $mockPendingEvent;
     }
 
     private function captureDispatchedPayload(array $payloadData, array $profileFields = []): array
@@ -524,5 +552,66 @@ class MarketingMessageSubscriberTest extends TestCase
 
         $event = $this->makeBatchEvent(1, [$qm]);
         $this->makeSubscriber()->onProcessMessageQueueBatch($event);
+    }
+
+    // -------------------------------------------------------------------------
+    // onMarketingMessageSend — propagação para lead_event_log
+    // -------------------------------------------------------------------------
+
+    public function testOnMarketingMessageSendWritesDispatchedEventAndPassesOnSuccess(): void
+    {
+        $this->mockModel->method('getEntity')->willReturn($this->makeWhatsAppMessage([]));
+
+        $lead = $this->makeLead();
+
+        $this->mockEm->method('persist');
+        $this->mockEm->method('flush');
+        $this->mockEm->method('clear');
+
+        $this->mockBus->method('dispatch')->willReturn(new Envelope(new \stdClass()));
+
+        $this->mockEventLogWriter
+            ->expects($this->once())
+            ->method('write')
+            ->with(
+                $this->anything(),
+                LeadEventLogWriter::ACTION_DISPATCHED,
+                $this->isInstanceOf(\DateTime::class)
+            );
+
+        $pendingEvent = $this->buildPendingEvent(1, [100 => $lead]);
+        $pendingEvent->expects($this->once())->method('pass');
+        $pendingEvent->expects($this->never())->method('fail');
+
+        $this->makeSubscriber()->onMarketingMessageSend($pendingEvent);
+    }
+
+    public function testOnMarketingMessageSendWritesFailedEventAndFailsOnDispatchFailure(): void
+    {
+        $this->mockModel->method('getEntity')->willReturn($this->makeWhatsAppMessage([]));
+
+        $lead = $this->makeLead();
+
+        $this->mockEm->method('persist');
+        $this->mockEm->method('flush');
+        $this->mockEm->method('clear');
+
+        $this->mockBus->method('dispatch')->willThrowException(new \RuntimeException('bus failure'));
+        $this->mockLogger->method('error');
+
+        $this->mockEventLogWriter
+            ->expects($this->once())
+            ->method('write')
+            ->with(
+                $this->anything(),
+                MessageLog::STATUS_FAILED,
+                $this->isInstanceOf(\DateTime::class)
+            );
+
+        $pendingEvent = $this->buildPendingEvent(1, [100 => $lead]);
+        $pendingEvent->expects($this->never())->method('pass');
+        $pendingEvent->expects($this->once())->method('fail');
+
+        $this->makeSubscriber()->onMarketingMessageSend($pendingEvent);
     }
 }
