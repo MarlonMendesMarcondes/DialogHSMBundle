@@ -6,6 +6,7 @@ use Doctrine\ORM\EntityManagerInterface;
 use Mautic\ChannelBundle\Event\MessageQueueBatchProcessEvent;
 use Mautic\ChannelBundle\Entity\MessageQueue;
 use Mautic\LeadBundle\Entity\Lead;
+use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppMessage;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
 use MauticPlugin\DialogHSMBundle\EventListener\MarketingMessageSubscriber;
@@ -497,7 +498,7 @@ class MarketingMessageSubscriberTest extends TestCase
         $this->makeSubscriber()->onProcessMessageQueueBatch($event);
     }
 
-    public function testDoesNotWriteDispatchedEventOnDispatchFailure(): void
+    public function testWritesFailedEventOnDispatchFailure(): void
     {
         $this->mockModel->method('getEntity')->willReturn($this->makeWhatsAppMessage([]));
 
@@ -513,7 +514,13 @@ class MarketingMessageSubscriberTest extends TestCase
         $this->mockBus->method('dispatch')->willThrowException(new \RuntimeException('bus failure'));
         $this->mockLogger->method('error');
 
-        $this->mockEventLogWriter->expects($this->never())->method('write');
+        $this->mockEventLogWriter->expects($this->once())
+            ->method('write')
+            ->with(
+                $this->anything(),
+                MessageLog::STATUS_FAILED,
+                $this->isInstanceOf(\DateTime::class)
+            );
 
         $event = $this->makeBatchEvent(1, [$qm]);
         $this->makeSubscriber()->onProcessMessageQueueBatch($event);

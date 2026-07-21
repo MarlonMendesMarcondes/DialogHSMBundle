@@ -15,6 +15,7 @@ use MauticPlugin\DialogHSMBundle\Exception\TransientApiException;
 use MauticPlugin\DialogHSMBundle\Integration\DialogHSMIntegration;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use MauticPlugin\DialogHSMBundle\Service\BulkRateLimiter;
+use MauticPlugin\DialogHSMBundle\Service\LeadEventLogWriter;
 use MauticPlugin\DialogHSMBundle\Service\RedisContactCache;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Messenger\Handler\MessageHandlerInterface;
@@ -39,6 +40,7 @@ class SendWhatsAppMessageHandler implements MessageHandlerInterface
         private IntegrationsHelper $integrationsHelper,
         private RedisContactCache $contactCache,
         private WhatsAppNumberRepository $whatsAppNumberRepository,
+        private LeadEventLogWriter $leadEventLogWriter,
     ) {
     }
 
@@ -207,6 +209,16 @@ class SendWhatsAppMessageHandler implements MessageHandlerInterface
 
         $this->entityManager->persist($log);
         $this->entityManager->flush();
+
+        try {
+            $this->leadEventLogWriter->write(
+                $log,
+                $result['success'] ? MessageLog::STATUS_SENT : MessageLog::STATUS_FAILED,
+                $log->getDateSent() ?? new \DateTime()
+            );
+        } catch (\Throwable) {
+            // falha silenciosa — não interrompe o registro do envio
+        }
 
         if (!$skipHousekeeping && $queueLogId === null) {
             $this->messageLogRepository->prune($this->getLogMaxRecords(), $this->getLogMaxDays());

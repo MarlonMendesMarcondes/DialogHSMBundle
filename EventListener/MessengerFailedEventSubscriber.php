@@ -9,6 +9,7 @@ use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppDirectBatchMessage;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
+use MauticPlugin\DialogHSMBundle\Service\LeadEventLogWriter;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\Messenger\Event\WorkerMessageFailedEvent;
@@ -19,6 +20,7 @@ class MessengerFailedEventSubscriber implements EventSubscriberInterface
         private EntityManagerInterface $entityManager,
         private LoggerInterface $logger,
         private MessageLogRepository $messageLogRepository,
+        private LeadEventLogWriter $leadEventLogWriter,
     ) {
     }
 
@@ -73,6 +75,12 @@ class MessengerFailedEventSubscriber implements EventSubscriberInterface
 
             $this->entityManager->persist($log);
             $this->entityManager->flush();
+
+            try {
+                $this->leadEventLogWriter->write($log, MessageLog::STATUS_DLQ, $log->getDateSent() ?? new \DateTime());
+            } catch (\Throwable) {
+                // falha silenciosa — não interrompe o registro DLQ
+            }
         } catch (\Throwable $e) {
             $this->logger->error('DialogHSM: falha ao registrar mensagem DLQ no log', [
                 'lead_id' => $message->leadId,

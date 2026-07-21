@@ -8,6 +8,7 @@ use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\EventListener\MessengerFailedEventSubscriber;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppDirectBatchMessage;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
+use MauticPlugin\DialogHSMBundle\Service\LeadEventLogWriter;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
@@ -19,18 +20,20 @@ class MessengerFailedEventSubscriberTest extends TestCase
     private EntityManagerInterface&MockObject $mockEm;
     private LoggerInterface&MockObject $mockLogger;
     private MessageLogRepository&MockObject $mockRepo;
+    private LeadEventLogWriter&MockObject $mockEventLogWriter;
     private MessengerFailedEventSubscriber $subscriber;
 
     protected function setUp(): void
     {
-        $this->mockEm     = $this->createMock(EntityManagerInterface::class);
-        $this->mockLogger = $this->createMock(LoggerInterface::class);
-        $this->mockRepo   = $this->createMock(MessageLogRepository::class);
+        $this->mockEm             = $this->createMock(EntityManagerInterface::class);
+        $this->mockLogger         = $this->createMock(LoggerInterface::class);
+        $this->mockRepo           = $this->createMock(MessageLogRepository::class);
+        $this->mockEventLogWriter = $this->createMock(LeadEventLogWriter::class);
 
         // Por padrão: sem log queued existente
         $this->mockRepo->method('findByWamid')->willReturn(null);
 
-        $this->subscriber = new MessengerFailedEventSubscriber($this->mockEm, $this->mockLogger, $this->mockRepo);
+        $this->subscriber = new MessengerFailedEventSubscriber($this->mockEm, $this->mockLogger, $this->mockRepo, $this->mockEventLogWriter);
     }
 
     private function makeMessage(
@@ -237,7 +240,7 @@ class MessengerFailedEventSubscriberTest extends TestCase
             });
         $mockEm->expects($this->once())->method('flush');
 
-        $subscriber = new MessengerFailedEventSubscriber($mockEm, $this->mockLogger, $mockRepo);
+        $subscriber = new MessengerFailedEventSubscriber($mockEm, $this->mockLogger, $mockRepo, $this->mockEventLogWriter);
 
         $message = $this->makeMessage(leadId: 42, queueLogId: 'uuid-abc');
         $event   = $this->makeEvent($message, new \RuntimeException('API timeout'));
@@ -385,5 +388,51 @@ class MessengerFailedEventSubscriberTest extends TestCase
 
         // Segundo item foi processado (persist chamado 2 vezes, mesmo que 1ª tenha falhado)
         $this->assertSame(2, $persistCount);
+    }
+
+    // =========================================================================
+    // onMessageFailed — propagação para lead_event_log (LeadEventLogWriter)
+    // =========================================================================
+
+    public function testWritesDlqEventToLeadEventLog(): void
+    {
+        $persisted = null;
+        $this->mockEm->method('persist')->willReturnCallback(function (MessageLog $log) use (&$persisted): void {
+            $persisted = $log;
+        });
+
+        $this->mockEventLogWriter
+            ->expects($this->once())
+            ->method('write')
+            ->with(
+                $this->isInstanceOf(MessageLog::class),
+                MessageLog::STATUS_DLQ,
+                $this->isInstanceOf(\DateTime::class)
+            );
+
+        $event = $this->makeEvent($this->makeMessage(), new \RuntimeException('Connection refused'));
+        $this->subscriber->onMessageFailed($event);
+
+        $this->assertNotNull($persisted);
+    }
+
+    public function testEventLogWriterExceptionDoesNotPreventDlqLogPersistence(): void
+    {
+        $persisted = null;
+        $this->mockEm->method('persist')->willReturnCallback(function (MessageLog $log) use (&$persisted): void {
+            $persisted = $log;
+        });
+        $this->mockEm->expects($this->once())->method('flush');
+
+        $this->mockEventLogWriter
+            ->method('write')
+            ->willThrowException(new \RuntimeException('lead_event_log indisponível'));
+
+        // Não deve lançar exceção nem impedir a gravação do MessageLog
+        $event = $this->makeEvent($this->makeMessage(), new \RuntimeException('err'));
+        $this->subscriber->onMessageFailed($event);
+
+        $this->assertNotNull($persisted);
+        $this->assertSame(MessageLog::STATUS_DLQ, $persisted->getStatus());
     }
 }

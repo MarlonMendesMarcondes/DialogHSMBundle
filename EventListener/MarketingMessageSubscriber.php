@@ -127,6 +127,11 @@ class MarketingMessageSubscriber implements EventSubscriberInterface
                 $msgLog->setStatus(MessageLog::STATUS_FAILED);
                 $this->em->persist($msgLog);
                 $this->em->flush();
+                try {
+                    $this->eventLogWriter->write($msgLog, MessageLog::STATUS_FAILED, new \DateTime());
+                } catch (\Throwable) {
+                    // falha silenciosa — não interrompe o fluxo da campanha
+                }
                 $pendingEvent->fail($log, 'dialoghsm.campaign.error.send_failed');
             }
         }
@@ -214,6 +219,11 @@ class MarketingMessageSubscriber implements EventSubscriberInterface
                 $msgLog->setStatus(MessageLog::STATUS_FAILED);
                 $this->em->persist($msgLog);
                 $this->em->flush();
+                try {
+                    $this->eventLogWriter->write($msgLog, MessageLog::STATUS_FAILED, new \DateTime());
+                } catch (\Throwable) {
+                    // falha silenciosa — não interrompe o processamento do lote
+                }
                 $queuedMessage->setProcessed();
                 $queuedMessage->setFailed();
             }

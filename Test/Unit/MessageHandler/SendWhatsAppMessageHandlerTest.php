@@ -14,6 +14,7 @@ use MauticPlugin\DialogHSMBundle\Exception\TransientApiException;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppMessageHandler;
 use MauticPlugin\DialogHSMBundle\Service\BulkRateLimiter;
+use MauticPlugin\DialogHSMBundle\Service\LeadEventLogWriter;
 use MauticPlugin\DialogHSMBundle\Service\RedisContactCache;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
@@ -31,6 +32,7 @@ class SendWhatsAppMessageHandlerTest extends TestCase
     private IntegrationsHelper&MockObject $mockIntegrationsHelper;
     private RedisContactCache&MockObject $mockContactCache;
     private WhatsAppNumberRepository&MockObject $mockWhatsAppNumberRepository;
+    private LeadEventLogWriter&MockObject $mockLeadEventLogWriter;
     private SendWhatsAppMessageHandler $handler;
 
     protected function setUp(): void
@@ -45,6 +47,7 @@ class SendWhatsAppMessageHandlerTest extends TestCase
         $this->mockIntegrationsHelper   = $this->createMock(IntegrationsHelper::class);
         $this->mockContactCache         = $this->createMock(RedisContactCache::class);
         $this->mockWhatsAppNumberRepository = $this->createMock(WhatsAppNumberRepository::class);
+        $this->mockLeadEventLogWriter    = $this->createMock(LeadEventLogWriter::class);
 
         // Default: getIntegration throws (fail-open → DEFAULT_MAX_RECORDS=10000)
         $this->mockIntegrationsHelper->method('getIntegration')->willThrowException(new \RuntimeException('not configured'));
@@ -59,6 +62,7 @@ class SendWhatsAppMessageHandlerTest extends TestCase
             $this->mockIntegrationsHelper,
             $this->mockContactCache,
             $this->mockWhatsAppNumberRepository,
+            $this->mockLeadEventLogWriter,
         );
     }
 
@@ -812,6 +816,66 @@ class SendWhatsAppMessageHandlerTest extends TestCase
 
         $this->mockContactCache->expects($this->never())->method('setLastSent');
 
+        ($this->handler)($this->makeMessage());
+    }
+
+    // -------------------------------------------------------------------------
+    // Testes: propagação para lead_event_log (LeadEventLogWriter)
+    // -------------------------------------------------------------------------
+
+    public function testWritesSentEventToLeadEventLogOnSuccess(): void
+    {
+        $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
+        $this->mockApi
+            ->method('sendMessage')
+            ->willReturn(['success' => true, 'wamid' => 'wamid.abc', 'response' => null, 'error' => null, 'http_status' => 200, 'retryable' => false]);
+
+        $this->mockLeadEventLogWriter
+            ->expects($this->once())
+            ->method('write')
+            ->with(
+                $this->isInstanceOf(MessageLog::class),
+                MessageLog::STATUS_SENT,
+                $this->isInstanceOf(\DateTime::class)
+            );
+
+        ($this->handler)($this->makeMessage());
+    }
+
+    public function testWritesFailedEventToLeadEventLogOnApiError(): void
+    {
+        $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
+        $this->mockApi
+            ->method('sendMessage')
+            ->willReturn(['success' => false, 'wamid' => null, 'response' => null, 'error' => 'HTTP 400: Bad Request', 'http_status' => 400, 'retryable' => false]);
+
+        $this->mockLeadEventLogWriter
+            ->expects($this->once())
+            ->method('write')
+            ->with(
+                $this->isInstanceOf(MessageLog::class),
+                MessageLog::STATUS_FAILED,
+                $this->isInstanceOf(\DateTime::class)
+            );
+
+        ($this->handler)($this->makeMessage());
+    }
+
+    public function testEventLogWriterExceptionDoesNotPreventContactFieldUpdate(): void
+    {
+        $this->mockLeadModel->method('getEntity')->willReturn($this->mockLead);
+        $this->mockApi
+            ->method('sendMessage')
+            ->willReturn(['success' => true, 'wamid' => 'wamid.abc', 'response' => null, 'error' => null, 'http_status' => 200, 'retryable' => false]);
+
+        $this->mockLeadEventLogWriter
+            ->method('write')
+            ->willThrowException(new \RuntimeException('lead_event_log indisponível'));
+
+        $this->mockLeadModel->expects($this->once())->method('setFieldValues');
+        $this->mockLeadModel->expects($this->once())->method('saveEntity');
+
+        // Não deve lançar exceção
         ($this->handler)($this->makeMessage());
     }
 }
