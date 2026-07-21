@@ -622,6 +622,18 @@ class MessageLogRepository extends CommonRepository
     }
 
     /**
+     * Reatribui os logs de um contato perdedor para o vencedor após merge (LeadEvents::LEAD_POST_MERGE).
+     */
+    public function updateLead(int $fromLeadId, int $toLeadId): void
+    {
+        $this->getEntityManager()->getConnection()->createQueryBuilder()
+            ->update($this->getEntityManager()->getClassMetadata(MessageLog::class)->getTableName())
+            ->set('lead_id', (string) $toLeadId)
+            ->where('lead_id = '.$fromLeadId)
+            ->executeStatement();
+    }
+
+    /**
      * Retorna os timestamps de leitura de HSM de um contato a partir de uma data.
      *
      * @return array<int, array{dateRead: \DateTime}>
