@@ -18,9 +18,10 @@ use MauticPlugin\DialogHSMBundle\Service\BulkRateLimiter;
 use MauticPlugin\DialogHSMBundle\Service\LeadEventLogWriter;
 use MauticPlugin\DialogHSMBundle\Service\RedisContactCache;
 use Psr\Log\LoggerInterface;
-use Symfony\Component\Messenger\Handler\MessageHandlerInterface;
+use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 
-class SendWhatsAppMessageHandler implements MessageHandlerInterface
+#[AsMessageHandler]
+class SendWhatsAppMessageHandler
 {
     private const CACHE_TTL_SECONDS   = 30;
     private const DEFAULT_MAX_RECORDS = 0;      // 0 = sem limite por contagem (padrão)

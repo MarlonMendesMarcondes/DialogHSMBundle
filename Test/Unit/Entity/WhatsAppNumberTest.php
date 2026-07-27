@@ -229,8 +229,9 @@ class WhatsAppNumberTest extends TestCase
         $metadata = $this->createMock(ValidatorClassMetadata::class);
         $metadata
             ->method('addPropertyConstraint')
-            ->willReturnCallback(function (string $property, $constraint) use (&$constraints): void {
+            ->willReturnCallback(function (string $property, $constraint) use (&$constraints, $metadata) {
                 $constraints[$property][] = $constraint;
+                return $metadata;
             });
 
         WhatsAppNumber::loadValidatorMetadata($metadata);
@@ -256,8 +257,9 @@ class WhatsAppNumberTest extends TestCase
         $metadata = $this->createMock(ValidatorClassMetadata::class);
         $metadata
             ->method('addPropertyConstraint')
-            ->willReturnCallback(function (string $property, $constraint) use (&$constraints): void {
+            ->willReturnCallback(function (string $property, $constraint) use (&$constraints, $metadata) {
                 $constraints[$property][] = $constraint;
+                return $metadata;
             });
 
         WhatsAppNumber::loadValidatorMetadata($metadata);
@@ -278,8 +280,9 @@ class WhatsAppNumberTest extends TestCase
         $metadata = $this->createMock(ValidatorClassMetadata::class);
         $metadata
             ->method('addPropertyConstraint')
-            ->willReturnCallback(function (string $property, $constraint) use (&$constraints): void {
+            ->willReturnCallback(function (string $property, $constraint) use (&$constraints, $metadata) {
                 $constraints[$property][] = $constraint;
+                return $metadata;
             });
 
         WhatsAppNumber::loadValidatorMetadata($metadata);
@@ -314,8 +317,9 @@ class WhatsAppNumberTest extends TestCase
         $metadata = $this->createMock(ValidatorClassMetadata::class);
         $metadata
             ->method('addPropertyConstraint')
-            ->willReturnCallback(function (string $property, $constraint) use (&$constraints): void {
+            ->willReturnCallback(function (string $property, $constraint) use (&$constraints, $metadata) {
                 $constraints[$property][] = $constraint;
+                return $metadata;
             });
 
         WhatsAppNumber::loadValidatorMetadata($metadata);
@@ -352,10 +356,11 @@ class WhatsAppNumberTest extends TestCase
         $metadata = $this->createMock(ValidatorClassMetadata::class);
         $metadata
             ->method('addPropertyConstraint')
-            ->willReturnCallback(function (string $property, $constraint) use (&$lengthConstraint): void {
+            ->willReturnCallback(function (string $property, $constraint) use (&$lengthConstraint, $metadata) {
                 if ($property === 'apiKey' && $constraint instanceof Length) {
                     $lengthConstraint = $constraint;
                 }
+                return $metadata;
             });
 
         WhatsAppNumber::loadValidatorMetadata($metadata);

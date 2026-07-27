@@ -8,7 +8,7 @@ use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppDirectBatchMessage;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use Psr\Log\LoggerInterface;
-use Symfony\Component\Messenger\Handler\MessageHandlerInterface;
+use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 
 /**
  * Processa um lote de mensagens WhatsApp.
@@ -26,7 +26,8 @@ use Symfony\Component\Messenger\Handler\MessageHandlerInterface;
  * em vez de uma vez por mensagem. Para isso, cada item é processado com
  * skipHousekeeping=true e o handler chama prune() ao terminar.
  */
-class SendWhatsAppDirectBatchMessageHandler implements MessageHandlerInterface
+#[AsMessageHandler]
+class SendWhatsAppDirectBatchMessageHandler
 {
     /** @var callable(int): void */
     private $sleepFn;

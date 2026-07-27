@@ -363,8 +363,9 @@ class WhatsAppMessageTest extends TestCase
         $metadata = $this->createMock(ValidatorClassMetadata::class);
         $metadata
             ->method('addPropertyConstraint')
-            ->willReturnCallback(function (string $property, $constraint) use (&$constraints): void {
+            ->willReturnCallback(function (string $property, $constraint) use (&$constraints, $metadata) {
                 $constraints[$property][] = $constraint;
+                return $metadata;
             });
 
         WhatsAppMessage::loadValidatorMetadata($metadata);
@@ -381,8 +382,9 @@ class WhatsAppMessageTest extends TestCase
         $metadata = $this->createMock(ValidatorClassMetadata::class);
         $metadata
             ->method('addPropertyConstraint')
-            ->willReturnCallback(function (string $property, $constraint) use (&$constraints): void {
+            ->willReturnCallback(function (string $property, $constraint) use (&$constraints, $metadata) {
                 $constraints[$property][] = $constraint;
+                return $metadata;
             });
 
         WhatsAppMessage::loadValidatorMetadata($metadata);
@@ -399,8 +401,9 @@ class WhatsAppMessageTest extends TestCase
         $metadata = $this->createMock(ValidatorClassMetadata::class);
         $metadata
             ->method('addPropertyConstraint')
-            ->willReturnCallback(function (string $property, $constraint) use (&$constraints): void {
+            ->willReturnCallback(function (string $property, $constraint) use (&$constraints, $metadata) {
                 $constraints[$property][] = $constraint;
+                return $metadata;
             });
 
         WhatsAppMessage::loadValidatorMetadata($metadata);
@@ -417,8 +420,9 @@ class WhatsAppMessageTest extends TestCase
         $metadata = $this->createMock(ValidatorClassMetadata::class);
         $metadata
             ->method('addPropertyConstraint')
-            ->willReturnCallback(function () use (&$count): void {
+            ->willReturnCallback(function () use (&$count, $metadata) {
                 ++$count;
+                return $metadata;
             });
 
         WhatsAppMessage::loadValidatorMetadata($metadata);
