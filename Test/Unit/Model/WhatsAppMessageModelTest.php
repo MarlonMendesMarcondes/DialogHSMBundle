@@ -22,6 +22,16 @@ use Symfony\Component\Messenger\MessageBusInterface;
 
 class WhatsAppMessageModelTest extends TestCase
 {
+    /**
+     * Records every createQueryBuilder() chain executed during the test, as
+     * {entity, alias, sets: [field => param], params: [name => value]}.
+     *
+     * @var array<int, array{entity: ?string, alias: ?string, sets: array<string, string>, params: array<string, mixed>}>
+     */
+    private array $qbCalls = [];
+
+    private int $nextLogId = 1;
+
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
@@ -34,6 +44,7 @@ class WhatsAppMessageModelTest extends TestCase
         MessageBusInterface $bus,
         EntityManagerInterface $em,
         ?BulkRateLimiter $rateLimiter = null,
+        ?\Psr\Log\LoggerInterface $logger = null,
     ): WhatsAppMessageModel {
         $ref   = new \ReflectionClass(WhatsAppMessageModel::class);
         $model = $ref->newInstanceWithoutConstructor();
@@ -41,6 +52,14 @@ class WhatsAppMessageModelTest extends TestCase
         $emProp = new \ReflectionProperty(\Mautic\CoreBundle\Model\AbstractCommonModel::class, 'em');
         $emProp->setAccessible(true);
         $emProp->setValue($model, $em);
+
+        $loggerProp = new \ReflectionProperty(\Mautic\CoreBundle\Model\AbstractCommonModel::class, 'logger');
+        $loggerProp->setAccessible(true);
+        if ($logger !== null) {
+            $loggerProp->setValue($model, $logger);
+        } else {
+            $loggerProp->setValue($model, $this->createMock(\Psr\Log\LoggerInterface::class));
+        }
 
         $model->setLeadModel($leadModel);
         $model->setBus($bus);
@@ -61,24 +80,52 @@ class WhatsAppMessageModelTest extends TestCase
      */
     private function makeEmWithRepo(): array
     {
-        $mockQuery = $this->createMock(AbstractQuery::class);
-        $mockQuery->method('execute')->willReturn(null);
+        $mockEm = $this->createMock(EntityManagerInterface::class);
+        $mockEm->method('createQueryBuilder')->willReturnCallback(function () {
+            $call = ['entity' => null, 'alias' => null, 'sets' => [], 'params' => []];
 
-        $mockQb = $this->createMock(QueryBuilder::class);
-        $mockQb->method('update')->willReturnSelf();
-        $mockQb->method('set')->willReturnSelf();
-        $mockQb->method('where')->willReturnSelf();
-        $mockQb->method('setParameter')->willReturnSelf();
-        $mockQb->method('getQuery')->willReturn($mockQuery);
+            $mockQuery = $this->createMock(AbstractQuery::class);
+            $mockQuery->method('execute')->willReturn(null);
+
+            $mockQb = $this->createMock(QueryBuilder::class);
+            $mockQb->method('update')->willReturnCallback(function (string $entity, string $alias) use ($mockQb, &$call) {
+                $call['entity'] = $entity;
+                $call['alias']  = $alias;
+
+                return $mockQb;
+            });
+            $mockQb->method('set')->willReturnCallback(function (string $field, string $paramName) use ($mockQb, &$call) {
+                $call['sets'][$field] = $paramName;
+
+                return $mockQb;
+            });
+            $mockQb->method('where')->willReturnSelf();
+            $mockQb->method('setParameter')->willReturnCallback(function (string $key, $value) use ($mockQb, &$call) {
+                $call['params'][$key] = $value;
+
+                return $mockQb;
+            });
+            $mockQb->method('getQuery')->willReturnCallback(function () use ($mockQuery, &$call) {
+                $this->qbCalls[] = $call;
+
+                return $mockQuery;
+            });
+
+            return $mockQb;
+        });
 
         $mockRepo = $this->createMock(WhatsAppMessageRepository::class);
 
-        $mockEm = $this->createMock(EntityManagerInterface::class);
-        $mockEm->method('createQueryBuilder')->willReturn($mockQb);
         $mockEm->method('getRepository')
             ->with(WhatsAppMessage::class)
             ->willReturn($mockRepo);
-        $mockEm->method('persist')->with($this->anything());
+        $mockEm->method('persist')->willReturnCallback(function ($entity): void {
+            if ($entity instanceof MessageLog) {
+                $idProp = new \ReflectionProperty(MessageLog::class, 'id');
+                $idProp->setAccessible(true);
+                $idProp->setValue($entity, $this->nextLogId++);
+            }
+        });
         $mockEm->method('flush');
         $mockEm->method('clear');
 
@@ -364,6 +411,140 @@ class WhatsAppMessageModelTest extends TestCase
         $result = $model->sendToLists($this->makeMessageMock($payload), $event);
 
         $this->assertSame([0, 1], $result);
+    }
+
+    public function testSendToListsBusExceptionMarksMessageLogAsFailedWithErrorMessage(): void
+    {
+        [$em, $repo] = $this->makeEmWithRepo();
+        $payload = ['list' => [['label' => 'content', 'value' => 'template_x']]];
+
+        $repo->method('getPendingContacts')
+            ->willReturnOnConsecutiveCalls(
+                [['id' => 3, 'phone' => '5511977776666']],
+                [],
+            );
+
+        $lead = $this->createMock(Lead::class);
+        $lead->method('getProfileFields')->willReturn([]);
+
+        $leadModel = $this->createMock(LeadModel::class);
+        $leadModel->method('getEntity')->with(3)->willReturn($lead);
+
+        $bus = $this->createMock(MessageBusInterface::class);
+        $bus->method('dispatch')->willThrowException(new \RuntimeException('bus failure'));
+
+        $logger = $this->createMock(\Psr\Log\LoggerInterface::class);
+        $logger->expects($this->once())
+            ->method('error')
+            ->with(
+                $this->stringContains('SendWhatsAppDirectBatchMessage'),
+                $this->callback(function (array $context) {
+                    return 'bus failure' === $context['exception']
+                        && \RuntimeException::class === $context['class'];
+                }),
+            );
+
+        $model  = $this->makeModel($leadModel, $bus, $em, null, $logger);
+        $event  = $this->createMock(ChannelBroadcastEvent::class);
+        $model->sendToLists($this->makeMessageMock($payload), $event);
+
+        $failureUpdates = array_values(array_filter(
+            $this->qbCalls,
+            static fn (array $call) => MessageLog::class === $call['entity'],
+        ));
+
+        $this->assertCount(1, $failureUpdates);
+        $update = $failureUpdates[0];
+        $this->assertSame(MessageLog::STATUS_FAILED, $update['params']['status']);
+        $this->assertStringContainsString('bus failure', $update['params']['errorMessage']);
+        $this->assertSame([1], $update['params']['ids']);
+    }
+
+    public function testSendToListsBusExceptionWithMultipleContactsMarksAllLogsInBatchFailed(): void
+    {
+        [$em, $repo] = $this->makeEmWithRepo();
+
+        $repo->method('getPendingContacts')
+            ->willReturnOnConsecutiveCalls(
+                [
+                    ['id' => 1, 'phone' => '5511111111111'],
+                    ['id' => 2, 'phone' => '5511222222222'],
+                    ['id' => 3, 'phone' => '5511333333333'],
+                ],
+                [],
+            );
+
+        $lead = $this->createMock(Lead::class);
+        $lead->method('getProfileFields')->willReturn([]);
+
+        $leadModel = $this->createMock(LeadModel::class);
+        $leadModel->method('getEntity')->willReturn($lead);
+
+        $bus = $this->createMock(MessageBusInterface::class);
+        $bus->method('dispatch')->willThrowException(new \RuntimeException('bus failure'));
+
+        $model  = $this->makeModel($leadModel, $bus, $em);
+        $result = $model->sendToLists($this->makeMessageMock([]), $this->createMock(ChannelBroadcastEvent::class));
+
+        $this->assertSame([0, 3], $result);
+
+        $failureUpdates = array_values(array_filter(
+            $this->qbCalls,
+            static fn (array $call) => MessageLog::class === $call['entity'],
+        ));
+
+        $this->assertCount(1, $failureUpdates);
+        $this->assertSame([1, 2, 3], $failureUpdates[0]['params']['ids']);
+    }
+
+    public function testSendToListsPartialBatchFailureOnlyMarksFailedBatchLogsAsFailed(): void
+    {
+        [$em, $repo] = $this->makeEmWithRepo();
+
+        $firstBatch = [];
+        for ($i = 1; $i <= 100; ++$i) {
+            $firstBatch[] = ['id' => $i, 'phone' => '55119999900'.str_pad((string) $i, 3, '0', STR_PAD_LEFT)];
+        }
+        $secondBatch = [['id' => 101, 'phone' => '5511988887777']];
+
+        $repo->method('getPendingContacts')
+            ->willReturnOnConsecutiveCalls(
+                $firstBatch,
+                $secondBatch,
+                [],
+            );
+
+        $lead = $this->createMock(Lead::class);
+        $lead->method('getProfileFields')->willReturn([]);
+
+        $leadModel = $this->createMock(LeadModel::class);
+        $leadModel->method('getEntity')->willReturn($lead);
+
+        // 1º batch (100 contatos) despacha com sucesso; 2º batch (1 contato) falha.
+        $bus       = $this->createMock(MessageBusInterface::class);
+        $callCount = 0;
+        $bus->method('dispatch')->willReturnCallback(function (object $msg) use (&$callCount): Envelope {
+            ++$callCount;
+            if (2 === $callCount) {
+                throw new \RuntimeException('second batch failure');
+            }
+
+            return new Envelope($msg);
+        });
+
+        $model  = $this->makeModel($leadModel, $bus, $em);
+        $result = $model->sendToLists($this->makeMessageMock([]), $this->createMock(ChannelBroadcastEvent::class));
+
+        $this->assertSame([100, 1], $result);
+
+        $failureUpdates = array_values(array_filter(
+            $this->qbCalls,
+            static fn (array $call) => MessageLog::class === $call['entity'],
+        ));
+
+        // Só o log do 2º batch (id 101) deve ter sido marcado como failed.
+        $this->assertCount(1, $failureUpdates);
+        $this->assertSame([101], $failureUpdates[0]['params']['ids']);
     }
 
     public function testSendToListsMultipleContactsInOneBatchMessage(): void

@@ -194,7 +194,25 @@ class WhatsAppMessageModel extends FormModel implements AjaxLookupModelInterface
                         batchLimit: 1,
                         sendDelay:  $sendDelay,
                     ));
-                } catch (\Throwable) {
+                } catch (\Throwable $e) {
+                    $this->logger->error('DialogHSM: falha ao despachar SendWhatsAppDirectBatchMessage', [
+                        'exception' => $e->getMessage(),
+                        'class'     => get_class($e),
+                        'trace'     => $e->getTraceAsString(),
+                    ]);
+
+                    $logIds = array_map(static fn (SendWhatsAppMessage $item) => (int) $item->queueLogId, $items);
+                    $this->em->createQueryBuilder()
+                        ->update(MessageLog::class, 'ml')
+                        ->set('ml.status', ':status')
+                        ->set('ml.errorMessage', ':errorMessage')
+                        ->where('ml.id IN (:ids)')
+                        ->setParameter('status', MessageLog::STATUS_FAILED)
+                        ->setParameter('errorMessage', substr('Falha ao enfileirar envio: '.$e->getMessage(), 0, 65535))
+                        ->setParameter('ids', $logIds)
+                        ->getQuery()
+                        ->execute();
+
                     $sent -= count($items);
                     $failed += count($items);
                 }
