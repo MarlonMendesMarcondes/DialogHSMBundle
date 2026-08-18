@@ -79,7 +79,7 @@
 
                 <div id="balance-result" class="alert" style="display:none"></div>
 
-                <button type="button" class="btn btn-primary btn-sm" id="btn-balance-check">
+                <button type="button" class="btn btn-primary btn-sm btn-nospin" id="btn-balance-check">
                     <i class="ri-refresh-line"></i> {{ 'dialoghsm.number.balance.check'|trans }}
                 </button>
             </div>
@@ -89,10 +89,10 @@
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px">
                     <p class="small text-muted" style="margin-bottom:0">{{ 'dialoghsm.number.balance.usage_chart.title'|trans }}</p>
                     <div class="btn-group btn-group-xs" id="usage-chart-range">
-                        <button type="button" class="btn btn-default" data-months="3">3M</button>
-                        <button type="button" class="btn btn-default" data-months="6">6M</button>
-                        <button type="button" class="btn btn-default" data-months="12">12M</button>
-                        <button type="button" class="btn btn-primary" data-months="0">{{ 'dialoghsm.number.balance.usage_chart.all'|trans }}</button>
+                        <button type="button" class="btn btn-default btn-nospin" style="color:#212529" data-months="3">3M</button>
+                        <button type="button" class="btn btn-default btn-nospin" style="color:#212529" data-months="6">6M</button>
+                        <button type="button" class="btn btn-default btn-nospin" style="color:#212529" data-months="12">12M</button>
+                        <button type="button" class="btn btn-primary btn-nospin" data-months="0">{{ 'dialoghsm.number.balance.usage_chart.all'|trans }}</button>
                     </div>
                 </div>
                 <div style="height:220px">
@@ -140,10 +140,10 @@
         <div id="webhook-result" class="alert" style="display:none"></div>
 
         <div class="btn-group btn-group-sm" style="display:flex; gap:6px; flex-wrap:wrap">
-            <button type="button" class="btn btn-default" id="btn-webhook-check" style="color:#212529">
+            <button type="button" class="btn btn-default btn-nospin" id="btn-webhook-check" style="color:#212529">
                 <i class="ri-search-eye-line"></i> {{ 'dialoghsm.number.webhook.check'|trans }}
             </button>
-            <button type="button" class="btn btn-primary" id="btn-webhook-register">
+            <button type="button" class="btn btn-primary btn-nospin" id="btn-webhook-register">
                 <i class="ri-link-m"></i> {{ 'dialoghsm.number.webhook.register'|trans }}
             </button>
         </div>
@@ -308,8 +308,12 @@
     var rangeButtons = document.querySelectorAll('#usage-chart-range button');
     rangeButtons.forEach(function (btn) {
         btn.addEventListener('click', function () {
-            rangeButtons.forEach(function (b) { b.className = 'btn btn-default'; });
-            btn.className = 'btn btn-primary';
+            rangeButtons.forEach(function (b) {
+                b.className = 'btn btn-default btn-nospin';
+                b.style.color = '#212529';
+            });
+            btn.className    = 'btn btn-primary btn-nospin';
+            btn.style.color  = '';
 
             var months  = parseInt(btn.getAttribute('data-months'), 10);
             chart.data  = toChartData(filterByMonths(months));

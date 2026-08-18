@@ -87,6 +87,7 @@ class BalanceAlertService
         $header  = $this->translator->trans("dialoghsm.number.balance_alert.{$transKey}.header", ['%name%' => $number->getName()]);
         $message = $this->translator->trans("dialoghsm.number.balance_alert.{$transKey}.message", [
             '%name%'     => $number->getName(),
+            '%phone%'    => (string) $number->getPhoneNumber(),
             '%balance%'  => number_format($balance, 2),
             '%currency%' => strtoupper((string) $currency),
         ]);
@@ -126,6 +127,12 @@ class BalanceAlertService
             return;
         }
 
+        // Reseta estado interno (queuedRecipients, flag "fatal", mensagem) antes de
+        // compor um novo e-mail. Sem isso, quando mais de um número transiciona de
+        // estado no mesmo cron, o segundo envio em diante herda estado do anterior —
+        // inclusive uma falha no primeiro pode silenciar todos os seguintes (o core
+        // só zera $fatal dentro de reset()).
+        $this->mailHelper->reset();
         $this->mailHelper->setTo($emails);
         $this->mailHelper->setSubject($subject);
         $this->mailHelper->setBody($body);

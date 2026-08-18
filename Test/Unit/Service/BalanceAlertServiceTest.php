@@ -322,6 +322,7 @@ class BalanceAlertServiceTest extends TestCase
 
         $this->partnerConfigProvider->method('getBalanceAlertSendEmail')->willReturn(true);
 
+        $this->mailHelper->expects($this->once())->method('reset');
         $this->mailHelper->expects($this->once())->method('setTo')->with(['admin@example.com']);
         $this->mailHelper->expects($this->once())->method('setSubject');
         $this->mailHelper->expects($this->once())->method('setBody');
@@ -329,6 +330,35 @@ class BalanceAlertServiceTest extends TestCase
 
         $number = $this->makeNumber('ok');
         $this->makeService()->checkAndNotify($number, 0.0, 'usd');
+    }
+
+    /**
+     * Regressão: sem reset() entre envios, o MailHelper acumula estado interno
+     * (queuedRecipients, flag "fatal") entre chamadas — uma falha no e-mail do
+     * primeiro número podia silenciar o alerta de todos os seguintes no mesmo
+     * cron. reset() precisa ser chamado uma vez POR e-mail enviado.
+     */
+    public function testResetsMailHelperBeforeEachEmailWhenMultipleNumbersAlertInSameRun(): void
+    {
+        $user = $this->createMock(User::class);
+        $user->method('getEmail')->willReturn('admin@example.com');
+
+        $repo = $this->createMock(UserRepository::class);
+        $repo->method('getEntities')->willReturn([$user]);
+        $this->em->method('getRepository')->with(User::class)->willReturn($repo);
+
+        $this->partnerConfigProvider->method('getBalanceAlertSendEmail')->willReturn(true);
+
+        $service = $this->makeService();
+
+        $numberA = $this->makeNumber('ok', 1);
+        $numberB = $this->makeNumber('ok', 2);
+
+        $this->mailHelper->expects($this->exactly(2))->method('reset');
+        $this->mailHelper->expects($this->exactly(2))->method('send');
+
+        $service->checkAndNotify($numberA, 0.0, 'usd');
+        $service->checkAndNotify($numberB, 0.0, 'usd');
     }
 
     public function testDoesNotSendEmailWhenNoRecipientHasEmail(): void
