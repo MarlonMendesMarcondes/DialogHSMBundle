@@ -86,7 +86,15 @@
 
             {% if entity.balanceUsageSnapshot is not empty %}
             <div class="col-md-8">
-                <p class="small text-muted" style="margin-bottom:4px">{{ 'dialoghsm.number.balance.usage_chart.title'|trans }}</p>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px">
+                    <p class="small text-muted" style="margin-bottom:0">{{ 'dialoghsm.number.balance.usage_chart.title'|trans }}</p>
+                    <div class="btn-group btn-group-xs" id="usage-chart-range">
+                        <button type="button" class="btn btn-default" data-months="3">3M</button>
+                        <button type="button" class="btn btn-default" data-months="6">6M</button>
+                        <button type="button" class="btn btn-default" data-months="12">12M</button>
+                        <button type="button" class="btn btn-primary" data-months="0">{{ 'dialoghsm.number.balance.usage_chart.all'|trans }}</button>
+                    </div>
+                </div>
                 <div style="height:220px">
                     <canvas id="balance-usage-chart"></canvas>
                 </div>
@@ -245,34 +253,68 @@
 {% if entity.balanceUsageSnapshot is not empty %}
 <script>
 (function () {
-    var usage = {{ entity.balanceUsageSnapshot|json_encode|raw }};
+    var usage    = {{ entity.balanceUsageSnapshot|json_encode|raw }};
+    var currency = '{{ entity.balanceCurrency|upper }}';
 
-    var labels = usage.map(function (row) {
-        var parts = row.period_date.split('-');
-        return parts[1] + '/' + parts[0].slice(2);
-    });
-    var totals = usage.map(function (row) { return row.total_price; });
+    function filterByMonths(monthsBack) {
+        if (!monthsBack) {
+            return usage;
+        }
+        var cutoff = new Date();
+        cutoff.setMonth(cutoff.getMonth() - monthsBack);
+        return usage.filter(function (row) { return new Date(row.period_date) >= cutoff; });
+    }
 
-    var ctx = document.getElementById('balance-usage-chart').getContext('2d');
-    new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: labels,
+    function toChartData(rows) {
+        return {
+            labels: rows.map(function (row) {
+                var parts = row.period_date.split('-');
+                return parts[1] + '/' + parts[0].slice(2);
+            }),
             datasets: [{
                 label: '{{ 'dialoghsm.number.balance.usage_chart.cost'|trans }}',
-                data: totals,
+                data: rows.map(function (row) { return row.total_price; }),
                 backgroundColor: 'rgba(99, 102, 241, 0.6)'
             }]
-        },
+        };
+    }
+
+    var ctx = document.getElementById('balance-usage-chart').getContext('2d');
+    var chart = new Chart(ctx, {
+        type: 'bar',
+        data: toChartData(usage),
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
+            // Chart.js 2.x (bundlado pelo Mautic) — legend/tooltips ficam no
+            // nível raiz de options, não em "plugins" (isso é API do Chart.js 3+).
+            legend: { display: false },
+            tooltips: {
+                callbacks: {
+                    label: function (tooltipItem, data) {
+                        var datasetLabel = data.datasets[tooltipItem.datasetIndex].label || '';
+
+                        return datasetLabel + ': ' + tooltipItem.yLabel + ' ' + currency;
+                    }
+                }
+            },
             scales: {
-                x: { grid: { display: false }, ticks: { maxRotation: 0 } },
-                y: { beginAtZero: true, ticks: { precision: 2 } }
+                xAxes: [{ gridLines: { display: false }, ticks: { maxRotation: 0 } }],
+                yAxes: [{ ticks: { beginAtZero: true, precision: 2 } }]
             }
         }
+    });
+
+    var rangeButtons = document.querySelectorAll('#usage-chart-range button');
+    rangeButtons.forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            rangeButtons.forEach(function (b) { b.className = 'btn btn-default'; });
+            btn.className = 'btn btn-primary';
+
+            var months  = parseInt(btn.getAttribute('data-months'), 10);
+            chart.data  = toChartData(filterByMonths(months));
+            chart.update();
+        });
     });
 })();
 </script>
