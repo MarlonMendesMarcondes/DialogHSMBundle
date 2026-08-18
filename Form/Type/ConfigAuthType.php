@@ -4,14 +4,23 @@ declare(strict_types=1);
 
 namespace MauticPlugin\DialogHSMBundle\Form\Type;
 
+use Mautic\CoreBundle\Form\Type\YesNoButtonGroupType;
+use Mautic\UserBundle\Form\Type\UserListType;
 use Symfony\Component\Form\AbstractType;
 use Symfony\Component\Form\Extension\Core\Type\IntegerType;
+use Symfony\Component\Form\Extension\Core\Type\NumberType;
+use Symfony\Component\Form\Extension\Core\Type\PasswordType;
 use Symfony\Component\Form\Extension\Core\Type\TextType;
 use Symfony\Component\Form\FormBuilderInterface;
 use Symfony\Component\OptionsResolver\OptionsResolver;
+use Symfony\Contracts\Translation\TranslatorInterface;
 
 class ConfigAuthType extends AbstractType
 {
+    public function __construct(private TranslatorInterface $translator)
+    {
+    }
+
     public function buildForm(FormBuilderInterface $builder, array $options): void
     {
         $data = [];
@@ -140,6 +149,88 @@ class ConfigAuthType extends AbstractType
                 ],
                 'data' => (int) ($data['log_max_days'] ?? 30),
                 'help' => 'dialoghsm.config.log_max_days.help',
+            ]
+        );
+
+        $builder->add(
+            'balance_alert_threshold',
+            NumberType::class,
+            [
+                'label'      => 'dialoghsm.config.balance_alert_threshold',
+                'label_attr' => ['class' => 'control-label'],
+                'required'   => false,
+                'scale'      => 2,
+                'attr'       => [
+                    'class'   => 'form-control',
+                    'min'     => 0,
+                    'tooltip' => 'dialoghsm.config.balance_alert_threshold.tooltip',
+                ],
+                'data' => (float) ($data['balance_alert_threshold'] ?? 10),
+                'help' => 'dialoghsm.config.balance_alert_threshold.help',
+            ]
+        );
+
+        $builder->add(
+            'balance_alert_recipients',
+            UserListType::class,
+            [
+                'label'      => 'dialoghsm.config.balance_alert_recipients',
+                'label_attr' => ['class' => 'control-label'],
+                'attr'       => [
+                    'class'   => 'form-control',
+                    'tooltip' => 'dialoghsm.config.balance_alert_recipients.tooltip',
+                ],
+                'data' => $data['balance_alert_recipients'] ?? [],
+                'help' => 'dialoghsm.config.balance_alert_recipients.help',
+            ]
+        );
+
+        $builder->add(
+            'balance_alert_send_email',
+            YesNoButtonGroupType::class,
+            [
+                'label' => 'dialoghsm.config.balance_alert_send_email',
+                'data'  => (bool) ($data['balance_alert_send_email'] ?? false),
+                'help'  => 'dialoghsm.config.balance_alert_send_email.help',
+            ]
+        );
+
+        $builder->add(
+            'partner_id',
+            TextType::class,
+            [
+                'label'      => 'dialoghsm.config.partner_id',
+                'label_attr' => ['class' => 'control-label'],
+                'required'   => false,
+                'attr'       => [
+                    'class'   => 'form-control',
+                    'tooltip' => 'dialoghsm.config.partner_id.tooltip',
+                ],
+                'data' => $data['partner_id'] ?? '',
+                'help' => 'dialoghsm.config.partner_id.help',
+            ]
+        );
+
+        $partnerApiKeyConfigured = !empty($data['partner_api_key']);
+        $partnerApiKeyStatusBadge = $partnerApiKeyConfigured
+            ? '<span class="label label-success"><i class="ri-shield-keyhole-line"></i> '
+                .$this->translator->trans('dialoghsm.config.partner_api_key.configured').'</span>'
+                .'&nbsp;'.$this->translator->trans('dialoghsm.config.partner_api_key.keep_current')
+            : '<span class="label label-warning"><i class="ri-key-line"></i> '
+                .$this->translator->trans('dialoghsm.config.partner_api_key.not_configured').'</span>';
+
+        $builder->add(
+            'partner_api_key',
+            PasswordType::class,
+            [
+                'label'        => 'dialoghsm.config.partner_api_key',
+                'label_attr'   => ['class' => 'control-label'],
+                'required'     => false,
+                'attr'         => ['class' => 'form-control', 'maxlength' => 250],
+                'always_empty' => false,
+                'data'         => $data['partner_api_key'] ?? '',
+                'help'         => $partnerApiKeyStatusBadge,
+                'help_html'    => true,
             ]
         );
     }

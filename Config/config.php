@@ -5,7 +5,7 @@ declare(strict_types=1);
 return [
     'name'        => '360dialog WhatsApp',
     'description' => 'Envia mensagens WhatsApp HSM via API 360dialog',
-    'version'     => '1.4.7',
+    'version'     => '1.4.8',
     'author'      => 'DialogHSM',
     'routes'      => [
         'main' => [
@@ -25,6 +25,11 @@ return [
             'mautic_dialoghsm_number_webhook_register' => [
                 'path'       => '/dialoghsm/numbers/{objectId}/webhook/register',
                 'controller' => 'MauticPlugin\DialogHSMBundle\Controller\WhatsAppNumberController::webhookRegisterAction',
+                'methods'    => ['POST'],
+            ],
+            'mautic_dialoghsm_number_balance_check' => [
+                'path'       => '/dialoghsm/numbers/{objectId}/balance/check',
+                'controller' => 'MauticPlugin\DialogHSMBundle\Controller\WhatsAppNumberController::balanceCheckAction',
                 'methods'    => ['POST'],
             ],
             'mautic_dialoghsm_log_simulate_status' => [

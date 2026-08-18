@@ -5,9 +5,14 @@ declare(strict_types=1);
 namespace MauticPlugin\DialogHSMBundle\Controller;
 
 use Mautic\CoreBundle\Controller\FormController;
+use MauticPlugin\DialogHSMBundle\Api\DialogHSMPartnerApi;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
 use MauticPlugin\DialogHSMBundle\Model\WhatsAppNumberModel;
+use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumberBalanceHistoryRepository;
+use MauticPlugin\DialogHSMBundle\Service\BalanceAlertService;
+use MauticPlugin\DialogHSMBundle\Service\BalanceHistoryRecorder;
 use MauticPlugin\DialogHSMBundle\Service\MultiWebhookService;
+use MauticPlugin\DialogHSMBundle\Service\PartnerConfigProvider;
 use Symfony\Contracts\Service\Attribute\Required;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -17,11 +22,46 @@ use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 class WhatsAppNumberController extends FormController
 {
     private MultiWebhookService $multiWebhookService;
+    private DialogHSMPartnerApi $partnerApi;
+    private PartnerConfigProvider $partnerConfigProvider;
+    private BalanceAlertService $balanceAlertService;
+    private BalanceHistoryRecorder $balanceHistoryRecorder;
+    private WhatsAppNumberBalanceHistoryRepository $balanceHistoryRepository;
 
     #[Required]
     public function setMultiWebhookService(MultiWebhookService $service): void
     {
         $this->multiWebhookService = $service;
+    }
+
+    #[Required]
+    public function setPartnerApi(DialogHSMPartnerApi $partnerApi): void
+    {
+        $this->partnerApi = $partnerApi;
+    }
+
+    #[Required]
+    public function setPartnerConfigProvider(PartnerConfigProvider $partnerConfigProvider): void
+    {
+        $this->partnerConfigProvider = $partnerConfigProvider;
+    }
+
+    #[Required]
+    public function setBalanceAlertService(BalanceAlertService $balanceAlertService): void
+    {
+        $this->balanceAlertService = $balanceAlertService;
+    }
+
+    #[Required]
+    public function setBalanceHistoryRecorder(BalanceHistoryRecorder $balanceHistoryRecorder): void
+    {
+        $this->balanceHistoryRecorder = $balanceHistoryRecorder;
+    }
+
+    #[Required]
+    public function setBalanceHistoryRepository(WhatsAppNumberBalanceHistoryRepository $repository): void
+    {
+        $this->balanceHistoryRepository = $repository;
     }
 
     /**
@@ -228,8 +268,9 @@ class WhatsAppNumberController extends FormController
 
         return $this->delegateView([
             'viewParameters' => [
-                'form'   => $form->createView(),
-                'entity' => $entity,
+                'form'           => $form->createView(),
+                'entity'         => $entity,
+                'balanceHistory' => $this->balanceHistoryRepository->findAllForNumber($entity->getId()),
             ],
             'contentTemplate' => '@DialogHSM/WhatsAppNumber/form.html.twig',
             'passthroughVars' => [
@@ -324,6 +365,69 @@ class WhatsAppNumberController extends FormController
         $result = $this->multiWebhookService->register($entity->getApiKey() ?? '', $webhookUrl);
 
         return new JsonResponse(array_merge($result, ['url' => $webhookUrl]));
+    }
+
+    public function balanceCheckAction(Request $request, int $objectId): JsonResponse
+    {
+        if ('POST' !== $request->getMethod()) {
+            return new JsonResponse(['error' => 'Method not allowed'], 405);
+        }
+
+        $model = $this->getModel('dialoghsm.whatsappnumber');
+        \assert($model instanceof WhatsAppNumberModel);
+        $entity = $model->getEntity($objectId);
+
+        if (null === $entity) {
+            return new JsonResponse(['error' => 'Number not found'], 404);
+        }
+
+        if (empty($entity->getClientId()) || empty($entity->getChannelId())) {
+            return new JsonResponse([
+                'success' => false,
+                'error'   => $this->translator->trans('dialoghsm.number.balance.missing_ids'),
+            ], 400);
+        }
+
+        $partnerId     = $this->partnerConfigProvider->getPartnerId();
+        $partnerApiKey = $this->partnerConfigProvider->getPartnerApiKey();
+
+        if (empty($partnerId) || empty($partnerApiKey)) {
+            return new JsonResponse([
+                'success' => false,
+                'error'   => $this->translator->trans('dialoghsm.number.balance.missing_partner_config'),
+            ], 400);
+        }
+
+        $result = $this->partnerApi->getChannelBalance(
+            $partnerId,
+            $partnerApiKey,
+            $entity->getClientId(),
+            $entity->getChannelId()
+        );
+
+        if ($result['success']) {
+            $entity->setBalanceInfo($result['balance'], $result['currency'], new \DateTime());
+            $entity->setBalanceUsageSnapshot($result['usage']);
+            $model->getRepository()->saveEntity($entity);
+
+            $this->balanceAlertService->checkAndNotify($entity, $result['balance'], $result['currency']);
+
+            $this->balanceHistoryRecorder->recordIfNewRecharge(
+                $entity,
+                $result['last_renewal_date'],
+                $result['last_renewal_amount'],
+                $result['balance'],
+                $result['currency']
+            );
+        }
+
+        return new JsonResponse([
+            'success'          => $result['success'],
+            'error'            => $result['error'],
+            'balance'          => $entity->getBalance(),
+            'currency'         => $entity->getBalanceCurrency(),
+            'balanceUpdatedAt' => $entity->getBalanceUpdatedAt()?->format(\DateTimeInterface::ATOM),
+        ]);
     }
 
     protected function getModelName(): string

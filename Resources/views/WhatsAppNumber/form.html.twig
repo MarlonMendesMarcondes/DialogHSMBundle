@@ -48,6 +48,73 @@
         {{ form_row(form.batchQueueName) }}
     </div>
 </div>
+
+<div class="row">
+    <div class="col-md-6">
+        {{ form_row(form.clientId) }}
+    </div>
+    <div class="col-md-6">
+        {{ form_row(form.channelId) }}
+    </div>
+</div>
+
+{% if isExisting and entity.clientId is not empty and entity.channelId is not empty %}
+<hr>
+<div class="panel panel-default">
+    <div class="panel-heading">
+        <h5 class="panel-title"><i class="ri-wallet-3-line"></i> {{ 'dialoghsm.number.balance.title'|trans }}</h5>
+    </div>
+    <div class="panel-body">
+        <div class="row">
+            <div class="col-md-4">
+                <p id="balance-current" class="small">
+                    {% if entity.balanceUpdatedAt %}
+                        <strong style="font-size:18px">{{ entity.balance }} {{ entity.balanceCurrency|upper }}</strong>
+                        <br>
+                        <span class="text-muted">{{ 'dialoghsm.number.balance.updated_at'|trans }}: {{ entity.balanceUpdatedAt|date('d/m/Y H:i') }}</span>
+                    {% else %}
+                        <span class="text-muted">{{ 'dialoghsm.number.balance.not_checked'|trans }}</span>
+                    {% endif %}
+                </p>
+
+                <div id="balance-result" class="alert" style="display:none"></div>
+
+                <button type="button" class="btn btn-primary btn-sm" id="btn-balance-check">
+                    <i class="ri-refresh-line"></i> {{ 'dialoghsm.number.balance.check'|trans }}
+                </button>
+            </div>
+
+            {% if entity.balanceUsageSnapshot is not empty %}
+            <div class="col-md-8">
+                <p class="small text-muted" style="margin-bottom:4px">{{ 'dialoghsm.number.balance.usage_chart.title'|trans }}</p>
+                <div style="height:220px">
+                    <canvas id="balance-usage-chart"></canvas>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+        {% if balanceHistory is defined and balanceHistory|length %}
+        <hr style="margin:16px 0 12px">
+        <p class="small text-muted" style="margin-bottom:4px">{{ 'dialoghsm.number.balance.history.title'|trans }}</p>
+        <div class="row">
+            {% for entry in balanceHistory %}
+            <div class="col-md-3 col-sm-4 col-xs-6" style="margin-bottom:8px">
+                <div class="small">{{ entry.rechargeDate|date('d/m/Y') }}</div>
+                <div>
+                    {% if entry.rechargeAmount is not null %}
+                        <strong>+{{ entry.rechargeAmount }} {{ entry.currency|upper }}</strong>
+                    {% else %}
+                        —
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
 {% endblock %}
 
 {% block rightFormContent %}
@@ -65,7 +132,7 @@
         <div id="webhook-result" class="alert" style="display:none"></div>
 
         <div class="btn-group btn-group-sm" style="display:flex; gap:6px; flex-wrap:wrap">
-            <button type="button" class="btn btn-default" id="btn-webhook-check">
+            <button type="button" class="btn btn-default" id="btn-webhook-check" style="color:#212529">
                 <i class="ri-search-eye-line"></i> {{ 'dialoghsm.number.webhook.check'|trans }}
             </button>
             <button type="button" class="btn btn-primary" id="btn-webhook-register">
@@ -136,6 +203,78 @@
         });
     });
 }());
+</script>
+{% endif %}
+
+{% if isExisting and entity.clientId is not empty and entity.channelId is not empty %}
+<script>
+(function () {
+    var balanceCheckUrl = '{{ path('mautic_dialoghsm_number_balance_check', {'objectId': entity.getId()}) }}';
+    var currentEl       = document.getElementById('balance-current');
+    var resultDiv       = document.getElementById('balance-result');
+
+    document.getElementById('btn-balance-check').addEventListener('click', function () {
+        resultDiv.className = 'alert alert-info';
+        resultDiv.innerHTML = '<i class="ri-loader-line"></i> ...';
+        resultDiv.style.display = 'block';
+
+        mQuery.ajax({ url: balanceCheckUrl, method: 'POST', dataType: 'json',
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            success: function (d) {
+                if (d.success) {
+                    var currency = (d.currency || '').toUpperCase();
+                    currentEl.innerHTML = '<strong>' + d.balance + ' ' + currency + '</strong><br>'
+                        + '<span class="text-muted">{{ 'dialoghsm.number.balance.updated_at'|trans }}: '
+                        + new Date(d.balanceUpdatedAt).toLocaleString() + '</span>';
+                    resultDiv.style.display = 'none';
+                } else {
+                    resultDiv.className = 'alert alert-danger';
+                    resultDiv.innerHTML = '<strong>Erro:</strong> ' + d.error;
+                }
+            },
+            error: function (x) {
+                resultDiv.className = 'alert alert-danger';
+                resultDiv.innerHTML = 'HTTP ' + x.status;
+            }
+        });
+    });
+}());
+</script>
+{% endif %}
+
+{% if entity.balanceUsageSnapshot is not empty %}
+<script>
+(function () {
+    var usage = {{ entity.balanceUsageSnapshot|json_encode|raw }};
+
+    var labels = usage.map(function (row) {
+        var parts = row.period_date.split('-');
+        return parts[1] + '/' + parts[0].slice(2);
+    });
+    var totals = usage.map(function (row) { return row.total_price; });
+
+    var ctx = document.getElementById('balance-usage-chart').getContext('2d');
+    new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: '{{ 'dialoghsm.number.balance.usage_chart.cost'|trans }}',
+                data: totals,
+                backgroundColor: 'rgba(99, 102, 241, 0.6)'
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+                x: { grid: { display: false }, ticks: { maxRotation: 0 } },
+                y: { beginAtZero: true, ticks: { precision: 2 } }
+            }
+        }
+    });
+})();
 </script>
 {% endif %}
 {% endblock %}

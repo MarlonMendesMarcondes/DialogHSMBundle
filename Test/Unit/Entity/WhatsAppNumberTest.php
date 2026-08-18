@@ -218,6 +218,158 @@ class WhatsAppNumberTest extends TestCase
         $this->assertSame($number, $number->setBatchQueueName('batch.vendas'));
     }
 
+    public function testGetClientIdReturnsNullByDefault(): void
+    {
+        $this->assertNull($this->makeNumber()->getClientId());
+    }
+
+    public function testSetClientIdStoresValue(): void
+    {
+        $number = $this->makeNumber()->setClientId('client-abc');
+        $this->assertSame('client-abc', $number->getClientId());
+    }
+
+    public function testSetClientIdConvertsEmptyStringToNull(): void
+    {
+        $number = $this->makeNumber()->setClientId('');
+        $this->assertNull($number->getClientId());
+    }
+
+    public function testSetClientIdTracksChange(): void
+    {
+        $number = $this->makeNumber();
+        $number->setClientId('client-abc');
+        $this->assertArrayHasKey('clientId', $number->getChanges());
+    }
+
+    public function testGetChannelIdReturnsNullByDefault(): void
+    {
+        $this->assertNull($this->makeNumber()->getChannelId());
+    }
+
+    public function testSetChannelIdStoresValue(): void
+    {
+        $number = $this->makeNumber()->setChannelId('channel-abc');
+        $this->assertSame('channel-abc', $number->getChannelId());
+    }
+
+    public function testSetChannelIdConvertsEmptyStringToNull(): void
+    {
+        $number = $this->makeNumber()->setChannelId('');
+        $this->assertNull($number->getChannelId());
+    }
+
+    public function testSetChannelIdTracksChange(): void
+    {
+        $number = $this->makeNumber();
+        $number->setChannelId('channel-abc');
+        $this->assertArrayHasKey('channelId', $number->getChanges());
+    }
+
+    // =========================================================================
+    // Saldo (balance, balanceCurrency, balanceUpdatedAt)
+    // =========================================================================
+
+    public function testGetBalanceReturnsNullByDefault(): void
+    {
+        $this->assertNull($this->makeNumber()->getBalance());
+        $this->assertNull($this->makeNumber()->getBalanceCurrency());
+        $this->assertNull($this->makeNumber()->getBalanceUpdatedAt());
+    }
+
+    public function testSetBalanceInfoStoresAllFields(): void
+    {
+        $number    = $this->makeNumber();
+        $updatedAt = new \DateTime('2026-08-18 12:00:00');
+
+        $number->setBalanceInfo(48.15, 'usd', $updatedAt);
+
+        $this->assertSame(48.15, $number->getBalance());
+        $this->assertSame('usd', $number->getBalanceCurrency());
+        $this->assertSame($updatedAt, $number->getBalanceUpdatedAt());
+    }
+
+    public function testSetBalanceInfoDoesNotTrackChange(): void
+    {
+        $number = $this->makeNumber();
+        $number->setBalanceInfo(48.15, 'usd', new \DateTime());
+
+        $this->assertArrayNotHasKey('balance', $number->getChanges());
+    }
+
+    public function testSetBalanceInfoReturnsSelf(): void
+    {
+        $number = $this->makeNumber();
+        $this->assertSame($number, $number->setBalanceInfo(1.0, 'usd', new \DateTime()));
+    }
+
+    public function testSetBalanceInfoAcceptsNullBalance(): void
+    {
+        $number = $this->makeNumber();
+        $number->setBalanceInfo(null, null, new \DateTime());
+
+        $this->assertNull($number->getBalance());
+        $this->assertNull($number->getBalanceCurrency());
+    }
+
+    // =========================================================================
+    // balanceAlertState
+    // =========================================================================
+
+    public function testGetBalanceAlertStateReturnsNullByDefault(): void
+    {
+        $this->assertNull($this->makeNumber()->getBalanceAlertState());
+    }
+
+    public function testSetBalanceAlertStateStoresValue(): void
+    {
+        $number = $this->makeNumber()->setBalanceAlertState('low');
+        $this->assertSame('low', $number->getBalanceAlertState());
+    }
+
+    public function testSetBalanceAlertStateDoesNotTrackChange(): void
+    {
+        $number = $this->makeNumber();
+        $number->setBalanceAlertState('depleted');
+        $this->assertArrayNotHasKey('balanceAlertState', $number->getChanges());
+    }
+
+    public function testSetBalanceAlertStateReturnsSelf(): void
+    {
+        $number = $this->makeNumber();
+        $this->assertSame($number, $number->setBalanceAlertState('ok'));
+    }
+
+    // =========================================================================
+    // balanceUsageSnapshot
+    // =========================================================================
+
+    public function testGetBalanceUsageSnapshotReturnsNullByDefault(): void
+    {
+        $this->assertNull($this->makeNumber()->getBalanceUsageSnapshot());
+    }
+
+    public function testSetBalanceUsageSnapshotStoresValue(): void
+    {
+        $snapshot = [['period_date' => '2026-05-01T00:00:00Z', 'total_price' => 57.9375]];
+        $number   = $this->makeNumber()->setBalanceUsageSnapshot($snapshot);
+
+        $this->assertSame($snapshot, $number->getBalanceUsageSnapshot());
+    }
+
+    public function testSetBalanceUsageSnapshotDoesNotTrackChange(): void
+    {
+        $number = $this->makeNumber();
+        $number->setBalanceUsageSnapshot([['period_date' => '2026-05-01T00:00:00Z', 'total_price' => 1.0]]);
+        $this->assertArrayNotHasKey('balanceUsageSnapshot', $number->getChanges());
+    }
+
+    public function testSetBalanceUsageSnapshotReturnsSelf(): void
+    {
+        $number = $this->makeNumber();
+        $this->assertSame($number, $number->setBalanceUsageSnapshot(null));
+    }
+
     // =========================================================================
     // loadValidatorMetadata
     // =========================================================================

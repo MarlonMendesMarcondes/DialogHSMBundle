@@ -22,6 +22,7 @@ use MauticPlugin\DialogHSMBundle\Migrations\Version_1_1_1;
 use MauticPlugin\DialogHSMBundle\Migrations\Version_1_2_0;
 use MauticPlugin\DialogHSMBundle\Migrations\Version_1_4_1;
 use MauticPlugin\DialogHSMBundle\Migrations\Version_1_4_2;
+use MauticPlugin\DialogHSMBundle\Migrations\Version_1_4_8;
 use Mautic\IntegrationsBundle\Migration\AbstractMigration;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
@@ -605,6 +606,66 @@ class MigrationIdempotencyTest extends TestCase
     }
 
     // =========================================================================
+    // Version_1_4_8 — adiciona client_id, channel_id, balance*, balance_alert_state,
+    // balance_usage_snapshot em dialog_hsm_numbers + cria dialog_hsm_number_balance_history
+    // (isApplicable via SHOW COLUMNS, não via Schema — dummy schema é ignorado)
+    // =========================================================================
+
+    public function testV148ApplicableWhenColumnAbsent(): void
+    {
+        $this->mockConn->method('fetchAllAssociative')->willReturn([]);
+
+        $migration = $this->migration(Version_1_4_8::class);
+        $this->assertTrue($this->callProtected($migration, 'isApplicable', $this->schemaWithoutTable()));
+    }
+
+    public function testV148NotApplicableWhenColumnPresent(): void
+    {
+        $this->mockConn->method('fetchAllAssociative')->willReturn([['Field' => 'balance_usage_snapshot']]);
+
+        $migration = $this->migration(Version_1_4_8::class);
+        $this->assertFalse($this->callProtected($migration, 'isApplicable', $this->schemaWithoutTable()));
+    }
+
+    public function testV148NotApplicableWhenQueryThrows(): void
+    {
+        $this->mockConn->method('fetchAllAssociative')->willThrowException(new \Exception('table not found'));
+
+        $migration = $this->migration(Version_1_4_8::class);
+        $this->assertFalse($this->callProtected($migration, 'isApplicable', $this->schemaWithoutTable()));
+    }
+
+    public function testV148SqlAddsAllExpectedColumns(): void
+    {
+        $sql = implode(' ', $this->collectSql($this->migration(Version_1_4_8::class)));
+
+        $this->assertStringContainsStringIgnoringCase('ADD COLUMN IF NOT EXISTS', $sql);
+        foreach ([
+            'client_id', 'channel_id', 'balance`', 'balance_currency',
+            'balance_updated_at', 'balance_alert_state', 'balance_usage_snapshot',
+        ] as $column) {
+            $this->assertStringContainsString($column, $sql);
+        }
+    }
+
+    public function testV148SqlTargetsNumbersTable(): void
+    {
+        $sql = implode(' ', $this->collectSql($this->migration(Version_1_4_8::class)));
+        $this->assertStringContainsString('dialog_hsm_numbers', $sql);
+    }
+
+    public function testV148SqlCreatesBalanceHistoryTable(): void
+    {
+        $sql = implode(' ', $this->collectSql($this->migration(Version_1_4_8::class)));
+
+        $this->assertStringContainsStringIgnoringCase('CREATE TABLE IF NOT EXISTS', $sql);
+        $this->assertStringContainsString('dialog_hsm_number_balance_history', $sql);
+        foreach (['whatsapp_number_id', 'recharge_date', 'recharge_amount', 'balance_at_sync', 'currency'] as $column) {
+            $this->assertStringContainsString($column, $sql);
+        }
+    }
+
+    // =========================================================================
     // Contrato geral: nenhuma migration gera SQL vazio
     // =========================================================================
 
@@ -636,6 +697,7 @@ class MigrationIdempotencyTest extends TestCase
             [Version_1_2_0::class],
             [Version_1_4_1::class],
             [Version_1_4_2::class],
+            [Version_1_4_8::class],
         ];
     }
 }
