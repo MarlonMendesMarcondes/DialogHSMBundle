@@ -12,6 +12,8 @@ use Symfony\Component\Form\Extension\Core\Type\NumberType;
 use Symfony\Component\Form\Extension\Core\Type\PasswordType;
 use Symfony\Component\Form\Extension\Core\Type\TextType;
 use Symfony\Component\Form\FormBuilderInterface;
+use Symfony\Component\Form\FormEvent;
+use Symfony\Component\Form\FormEvents;
 use Symfony\Component\OptionsResolver\OptionsResolver;
 use Symfony\Contracts\Translation\TranslatorInterface;
 
@@ -233,6 +235,21 @@ class ConfigAuthType extends AbstractType
                 'help_html'    => true,
             ]
         );
+
+        // Se o campo partner_api_key for enviado vazio, mantém o valor já
+        // configurado em vez de apagar — mesmo padrão usado pra apiKey em
+        // WhatsAppNumberType. Sem isso, salvar a tela de Config por qualquer
+        // motivo (ex: mudar um limite) apagava a chave se o campo de senha
+        // chegasse vazio no submit.
+        $existingPartnerApiKey = $data['partner_api_key'] ?? '';
+        $builder->addEventListener(FormEvents::PRE_SUBMIT, function (FormEvent $event) use ($existingPartnerApiKey): void {
+            $submitted = $event->getData();
+
+            if (is_array($submitted) && empty($submitted['partner_api_key']) && !empty($existingPartnerApiKey)) {
+                $submitted['partner_api_key'] = $existingPartnerApiKey;
+                $event->setData($submitted);
+            }
+        });
     }
 
     public function configureOptions(OptionsResolver $resolver): void
