@@ -103,7 +103,7 @@
                     <td>
                         {% if item.getBalanceUpdatedAt() %}
                             <span title="{{ 'dialoghsm.number.balance.updated_at'|trans }}: {{ item.getBalanceUpdatedAt()|date('d/m/Y H:i') }}">
-                                <strong>{{ item.getBalance() }}</strong> {{ item.getBalanceCurrency()|upper }}
+                                <strong>{{ '%.2f'|format(item.getBalance()) }}</strong> {{ item.getBalanceCurrency()|upper }}
                             </span>
                         {% else %}
                             <span class="text-muted">{{ 'dialoghsm.number.balance.not_checked_short'|trans }}</span>

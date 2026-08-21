@@ -69,7 +69,7 @@
             <div class="col-md-4">
                 <p id="balance-current" class="small">
                     {% if entity.balanceUpdatedAt %}
-                        <strong style="font-size:18px">{{ entity.balance }} {{ entity.balanceCurrency|upper }}</strong>
+                        <strong style="font-size:18px">{{ '%.2f'|format(entity.balance) }} {{ entity.balanceCurrency|upper }}</strong>
                         <br>
                         <span class="text-muted">{{ 'dialoghsm.number.balance.updated_at'|trans }}: {{ entity.balanceUpdatedAt|date('d/m/Y H:i') }}</span>
                     {% else %}
@@ -111,7 +111,7 @@
                 <div class="small">{{ entry.rechargeDate|date('d/m/Y') }}</div>
                 <div>
                     {% if entry.rechargeAmount is not null %}
-                        <strong>+{{ entry.rechargeAmount }} {{ entry.currency|upper }}</strong>
+                        <strong>+{{ '%.2f'|format(entry.rechargeAmount) }} {{ entry.currency|upper }}</strong>
                     {% else %}
                         —
                     {% endif %}
@@ -231,7 +231,7 @@
             success: function (d) {
                 if (d.success) {
                     var currency = (d.currency || '').toUpperCase();
-                    currentEl.innerHTML = '<strong>' + d.balance + ' ' + currency + '</strong><br>'
+                    currentEl.innerHTML = '<strong>' + Number(d.balance).toFixed(2) + ' ' + currency + '</strong><br>'
                         + '<span class="text-muted">{{ 'dialoghsm.number.balance.updated_at'|trans }}: '
                         + new Date(d.balanceUpdatedAt).toLocaleString() + '</span>';
                     resultDiv.style.display = 'none';
@@ -294,7 +294,7 @@
                     label: function (tooltipItem, data) {
                         var datasetLabel = data.datasets[tooltipItem.datasetIndex].label || '';
 
-                        return datasetLabel + ': ' + tooltipItem.yLabel + ' ' + currency;
+                        return datasetLabel + ': ' + Number(tooltipItem.yLabel).toFixed(2) + ' ' + currency;
                     }
                 }
             },
