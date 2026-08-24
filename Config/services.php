@@ -42,6 +42,10 @@ return function (ContainerConfigurator $configurator): void {
         ->autoconfigure()
         ->arg('$directTransportDsn', '%env(MAUTIC_MESSENGER_DSN_WHATSAPP_DIRECT)%');
 
+    // Substitui o serviço buggy do core (ver CampaignAuditServiceFix::addWarningForUnpublishedEmails).
+    $services->set(\Mautic\CampaignBundle\Service\CampaignAuditService::class, \MauticPlugin\DialogHSMBundle\Service\CampaignAuditServiceFix::class)
+        ->autowire();
+
     $services->set(\MauticPlugin\DialogHSMBundle\EventListener\ApiKeyEncryptionSubscriber::class)
         ->autowire()
         ->tag('doctrine.event_listener', ['event' => 'postLoad'])
