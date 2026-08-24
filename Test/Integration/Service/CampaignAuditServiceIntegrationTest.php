@@ -6,7 +6,10 @@ use Doctrine\ORM\EntityManagerInterface;
 use Mautic\CampaignBundle\Entity\Campaign;
 use Mautic\CampaignBundle\Entity\CampaignRepository;
 use Mautic\CampaignBundle\Entity\Event as CampaignEvent;
+use Mautic\CampaignBundle\EventListener\CampaignSubscriber as CoreCampaignSubscriber;
+use Mautic\CampaignBundle\Event\CampaignEvent as CoreCampaignEventWrapper;
 use Mautic\CampaignBundle\Service\CampaignAuditService;
+use Mautic\EmailBundle\Entity\Email;
 use MauticPlugin\DialogHSMBundle\Service\CampaignAuditServiceFix;
 use PHPUnit\Framework\TestCase;
 
@@ -37,6 +40,9 @@ class CampaignAuditServiceIntegrationTest extends TestCase
     private EntityManagerInterface $em;
     private CampaignRepository $campaignRepository;
     private Campaign $wpOnlyCampaign;
+
+    /** @var array<int, object> entidades extra criadas por teste, removidas no tearDown */
+    private array $extraEntities = [];
 
     public static function setUpBeforeClass(): void
     {
@@ -71,8 +77,16 @@ class CampaignAuditServiceIntegrationTest extends TestCase
     {
         if (isset($this->wpOnlyCampaign) && $this->wpOnlyCampaign->getId()) {
             $this->em->remove($this->wpOnlyCampaign);
-            $this->em->flush();
         }
+
+        foreach ($this->extraEntities as $entity) {
+            if (\Doctrine\ORM\UnitOfWork::STATE_MANAGED === $this->em->getUnitOfWork()->getEntityState($entity)) {
+                $this->em->remove($entity);
+            }
+        }
+
+        $this->em->flush();
+        $this->extraEntities = [];
     }
 
     private function createPublishedCampaignWithoutEmailActions(): Campaign
@@ -96,6 +110,82 @@ class CampaignAuditServiceIntegrationTest extends TestCase
         $this->em->flush();
 
         return $campaign;
+    }
+
+    private function createEmail(bool $published): Email
+    {
+        $email = new Email();
+        $email->setName('TESTE INTEGRAÇÃO — email '.uniqid('', true));
+        $email->setSubject('Assunto de teste');
+        $email->setIsPublished($published);
+
+        $this->em->persist($email);
+        $this->em->flush();
+
+        $this->extraEntities[] = $email;
+
+        return $email;
+    }
+
+    private function addEmailAction(Campaign $campaign, Email $email): CampaignEvent
+    {
+        $event = new CampaignEvent();
+        $event->setName('Enviar email (teste)');
+        $event->setType('email.send');
+        $event->setEventType('action');
+        $event->setChannel('email');
+        $event->setChannelId($email->getId());
+        $event->setCampaign($campaign);
+        $event->setProperties([]);
+
+        $campaign->addEvent(1, $event);
+        $this->em->persist($event);
+        $this->em->flush();
+
+        // Não entra em $extraEntities: Campaign::events tem cascadeAll(),
+        // então remover a campanha no tearDown já remove este evento.
+        return $event;
+    }
+
+    /**
+     * A forma como o FlashBag do core acessa a sessão mudou entre Mautic 5 e 7:
+     * no Mautic 5 ele recebe uma Session injetada direto (propriedade $session);
+     * no Mautic 7 ele usa $requestStack->getSession() (a propriedade não existe
+     * mais — confirmado via ReflectionException rodando este teste lá). Fora de
+     * uma requisição HTTP real (CLI/PHPUnit), getSession() só funciona se
+     * empurrarmos uma Request com sessão no RequestStack primeiro.
+     */
+    private function getFlashBagSession(): \Symfony\Component\HttpFoundation\Session\SessionInterface
+    {
+        $container = self::$kernel->getContainer();
+        $flashBag  = $container->get(\Mautic\CoreBundle\Service\FlashBag::class);
+
+        if ((new \ReflectionClass($flashBag))->hasProperty('session')) {
+            $property = new \ReflectionProperty($flashBag, 'session');
+            $property->setAccessible(true);
+
+            return $property->getValue($flashBag);
+        }
+
+        $requestStack = $container->get('request_stack');
+        $request      = $requestStack->getCurrentRequest();
+
+        if (null === $request || !$request->hasSession()) {
+            // "session.factory" é privado/inlined no container compilado (Mautic 7) —
+            // não precisamos do serviço real, só de uma Session funcional pra inspecionar
+            // o FlashBag que o core escreve nela.
+            $session = new \Symfony\Component\HttpFoundation\Session\Session(
+                new \Symfony\Component\HttpFoundation\Session\Storage\MockArraySessionStorage()
+            );
+            $request = $request ?? new \Symfony\Component\HttpFoundation\Request();
+            $request->setSession($session);
+
+            if (null === $requestStack->getCurrentRequest()) {
+                $requestStack->push($request);
+            }
+        }
+
+        return $requestStack->getSession();
     }
 
     public function testFetchEmailIdsByIdIsEmptyForWhatsAppOnlyCampaign(): void
@@ -170,5 +260,89 @@ class CampaignAuditServiceIntegrationTest extends TestCase
         $campaignModel->saveEntity($this->wpOnlyCampaign);
 
         $this->addToAssertionCount(1);
+    }
+
+    /**
+     * Garante que o fix não é "silenciar tudo": campanha mista (WhatsApp + email)
+     * deve continuar funcionando exatamente como antes — fetchEmailIdsById()
+     * retorna o id do email, e ele é carregado normalmente.
+     */
+    public function testMixedChannelCampaignStillLoadsLinkedEmail(): void
+    {
+        $email = $this->createEmail(published: true);
+        $this->addEmailAction($this->wpOnlyCampaign, $email);
+
+        $emailIds = $this->campaignRepository->fetchEmailIdsById($this->wpOnlyCampaign->getId());
+        // Hydratação de int como string varia entre versões/drivers do Doctrine (visto no Mautic 7);
+        // o que importa aqui é o valor, não o tipo exato retornado pelo core.
+        $this->assertSame([$email->getId()], array_map('intval', $emailIds));
+
+        $service = self::$kernel->getContainer()->get(CampaignAuditService::class);
+        $service->addWarningForUnpublishedEmails($this->wpOnlyCampaign);
+
+        $this->addToAssertionCount(1); // não lança exception com email vinculado
+    }
+
+    /**
+     * Comportamento original preservado: email NÃO publicado vinculado a uma
+     * campanha publicada deve gerar um flash warning — o fix não pode
+     * silenciar esse aviso legítimo.
+     */
+    public function testWarnsWhenLinkedEmailIsUnpublished(): void
+    {
+        $email = $this->createEmail(published: false);
+        $this->addEmailAction($this->wpOnlyCampaign, $email);
+
+        $session = $this->getFlashBagSession();
+        $session->getFlashBag()->clear();
+
+        $service = self::$kernel->getContainer()->get(CampaignAuditService::class);
+        $service->addWarningForUnpublishedEmails($this->wpOnlyCampaign);
+
+        $warnings = $session->getFlashBag()->peek('warning');
+        $this->assertNotEmpty(
+            $warnings,
+            'Email não publicado vinculado a campanha publicada deve gerar flash warning.'
+        );
+    }
+
+    /**
+     * Espelho do teste anterior: email PUBLICADO não deve gerar nenhum warning.
+     */
+    public function testDoesNotWarnWhenLinkedEmailIsPublished(): void
+    {
+        $email = $this->createEmail(published: true);
+        $this->addEmailAction($this->wpOnlyCampaign, $email);
+
+        $session = $this->getFlashBagSession();
+        $session->getFlashBag()->clear();
+
+        $service = self::$kernel->getContainer()->get(CampaignAuditService::class);
+        $service->addWarningForUnpublishedEmails($this->wpOnlyCampaign);
+
+        $warnings = $session->getFlashBag()->peek('warning');
+        $this->assertEmpty(
+            $warnings,
+            'Email publicado não deve gerar flash warning.'
+        );
+    }
+
+    /**
+     * Dispara o CampaignSubscriber REAL do core (não mockado) via
+     * CAMPAIGN_POST_SAVE, exatamente como o CampaignController::saveAction
+     * dispara em produção — para garantir que a proteção vale no caminho
+     * completo do evento, não só chamando addWarningForUnpublishedEmails()
+     * isoladamente.
+     */
+    public function testCoreCampaignSubscriberPostSaveDoesNotThrowForWhatsAppOnlyCampaign(): void
+    {
+        $container      = self::$kernel->getContainer();
+        $coreSubscriber = $container->get(CoreCampaignSubscriber::class);
+
+        $event = new CoreCampaignEventWrapper($this->wpOnlyCampaign, isNew: false);
+
+        $coreSubscriber->onCampaignPostSave($event);
+
+        $this->addToAssertionCount(1); // chegou aqui sem lançar exception = sucesso
     }
 }

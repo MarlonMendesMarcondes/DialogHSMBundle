@@ -8,12 +8,14 @@ use Mautic\CampaignBundle\Entity\CampaignRepository;
 use Mautic\CampaignBundle\Entity\Event as CampaignEvent;
 use Mautic\CampaignBundle\Entity\EventRepository;
 use Mautic\CampaignBundle\Entity\LeadEventLog;
+use Mautic\CampaignBundle\Entity\LeadEventLogRepository;
 use Mautic\CampaignBundle\EventCollector\Accessor\Event\ActionAccessor;
 use Mautic\CampaignBundle\EventListener\CampaignEventSubscriber;
 use Mautic\CampaignBundle\Executioner\Dispatcher\ActionDispatcher;
 use Mautic\CampaignBundle\Executioner\Dispatcher\LegacyEventDispatcher;
 use Mautic\CampaignBundle\Executioner\Helper\NotificationHelper;
 use Mautic\CampaignBundle\Executioner\Scheduler\EventScheduler;
+use Mautic\CampaignBundle\Model\CampaignModel;
 use Doctrine\ORM\EntityManagerInterface;
 use Mautic\IntegrationsBundle\Helper\IntegrationsHelper;
 use Mautic\LeadBundle\Entity\Lead;
@@ -48,6 +50,16 @@ use Symfony\Component\Messenger\MessageBusInterface;
  *
  * Isso fecha a lacuna dos testes unitários, que só verificam que passWithError()/
  * fail() foram chamados — nunca o que o core do Mautic faz de fato com essa chamada.
+ *
+ * IMPORTANTE — divergência real de comportamento entre Mautic 5 e 7:
+ * o core reescreveu completamente a lógica de auto-disable entre as duas versões.
+ *   Mautic 5: threshold fixo de 10%, sem mínimo de contatos, conta toda falha.
+ *   Mautic 7: threshold de 35%, mínimo de 100 contatos, e só conta a falha depois
+ *             que o MESMO contato falhou LOOPS_TO_FAIL (100) vezes seguidas no
+ *             mesmo evento (mecanismo anti-flapping que não existia no Mautic 5).
+ * Este teste lê threshold/mínimo via reflection na classe real do core (nunca
+ * hardcoded), então continua válido e significativo em ambas as versões — em vez
+ * de só "consertar a assinatura do mock e fingir que a mecânica é a mesma".
  */
 class CampaignAutoDisableIntegrationTest extends TestCase
 {
@@ -62,8 +74,8 @@ class CampaignAutoDisableIntegrationTest extends TestCase
     protected function setUp(): void
     {
         // EventRepository real faria UPDATE no banco (incrementFailedCount) — aqui
-        // simulamos o contador em memória, mas a DECISÃO de desativar (>= 10%) é
-        // feita pelo CampaignEventSubscriber::onEventFailed() real, não por nós.
+        // simulamos o contador em memória, mas a DECISÃO de desativar (threshold real)
+        // é feita pelo CampaignEventSubscriber::onEventFailed() real, não por nós.
         $this->mockEventRepository = $this->createMock(EventRepository::class);
         $this->mockEventRepository->method('incrementFailedCount')
             ->willReturnCallback(function (CampaignEvent $event) {
@@ -73,13 +85,18 @@ class CampaignAutoDisableIntegrationTest extends TestCase
                 return $this->failedCounts[$id];
             });
 
+        // Mautic 7: getFailedCountLeadEvent() precisa retornar exatamente LOOPS_TO_FAIL
+        // pra passar do guard anti-flapping e a falha ser contada (ver onEventFailed()).
+        // Mautic 5 não tem esse método no EventRepository real — createMock() nem
+        // deixa configurar um método inexistente, por isso o reflection abaixo.
+        if (method_exists(EventRepository::class, 'getFailedCountLeadEvent')) {
+            $loopsToFail = $this->coreConstant('LOOPS_TO_FAIL', 100);
+            $this->mockEventRepository->method('getFailedCountLeadEvent')->willReturn($loopsToFail);
+        }
+
         $this->mockCampaignRepository = $this->createMock(CampaignRepository::class);
 
-        $realCampaignEventSubscriber = new CampaignEventSubscriber(
-            $this->mockEventRepository,
-            $this->createMock(NotificationHelper::class),
-            $this->mockCampaignRepository,
-        );
+        $realCampaignEventSubscriber = $this->buildCoreCampaignEventSubscriber();
 
         // EventDispatcher REAL do Symfony — não um mock. É ele quem efetivamente
         // liga o nosso CampaignSubscriber (plugin) ao CampaignEventSubscriber (core).
@@ -94,6 +111,94 @@ class CampaignAutoDisableIntegrationTest extends TestCase
             $this->createMock(EventScheduler::class),
             $this->createMock(LegacyEventDispatcher::class),
         );
+    }
+
+    /**
+     * Lê uma constante da classe REAL do core, sem hardcode — funciona em
+     * qualquer versão do Mautic que a declare (ex.: LOOPS_TO_FAIL,
+     * MINIMUM_CONTACTS_FOR_DISABLE, DISABLE_CAMPAIGN_THRESHOLD). Se a versão
+     * instalada não tiver essa constante (Mautic 5, que usa uma property em
+     * vez de const), cai no $default.
+     */
+    private function coreConstant(string $name, int|float $default): int|float
+    {
+        $ref = new \ReflectionClass(CampaignEventSubscriber::class);
+
+        return $ref->hasConstant($name) ? $ref->getConstant($name) : $default;
+    }
+
+    /**
+     * Threshold real de falha que desativa a campanha, na versão do core
+     * instalada. Mautic 7 expõe DISABLE_CAMPAIGN_THRESHOLD como constante;
+     * Mautic 5 usa a property privada $disableCampaignThreshold (default 0.1),
+     * lida via valor default da property (não precisa de instância).
+     */
+    private function getDisableThreshold(): float
+    {
+        $ref = new \ReflectionClass(CampaignEventSubscriber::class);
+
+        if ($ref->hasConstant('DISABLE_CAMPAIGN_THRESHOLD')) {
+            return (float) $ref->getConstant('DISABLE_CAMPAIGN_THRESHOLD');
+        }
+
+        return (float) $ref->getProperty('disableCampaignThreshold')->getDefaultValue();
+    }
+
+    /**
+     * Quantidade mínima de contatos exigida pelo core antes de considerar
+     * desativar a campanha. Mautic 5 não tem esse conceito (retorna 1).
+     */
+    private function getMinimumContactsForDisable(): int
+    {
+        return (int) $this->coreConstant('MINIMUM_CONTACTS_FOR_DISABLE', 1);
+    }
+
+    /**
+     * Monta o CampaignEventSubscriber REAL do core com os mocks certos pra
+     * cada assinatura de construtor — Mautic 5 (EventRepository,
+     * NotificationHelper, CampaignRepository) ou Mautic 7+ (EventRepository,
+     * CampaignModel, LeadEventLogRepository, EventDispatcherInterface).
+     * Detecta pela contagem de parâmetros do construtor real, nunca hardcoded
+     * por versão — se o core mudar de novo, este teste avisa via TypeError
+     * em vez de mascarar silenciosamente.
+     */
+    private function buildCoreCampaignEventSubscriber(): CampaignEventSubscriber
+    {
+        $params = (new \ReflectionClass(CampaignEventSubscriber::class))->getConstructor()->getParameters();
+
+        if (3 === count($params)) {
+            return new CampaignEventSubscriber(
+                $this->mockEventRepository,
+                $this->createMock(NotificationHelper::class),
+                $this->mockCampaignRepository,
+            );
+        }
+
+        if (4 === count($params)) {
+            $mockCampaignModel = $this->createMock(CampaignModel::class);
+            // transactionalCampaignUnPublish() é o que de fato desativa a campanha
+            // no Mautic 7 — como CampaignModel está mockado, replicamos aqui o
+            // único efeito que o teste observa (campaign->isPublished() === false).
+            $mockCampaignModel->method('transactionalCampaignUnPublish')
+                ->willReturnCallback(static function (Campaign $campaign): void {
+                    $campaign->setIsPublished(false);
+                });
+
+            $mockLeadEventLogRepository = $this->createMock(LeadEventLogRepository::class);
+            $mockLeadEventLogRepository->method('isLastFailed')->willReturn(true);
+
+            return new CampaignEventSubscriber(
+                $this->mockEventRepository,
+                $mockCampaignModel,
+                $mockLeadEventLogRepository,
+                new EventDispatcher(), // dispatcher próprio só p/ hasListeners()/dispatch() internos, sem listeners
+            );
+        }
+
+        throw new \RuntimeException(sprintf(
+            'CampaignEventSubscriber::__construct() tem %d parâmetros — assinatura desconhecida, este teste precisa ser atualizado para a versão do Mautic instalada.',
+            count($params)
+        ));
     }
 
     /**
@@ -182,6 +287,11 @@ class CampaignAutoDisableIntegrationTest extends TestCase
         $event = new CampaignEvent();
         $event->setCampaign($campaign);
         $event->setType('dialoghsm.send_whatsapp_queue');
+        // Mautic 7: onEventFailed() chama $failedEvent->getId() logo no início
+        // (getFailedCountLeadEvent) — sem id setado (só ocorre via Doctrine em
+        // produção), o TypeError acontece antes de qualquer lógica de negócio ser
+        // exercida. Mautic 5 não precisa disso, mas setar não tem efeito colateral.
+        $this->setEntityId($event, 999);
         // Sem isso, getWhatsAppNumber() do plugin recebe id=0 (whatsapp_number ausente
         // das properties) e falha TODOS os contatos por "número não encontrado" antes
         // de sequer chegar em resolveFromWebhookLog() — mascarando o teste (qualquer
@@ -266,18 +376,22 @@ class CampaignAutoDisableIntegrationTest extends TestCase
     }
 
     /**
-     * 10 contatos, 1 falha técnica real (10% exato) → o CampaignEventSubscriber
-     * REAL do core desativa a campanha (setIsPublished(false) via saveEntity real
-     * do fluxo, verificado pela mudança de estado da entidade Campaign real).
+     * N contatos com falhas técnicas reais suficientes para atingir o threshold
+     * REAL do core instalado (10% no Mautic 5, 35% + mínimo de 100 contatos no
+     * Mautic 7) → o CampaignEventSubscriber real desativa a campanha.
      */
-    public function testOneRealTechnicalFailureOutOfTenContactsDisablesCampaign(): void
+    public function testTechnicalFailuresAtThresholdDisableCampaign(): void
     {
-        ['campaign' => $campaign, 'event' => $event, 'logs' => $logs] = $this->buildCampaignWithContacts(10);
+        $totalContacts     = max($this->getMinimumContactsForDisable(), 20);
+        $technicalFailures = max(1, (int) ceil($this->getDisableThreshold() * $totalContacts));
 
-        // Lead 1: erro técnico real (sem webhook_error_code) → deve contar como falha.
-        $logsByLead = [1 => $this->buildMessageLog(MessageLog::STATUS_FAILED, null)];
-        // Leads 2-10: sucesso.
-        for ($i = 2; $i <= 10; ++$i) {
+        ['campaign' => $campaign, 'event' => $event, 'logs' => $logs] = $this->buildCampaignWithContacts($totalContacts);
+
+        $logsByLead = [];
+        for ($i = 1; $i <= $technicalFailures; ++$i) {
+            $logsByLead[$i] = $this->buildMessageLog(MessageLog::STATUS_FAILED, null);
+        }
+        for ($i = $technicalFailures + 1; $i <= $totalContacts; ++$i) {
             $logsByLead[$i] = $this->buildMessageLog(MessageLog::STATUS_DELIVERED);
         }
 
@@ -289,7 +403,12 @@ class CampaignAutoDisableIntegrationTest extends TestCase
 
         self::assertFalse(
             $campaign->isPublished(),
-            'Com 1 falha técnica real em 10 contatos (10%), o CampaignEventSubscriber real do core deve desativar a campanha.'
+            sprintf(
+                'Com %d falhas técnicas reais em %d contatos (threshold real do core: %.0f%%), o CampaignEventSubscriber deve desativar a campanha.',
+                $technicalFailures,
+                $totalContacts,
+                $this->getDisableThreshold() * 100
+            )
         );
     }
 
@@ -330,22 +449,28 @@ class CampaignAutoDisableIntegrationTest extends TestCase
     }
 
     /**
-     * Mistura: de 10 contatos, 1 é falha técnica real (10%) e 3 são restrição Meta
-     * (131049/130472/131050) — comprova que só a falha técnica conta para o
-     * threshold real do core; as 3 restrições Meta são ignoradas pelo contador,
-     * mesmo representando 40% do total (se contassem, desativaria muito antes).
+     * Mistura: falhas técnicas reais suficientes para atingir o threshold real do
+     * core + 3 contatos extras com restrição Meta (131049/130472/131050) — comprova
+     * que só a falha técnica conta para o threshold; as 3 restrições Meta são
+     * ignoradas pelo contador mesmo aumentando o denominador (contactCount).
      */
     public function testMixOfTechnicalFailureAndMetaRestrictionsOnlyCountsTechnicalFailure(): void
     {
-        ['campaign' => $campaign, 'event' => $event, 'logs' => $logs] = $this->buildCampaignWithContacts(10);
+        $baseContacts      = max($this->getMinimumContactsForDisable(), 20);
+        $totalContacts     = $baseContacts + 3; // +3 leads de restrição Meta, somados ao denominador
+        $technicalFailures = max(1, (int) ceil($this->getDisableThreshold() * $totalContacts));
+
+        ['campaign' => $campaign, 'event' => $event, 'logs' => $logs] = $this->buildCampaignWithContacts($totalContacts);
 
         $logsByLead = [
-            1 => $this->buildMessageLog(MessageLog::STATUS_FAILED, null),    // técnico real: conta
-            2 => $this->buildMessageLog(MessageLog::STATUS_FAILED, 131049), // restrição Meta: não conta
-            3 => $this->buildMessageLog(MessageLog::STATUS_DLQ, 130472),    // restrição Meta: não conta
-            4 => $this->buildMessageLog(MessageLog::STATUS_FAILED, 131050), // restrição Meta: não conta
+            $totalContacts - 2 => $this->buildMessageLog(MessageLog::STATUS_FAILED, 131049), // restrição Meta: não conta
+            $totalContacts - 1 => $this->buildMessageLog(MessageLog::STATUS_DLQ, 130472),     // restrição Meta: não conta
+            $totalContacts     => $this->buildMessageLog(MessageLog::STATUS_FAILED, 131050),  // restrição Meta: não conta
         ];
-        for ($i = 5; $i <= 10; ++$i) {
+        for ($i = 1; $i <= $technicalFailures; ++$i) {
+            $logsByLead[$i] = $this->buildMessageLog(MessageLog::STATUS_FAILED, null); // técnico real: conta
+        }
+        for ($i = $technicalFailures + 1; $i <= $totalContacts - 3; ++$i) {
             $logsByLead[$i] = $this->buildMessageLog(MessageLog::STATUS_DELIVERED);
         }
 
@@ -355,12 +480,20 @@ class CampaignAutoDisableIntegrationTest extends TestCase
 
         self::assertFalse(
             $campaign->isPublished(),
-            '1 falha técnica real em 10 contatos (10%) deve desativar a campanha, mesmo com 3 restrições Meta adicionais que não contam.'
+            sprintf(
+                '%d falhas técnicas reais em %d contatos (threshold real: %.0f%%) devem desativar a campanha, mesmo com 3 restrições Meta adicionais que não contam.',
+                $technicalFailures,
+                $totalContacts,
+                $this->getDisableThreshold() * 100
+            )
         );
         self::assertSame(
-            1,
+            $technicalFailures,
             $this->failedCounts[spl_object_id($event)] ?? 0,
-            'O contador real de falhas do core (EventRepository::incrementFailedCount) deve ter sido incrementado exatamente 1 vez — só pela falha técnica, nunca pelas 3 restrições Meta.'
+            sprintf(
+                'O contador real de falhas do core (EventRepository::incrementFailedCount) deve ter sido incrementado exatamente %d vezes — só pelas falhas técnicas, nunca pelas 3 restrições Meta.',
+                $technicalFailures
+            )
         );
     }
 }
