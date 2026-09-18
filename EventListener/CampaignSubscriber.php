@@ -32,7 +32,10 @@ use Symfony\Component\Messenger\MessageBusInterface;
 
 class CampaignSubscriber implements EventSubscriberInterface
 {
-    private const WEBHOOK_TIMEOUT_SECONDS = 120;
+    // 120s era menor que a latência real dos webhooks de status da Meta/360dialog,
+    // fazendo o timeout disparar fail() antes do código de erro real chegar e derrubar
+    // campanhas via CampaignEventSubscriber::onEventFailed (threshold de 10% do core).
+    private const WEBHOOK_TIMEOUT_SECONDS = 600;
 
     /**
      * Códigos de erro da Meta que indicam restrição de qualidade/entrega ou opt-out do
