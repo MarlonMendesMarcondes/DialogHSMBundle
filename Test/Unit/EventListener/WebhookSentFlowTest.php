@@ -244,7 +244,7 @@ class WebhookSentFlowTest extends TestCase
     }
 
     // =========================================================================
-    // Cenário 2: pending_webhook → failed (webhook) → fail() no Batch #2
+    // Cenário 2: pending_webhook → failed (webhook) → passWithError() no Batch #2
     // =========================================================================
 
     /**
@@ -252,9 +252,11 @@ class WebhookSentFlowTest extends TestCase
      *
      * Batch #1: log inexistente → envia → (handler cria log pending_webhook)
      * Webhook:  pending_webhook → failed (ex: código 131047, janela expirada)
-     * Batch #2: log com failed → fail()
+     * Batch #2: log com failed → passWithError() (razão 'webhook_failed', pois 131047
+     * não é código de restrição Meta em META_RESTRICTION_CODES; nunca fail(), para
+     * não contar no threshold de 10% de auto-disable do core)
      */
-    public function testBatch1WebhookFailedBatch2CallsFail(): void
+    public function testBatch1WebhookFailedBatch2CallsPassWithError(): void
     {
         $wamid   = 'wamid_failed_xyz789';
         $contact = $this->makeContact(id: 1);
@@ -318,15 +320,19 @@ class WebhookSentFlowTest extends TestCase
         $subscriber2   = $this->makeSubscriber($logRepo2, $batchHandler2);
         $pendingEvent2 = $this->makePendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
 
-        // Re-execução com failed: fail() é chamado, campanha roteia para ramo de erro
+        // Re-execução com failed: passWithError() é chamado, campanha roteia para
+        // ramo de erro sem nunca acionar fail() (que contaria no threshold do core)
         $pendingEvent2->expects($this->never())->method('pass');
-        $pendingEvent2->expects($this->once())->method('fail');
+        $pendingEvent2->expects($this->never())->method('fail');
+        $pendingEvent2->expects($this->once())
+            ->method('passWithError')
+            ->with($this->anything(), 'dialoghsm.campaign.error.webhook_failed');
 
         $subscriber2->onCampaignTriggerAction($pendingEvent2);
     }
 
     // =========================================================================
-    // Cenário 3: pending_webhook → timeout (webhook nunca chegou) → fail()
+    // Cenário 3: pending_webhook → timeout (webhook nunca chegou) → passWithError()
     // =========================================================================
 
     /**
@@ -334,9 +340,10 @@ class WebhookSentFlowTest extends TestCase
      *
      * Batch #1: log inexistente → envia → (handler cria log pending_webhook)
      * (webhook nunca chega — número inexistente, problema na 360dialog, etc.)
-     * Batch #2 (após 120s): log ainda pending_webhook mas dateSent antiga → fail()
+     * Batch #2 (após 120s): log ainda pending_webhook mas dateSent antiga →
+     * passWithError() (razão 'webhook_timeout'), nunca fail()
      */
-    public function testBatch1NoWebhookTimeoutBatch2CallsFail(): void
+    public function testBatch1NoWebhookTimeoutBatch2CallsPassWithError(): void
     {
         $contact = $this->makeContact(id: 1);
 
@@ -375,9 +382,12 @@ class WebhookSentFlowTest extends TestCase
         $subscriber2   = $this->makeSubscriber($logRepo2, $batchHandler2);
         $pendingEvent2 = $this->makePendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
 
-        // Timeout: fail() é chamado após 120s sem webhook
+        // Timeout: passWithError() é chamado após 120s sem webhook, nunca fail()
         $pendingEvent2->expects($this->never())->method('pass');
-        $pendingEvent2->expects($this->once())->method('fail');
+        $pendingEvent2->expects($this->never())->method('fail');
+        $pendingEvent2->expects($this->once())
+            ->method('passWithError')
+            ->with($this->anything(), 'dialoghsm.campaign.error.webhook_timeout');
 
         $subscriber2->onCampaignTriggerAction($pendingEvent2);
     }

@@ -49,7 +49,16 @@ use Symfony\Component\Messenger\MessageBusInterface;
  * Symfony/banco de teste neste projeto (ver project_integration_test_infra_gap).
  *
  * Isso fecha a lacuna dos testes unitários, que só verificam que passWithError()/
- * fail() foram chamados — nunca o que o core do Mautic faz de fato com essa chamada.
+ * passAllWithError() foram chamados — nunca o que o core do Mautic faz de fato com
+ * essa chamada.
+ *
+ * IMPORTANTE — CampaignSubscriber não chama mais fail()/failAll() (ver o próprio
+ * arquivo do plugin): todo caminho de falha usa passWithError()/passAllWithError(),
+ * que nunca alimenta PendingEvent::getFailures() nem dispara ON_EVENT_FAILED. Ou
+ * seja, o comportamento validado aqui NÃO é mais "quantas falhas técnicas atingem o
+ * threshold e desativam a campanha" — é a garantia oposta: nenhuma falha do
+ * DialogHSM, técnica ou de restrição Meta, jamais desativa a campanha, porque o
+ * plugin nunca aciona o caminho fail()/failAll() do core que leva a isso.
  *
  * IMPORTANTE — divergência real de comportamento entre Mautic 5 e 7:
  * o core reescreveu completamente a lógica de auto-disable entre as duas versões.
@@ -376,11 +385,15 @@ class CampaignAutoDisableIntegrationTest extends TestCase
     }
 
     /**
-     * N contatos com falhas técnicas reais suficientes para atingir o threshold
-     * REAL do core instalado (10% no Mautic 5, 35% + mínimo de 100 contatos no
-     * Mautic 7) → o CampaignEventSubscriber real desativa a campanha.
+     * N contatos com falhas técnicas reais, em quantidade suficiente para atingir
+     * (e superar) o threshold REAL do core instalado (10% no Mautic 5, 35% +
+     * mínimo de 100 contatos no Mautic 7) — SE o plugin ainda chamasse fail(), isso
+     * desativaria a campanha. Desde que CampaignSubscriber passou a usar
+     * passWithError() em todo caminho de falha (nunca mais fail()/failAll()), o log
+     * cai em PendingEvent::getSuccessful(), ON_EVENT_FAILED nunca é disparado, e a
+     * campanha permanece publicada mesmo com 100% de falhas técnicas.
      */
-    public function testTechnicalFailuresAtThresholdDisableCampaign(): void
+    public function testTechnicalFailuresAtOrAboveThresholdNeverDisableCampaign(): void
     {
         $totalContacts     = max($this->getMinimumContactsForDisable(), 20);
         $technicalFailures = max(1, (int) ceil($this->getDisableThreshold() * $totalContacts));
@@ -399,16 +412,27 @@ class CampaignAutoDisableIntegrationTest extends TestCase
 
         self::assertTrue($campaign->isPublished(), 'Pré-condição: campanha deve começar publicada.');
 
-        $this->dispatch($event, $logs, $pluginSubscriber);
+        $pendingEvent = $this->dispatch($event, $logs, $pluginSubscriber);
 
-        self::assertFalse(
+        self::assertCount(
+            0,
+            $pendingEvent->getFailures(),
+            'PendingEvent::getFailures() real deve ficar vazio — desde que fail() foi removido do CampaignSubscriber, falhas técnicas caem em getSuccessful() via passWithError().'
+        );
+
+        self::assertTrue(
             $campaign->isPublished(),
             sprintf(
-                'Com %d falhas técnicas reais em %d contatos (threshold real do core: %.0f%%), o CampaignEventSubscriber deve desativar a campanha.',
+                'Com %d falhas técnicas reais em %d contatos (threshold real do core: %.0f%%), a campanha deve permanecer publicada — o plugin não chama mais fail()/failAll(), então o CampaignEventSubscriber do core nunca roda onEventFailed().',
                 $technicalFailures,
                 $totalContacts,
                 $this->getDisableThreshold() * 100
             )
+        );
+        self::assertSame(
+            0,
+            $this->failedCounts[spl_object_id($event)] ?? 0,
+            'EventRepository::incrementFailedCount() nunca deve ser chamado — ON_EVENT_FAILED só é disparado por PendingEvent::fail()/failAll(), que o plugin não usa mais.'
         );
     }
 
@@ -417,7 +441,9 @@ class CampaignAutoDisableIntegrationTest extends TestCase
      * que adicionamos em META_RESTRICTION_CODES) → o plugin chama passWithError(),
      * o log nunca entra em PendingEvent::getFailures(), o ActionDispatcher REAL
      * nunca dispara ON_EVENT_FAILED, e o CampaignEventSubscriber REAL do core
-     * nunca roda onEventFailed() → campanha continua publicada.
+     * nunca roda onEventFailed() → campanha continua publicada. Esta é uma instância
+     * específica da garantia geral (ver testTechnicalFailuresAtOrAboveThresholdNeverDisableCampaign):
+     * restrição Meta é só mais um dos caminhos de falha do plugin, todos via passWithError().
      */
     public function testOneMetaRestrictionOutOfTenContactsDoesNotDisableCampaign(): void
     {
@@ -449,12 +475,13 @@ class CampaignAutoDisableIntegrationTest extends TestCase
     }
 
     /**
-     * Mistura: falhas técnicas reais suficientes para atingir o threshold real do
-     * core + 3 contatos extras com restrição Meta (131049/130472/131050) — comprova
-     * que só a falha técnica conta para o threshold; as 3 restrições Meta são
-     * ignoradas pelo contador mesmo aumentando o denominador (contactCount).
+     * Mistura: falhas técnicas reais em quantidade suficiente para, no comportamento
+     * antigo (fail()), atingir o threshold real do core + 3 contatos extras com
+     * restrição Meta (131049/130472/131050). Comprova a garantia geral: nem as
+     * falhas técnicas nem as restrições Meta desativam a campanha ou incrementam o
+     * contador de falhas do core — nenhum dos dois caminhos usa mais fail()/failAll().
      */
-    public function testMixOfTechnicalFailureAndMetaRestrictionsOnlyCountsTechnicalFailure(): void
+    public function testMixOfTechnicalFailureAndMetaRestrictionsNeverDisablesCampaign(): void
     {
         $baseContacts      = max($this->getMinimumContactsForDisable(), 20);
         $totalContacts     = $baseContacts + 3; // +3 leads de restrição Meta, somados ao denominador
@@ -468,7 +495,7 @@ class CampaignAutoDisableIntegrationTest extends TestCase
             $totalContacts     => $this->buildMessageLog(MessageLog::STATUS_FAILED, 131050),  // restrição Meta: não conta
         ];
         for ($i = 1; $i <= $technicalFailures; ++$i) {
-            $logsByLead[$i] = $this->buildMessageLog(MessageLog::STATUS_FAILED, null); // técnico real: conta
+            $logsByLead[$i] = $this->buildMessageLog(MessageLog::STATUS_FAILED, null); // técnico real: também não conta mais
         }
         for ($i = $technicalFailures + 1; $i <= $totalContacts - 3; ++$i) {
             $logsByLead[$i] = $this->buildMessageLog(MessageLog::STATUS_DELIVERED);
@@ -476,24 +503,23 @@ class CampaignAutoDisableIntegrationTest extends TestCase
 
         $pluginSubscriber = $this->makePluginSubscriberWithLogs($logsByLead);
 
+        self::assertTrue($campaign->isPublished(), 'Pré-condição: campanha deve começar publicada.');
+
         $this->dispatch($event, $logs, $pluginSubscriber);
 
-        self::assertFalse(
+        self::assertTrue(
             $campaign->isPublished(),
             sprintf(
-                '%d falhas técnicas reais em %d contatos (threshold real: %.0f%%) devem desativar a campanha, mesmo com 3 restrições Meta adicionais que não contam.',
+                '%d falhas técnicas reais + 3 restrições Meta em %d contatos (threshold real: %.0f%%) NÃO devem desativar a campanha — o plugin não chama mais fail()/failAll() em nenhum dos dois caminhos.',
                 $technicalFailures,
                 $totalContacts,
                 $this->getDisableThreshold() * 100
             )
         );
         self::assertSame(
-            $technicalFailures,
+            0,
             $this->failedCounts[spl_object_id($event)] ?? 0,
-            sprintf(
-                'O contador real de falhas do core (EventRepository::incrementFailedCount) deve ter sido incrementado exatamente %d vezes — só pelas falhas técnicas, nunca pelas 3 restrições Meta.',
-                $technicalFailures
-            )
+            'O contador real de falhas do core (EventRepository::incrementFailedCount) nunca deve ser incrementado — nem pelas falhas técnicas, nem pelas restrições Meta, já que nenhuma delas passa mais por fail()/failAll().'
         );
     }
 }

@@ -33,15 +33,21 @@ use Symfony\Component\Messenger\MessageBusInterface;
 class CampaignSubscriber implements EventSubscriberInterface
 {
     // 120s era menor que a latência real dos webhooks de status da Meta/360dialog,
-    // fazendo o timeout disparar fail() antes do código de erro real chegar e derrubar
-    // campanhas via CampaignEventSubscriber::onEventFailed (threshold de 10% do core).
+    // fazendo o timeout disparar antes do código de erro real chegar.
     private const WEBHOOK_TIMEOUT_SECONDS = 600;
 
     /**
      * Códigos de erro da Meta que indicam restrição de qualidade/entrega ou opt-out do
-     * contato, não uma falha técnica do nosso lado. Não devem contar para o limite de
-     * 10% de falha que o Mautic core usa para desativar a campanha automaticamente
-     * (Mautic\CampaignBundle\EventListener\CampaignEventSubscriber::onEventFailed).
+     * contato, não uma falha técnica do nosso lado. Usados só para escolher a mensagem
+     * de razão mostrada na timeline ('meta_restricted' vs 'webhook_failed') — todo
+     * caminho de falha deste subscriber usa passWithError()/passAllWithError() em vez de
+     * fail()/failAll(), porque fail() alimenta PendingEvent::getFailures(), que é o que
+     * o Mautic core usa em CampaignEventSubscriber::onEventFailed() para desativar a
+     * campanha automaticamente quando a taxa de falha de um evento passa de 10%
+     * (ver project_campaign_auto_disable_threshold). passWithError() registra o mesmo
+     * "falhou" na UI/timeline (metadata failed=1), mas conta como sucesso para o core,
+     * então nunca aciona esse threshold. O status real (STATUS_FAILED) continua sendo
+     * gravado em dialog_hsm_message_log normalmente, via persistFailureLog().
      *
      * IMPORTANTE: esses códigos chegam via webhook (MessageLog::getWebhookErrorCode()),
      * não via HTTP status do envio síncrono. A 360dialog aceita a mensagem no envio
@@ -406,7 +412,7 @@ class CampaignSubscriber implements EventSubscriberInterface
                     $campaignId,
                     $campaignEventId,
                 );
-                $event->fail(
+                $event->passWithError(
                     $event->getPending()->get($logId),
                     'dialoghsm.campaign.error.invalid_phone'
                 );
@@ -439,7 +445,7 @@ class CampaignSubscriber implements EventSubscriberInterface
                     $campaignId,
                     $campaignEventId,
                 );
-                $event->fail(
+                $event->passWithError(
                     $event->getPending()->get($logId),
                     'dialoghsm.campaign.error.send_failed'
                 );
@@ -447,7 +453,7 @@ class CampaignSubscriber implements EventSubscriberInterface
             }
 
             if (!$success) {
-                $event->fail(
+                $event->passWithError(
                     $event->getPending()->get($logId),
                     'dialoghsm.campaign.error.send_failed'
                 );
@@ -488,7 +494,7 @@ class CampaignSubscriber implements EventSubscriberInterface
                 return;
             }
 
-            $event->fail($campaignLog, 'dialoghsm.campaign.error.webhook_failed');
+            $event->passWithError($campaignLog, 'dialoghsm.campaign.error.webhook_failed');
 
             return;
         }
@@ -496,7 +502,7 @@ class CampaignSubscriber implements EventSubscriberInterface
         if (MessageLog::STATUS_PENDING_WEBHOOK === $status) {
             $elapsed = (new \DateTime())->getTimestamp() - ($log->getDateSent()?->getTimestamp() ?? 0);
             if ($elapsed > self::WEBHOOK_TIMEOUT_SECONDS) {
-                $event->fail($campaignLog, 'dialoghsm.campaign.error.webhook_timeout');
+                $event->passWithError($campaignLog, 'dialoghsm.campaign.error.webhook_timeout');
             }
             // Dentro do timeout: permanece is_scheduled=1, reavaliado no próximo batch
         }
@@ -546,7 +552,7 @@ class CampaignSubscriber implements EventSubscriberInterface
             );
         }
 
-        $event->failAll($failMessage);
+        $event->passAllWithError($failMessage);
     }
 
     /**

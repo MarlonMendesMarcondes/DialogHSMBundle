@@ -317,7 +317,7 @@ class CampaignSubscriberActionTest extends TestCase
         $event = $this->buildPendingEvent('dialoghsm.send_whatsapp', $contacts);
 
         $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
-        $event->expects($this->exactly(2))->method('fail');
+        $event->expects($this->exactly(2))->method('passWithError');
         $event->expects($this->never())->method('pass');
 
         $this->subscriber->onCampaignTriggerAction($event);
@@ -330,7 +330,7 @@ class CampaignSubscriberActionTest extends TestCase
         $event = $this->buildPendingEvent('dialoghsm.send_whatsapp');
 
         $event->expects($this->once())
-            ->method('failAll')
+            ->method('passAllWithError')
             ->with('dialoghsm.campaign.error.integration_disabled');
 
         $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
@@ -349,7 +349,7 @@ class CampaignSubscriberActionTest extends TestCase
         $event = $this->buildPendingEvent('dialoghsm.send_whatsapp');
 
         $event->expects($this->once())
-            ->method('failAll')
+            ->method('passAllWithError')
             ->with('dialoghsm.campaign.error.missing_number');
 
         $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
@@ -368,7 +368,7 @@ class CampaignSubscriberActionTest extends TestCase
         $event = $this->buildPendingEvent('dialoghsm.send_whatsapp');
 
         $event->expects($this->once())
-            ->method('failAll')
+            ->method('passAllWithError')
             ->with('dialoghsm.campaign.error.missing_api_key');
 
         $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
@@ -388,7 +388,7 @@ class CampaignSubscriberActionTest extends TestCase
         $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
 
         $event->expects($this->once())
-            ->method('fail')
+            ->method('passWithError')
             ->with($this->anything(), 'dialoghsm.campaign.error.invalid_phone');
 
         $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
@@ -411,7 +411,7 @@ class CampaignSubscriberActionTest extends TestCase
         $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
 
         $event->expects($this->once())
-            ->method('fail')
+            ->method('passWithError')
             ->with($this->anything(), 'dialoghsm.campaign.error.invalid_phone');
 
         $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
@@ -446,7 +446,7 @@ class CampaignSubscriberActionTest extends TestCase
         // Primeira execução: pass() não é chamado (contatos válidos ficam is_scheduled=1)
         $event->expects($this->never())->method('pass');
         $event->expects($this->once())
-            ->method('fail')
+            ->method('passWithError')
             ->with($this->anything(), 'dialoghsm.campaign.error.invalid_phone');
 
         $this->subscriber->onCampaignTriggerAction($event);
@@ -900,9 +900,10 @@ class CampaignSubscriberActionTest extends TestCase
         $this->mockLogger->expects($this->once())->method('warning')
             ->with($this->stringContains('fila não configurada'));
 
-        // Contato recebe fail, pois o envio não ocorreu (fila não configurada)
+        // Contato recebe passWithError, pois o envio não ocorreu (fila não configurada) —
+        // nunca fail(), para não contar no threshold de 10% do core
         $event->expects($this->never())->method('pass');
-        $event->expects($this->once())->method('fail');
+        $event->expects($this->once())->method('passWithError');
 
         $this->subscriber->onCampaignTriggerActionQueue($event);
     }
@@ -914,7 +915,7 @@ class CampaignSubscriberActionTest extends TestCase
         $event = $this->buildPendingEvent('dialoghsm.send_whatsapp_queue');
 
         $event->expects($this->once())
-            ->method('failAll')
+            ->method('passAllWithError')
             ->with('dialoghsm.campaign.error.integration_disabled');
 
         $this->mockBus->expects($this->never())->method('dispatch');
@@ -934,7 +935,7 @@ class CampaignSubscriberActionTest extends TestCase
         $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp_queue', [1 => $contact]);
 
         $event->expects($this->once())
-            ->method('fail')
+            ->method('passWithError')
             ->with($this->anything(), 'dialoghsm.campaign.error.invalid_phone');
 
         $this->mockBus->expects($this->never())->method('dispatch');
@@ -992,7 +993,7 @@ class CampaignSubscriberActionTest extends TestCase
         $event = $this->buildPendingEvent('dialoghsm.send_whatsapp_queue');
 
         $event->expects($this->once())
-            ->method('failAll')
+            ->method('passAllWithError')
             ->with('dialoghsm.campaign.error.missing_number');
 
         $this->mockBus->expects($this->never())->method('dispatch');
@@ -1011,7 +1012,7 @@ class CampaignSubscriberActionTest extends TestCase
         $event = $this->buildPendingEvent('dialoghsm.send_whatsapp_queue');
 
         $event->expects($this->once())
-            ->method('failAll')
+            ->method('passAllWithError')
             ->with('dialoghsm.campaign.error.missing_api_key');
 
         $this->mockBus->expects($this->never())->method('dispatch');
@@ -1033,7 +1034,7 @@ class CampaignSubscriberActionTest extends TestCase
         $event = $this->buildPendingEvent('dialoghsm.send_whatsapp');
 
         $event->expects($this->once())
-            ->method('failAll')
+            ->method('passAllWithError')
             ->with('dialoghsm.campaign.error.missing_number');
 
         $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
@@ -1050,7 +1051,7 @@ class CampaignSubscriberActionTest extends TestCase
         $event = $this->buildPendingEvent('dialoghsm.send_whatsapp');
 
         $event->expects($this->once())
-            ->method('failAll')
+            ->method('passAllWithError')
             ->with('dialoghsm.campaign.error.integration_disabled');
 
         $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
@@ -1067,7 +1068,7 @@ class CampaignSubscriberActionTest extends TestCase
         $event = $this->buildPendingEvent('dialoghsm.send_whatsapp_queue');
 
         $event->expects($this->once())
-            ->method('failAll')
+            ->method('passAllWithError')
             ->with('dialoghsm.campaign.error.integration_disabled');
 
         $this->mockBus->expects($this->never())->method('dispatch');
@@ -1418,7 +1419,7 @@ class CampaignSubscriberActionTest extends TestCase
         $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
 
         $event->expects($this->once())
-            ->method('fail')
+            ->method('passWithError')
             ->with($this->anything(), 'dialoghsm.campaign.error.invalid_phone');
 
         $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
@@ -1683,9 +1684,10 @@ class CampaignSubscriberActionTest extends TestCase
     }
 
     /**
-     * Re-execução: log existente com status 'failed' → fail() é chamado.
+     * Re-execução: log existente com status 'failed' → passWithError() é chamado
+     * (nunca fail(), para não contar no threshold de 10% do core).
      */
-    public function testReExecutionWithFailedStatusCallsFail(): void
+    public function testReExecutionWithFailedStatusCallsPassWithError(): void
     {
         $this->enableIntegration();
         $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
@@ -1700,16 +1702,20 @@ class CampaignSubscriberActionTest extends TestCase
         $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
 
         $event->expects($this->never())->method('pass');
-        $event->expects($this->once())->method('fail');
+        $event->expects($this->never())->method('fail');
+        $event->expects($this->once())
+            ->method('passWithError')
+            ->with($this->anything(), 'dialoghsm.campaign.error.webhook_failed');
         $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
 
         $subscriber->onCampaignTriggerAction($event);
     }
 
     /**
-     * Re-execução: log existente com status 'dlq' → fail() é chamado.
+     * Re-execução: log existente com status 'dlq' → passWithError() é chamado
+     * (nunca fail(), para não contar no threshold de 10% do core).
      */
-    public function testReExecutionWithDlqStatusCallsFail(): void
+    public function testReExecutionWithDlqStatusCallsPassWithError(): void
     {
         $this->enableIntegration();
         $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
@@ -1724,7 +1730,10 @@ class CampaignSubscriberActionTest extends TestCase
         $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
 
         $event->expects($this->never())->method('pass');
-        $event->expects($this->once())->method('fail');
+        $event->expects($this->never())->method('fail');
+        $event->expects($this->once())
+            ->method('passWithError')
+            ->with($this->anything(), 'dialoghsm.campaign.error.webhook_failed');
         $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
 
         $subscriber->onCampaignTriggerAction($event);
@@ -1756,9 +1765,10 @@ class CampaignSubscriberActionTest extends TestCase
     }
 
     /**
-     * Re-execução: log com status 'pending_webhook' além do timeout → fail() é chamado.
+     * Re-execução: log com status 'pending_webhook' além do timeout → passWithError()
+     * é chamado (nunca fail(), para não contar no threshold de 10% do core).
      */
-    public function testReExecutionWithPendingWebhookTimedOutCallsFail(): void
+    public function testReExecutionWithPendingWebhookTimedOutCallsPassWithError(): void
     {
         $this->enableIntegration();
         $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
@@ -1773,14 +1783,21 @@ class CampaignSubscriberActionTest extends TestCase
         $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
 
         $event->expects($this->never())->method('pass');
-        $event->expects($this->once())->method('fail');
+        $event->expects($this->never())->method('fail');
+        $event->expects($this->once())
+            ->method('passWithError')
+            ->with($this->anything(), 'dialoghsm.campaign.error.webhook_timeout');
         $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
 
         $subscriber->onCampaignTriggerAction($event);
     }
 
     // -------------------------------------------------------------------------
-    // Testes: restrição Meta (131049/130472/131050) → passWithError() em vez de fail()
+    // Testes: restrição Meta (131049/130472/131050/131026) → passWithError() com a
+    // razão 'meta_restricted' vs 'webhook_failed' genérico. Desde a remoção de fail()/
+    // failAll() do CampaignSubscriber (ver classe), TODO caminho de falha usa
+    // passWithError()/passAllWithError() — a distinção aqui é apenas a razão passada,
+    // não mais "conta ou não conta para o threshold" (nada mais conta).
     // -------------------------------------------------------------------------
 
     /**
@@ -1857,10 +1874,12 @@ class CampaignSubscriberActionTest extends TestCase
 
     /**
      * Status 'failed' com código de erro técnico (não é restrição Meta) →
-     * continua chamando fail() normalmente, preservando a trava de segurança do
-     * Mautic core para bugs reais (ex: payload malformado, permissão, API key inválida).
+     * continua chamando passWithError() com a razão genérica 'webhook_failed'
+     * (nunca fail() — todo caminho de falha do plugin usa passWithError() para
+     * não contar no threshold de 10% do core; bugs reais continuam visíveis via
+     * metadata['failed']=1 na timeline/UI e via o log persistido em message_log).
      */
-    public function testReExecutionWithFailedStatusAndTechnicalErrorCodeStillCallsFail(): void
+    public function testReExecutionWithFailedStatusAndTechnicalErrorCodeCallsPassWithError(): void
     {
         $this->enableIntegration();
         $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
@@ -1876,8 +1895,8 @@ class CampaignSubscriberActionTest extends TestCase
         $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
 
         $event->expects($this->never())->method('pass');
-        $event->expects($this->never())->method('passWithError');
-        $event->expects($this->once())->method('fail')
+        $event->expects($this->never())->method('fail');
+        $event->expects($this->once())->method('passWithError')
             ->with($this->anything(), 'dialoghsm.campaign.error.webhook_failed');
         $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
 
@@ -1886,9 +1905,10 @@ class CampaignSubscriberActionTest extends TestCase
 
     /**
      * Status 'failed' sem nenhum webhook_error_code (null) → continua
-     * chamando fail() normalmente, não deve ser tratado como restrição Meta por engano.
+     * chamando passWithError() com a razão genérica 'webhook_failed', não deve
+     * ser tratado como restrição Meta por engano.
      */
-    public function testReExecutionWithFailedStatusAndNullErrorCodeStillCallsFail(): void
+    public function testReExecutionWithFailedStatusAndNullErrorCodeCallsPassWithError(): void
     {
         $this->enableIntegration();
         $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
@@ -1904,8 +1924,8 @@ class CampaignSubscriberActionTest extends TestCase
         $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
 
         $event->expects($this->never())->method('pass');
-        $event->expects($this->never())->method('passWithError');
-        $event->expects($this->once())->method('fail')
+        $event->expects($this->never())->method('fail');
+        $event->expects($this->once())->method('passWithError')
             ->with($this->anything(), 'dialoghsm.campaign.error.webhook_failed');
         $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
 
@@ -1914,12 +1934,12 @@ class CampaignSubscriberActionTest extends TestCase
 
     /**
      * http_status_code=200 (envio síncrono aceito pela 360dialog) sozinho
-     * NUNCA deve disparar passWithError() — só o webhook_error_code importa. Aqui o
-     * status é 'failed' com http_status_code=200 mas um webhook_error_code que NÃO
-     * está na lista de restrição Meta (ex: 131000 "Something went wrong", visto nos
-     * dados reais) → continua chamando fail() normalmente.
+     * NUNCA deve disparar a razão 'meta_restricted' — só o webhook_error_code importa.
+     * Aqui o status é 'failed' com http_status_code=200 mas um webhook_error_code que
+     * NÃO está na lista de restrição Meta (ex: 131000 "Something went wrong", visto nos
+     * dados reais) → passWithError() é chamado com a razão genérica 'webhook_failed'.
      */
-    public function testHttp200AloneDoesNotTriggerPassWithErrorWithoutRestrictionCode(): void
+    public function testHttp200AloneDoesNotTriggerMetaRestrictedReasonWithoutRestrictionCode(): void
     {
         $this->enableIntegration();
         $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
@@ -1936,8 +1956,8 @@ class CampaignSubscriberActionTest extends TestCase
         $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
 
         $event->expects($this->never())->method('pass');
-        $event->expects($this->never())->method('passWithError');
-        $event->expects($this->once())->method('fail')
+        $event->expects($this->never())->method('fail');
+        $event->expects($this->once())->method('passWithError')
             ->with($this->anything(), 'dialoghsm.campaign.error.webhook_failed');
         $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
 
@@ -1946,11 +1966,12 @@ class CampaignSubscriberActionTest extends TestCase
 
     /**
      * Fronteira do 131026: um código vizinho/parecido (131027, inexistente
-     * na lista) NÃO deve disparar passWithError() — a comparação é estrita (in_array
-     * com $strict=true), então só o código exato 131026 é tratado como restrição Meta.
-     * Evita falso positivo por confusão com códigos próximos da mesma família 1310xx.
+     * na lista) NÃO deve disparar a razão 'meta_restricted' — a comparação é estrita
+     * (in_array com $strict=true), então só o código exato 131026 é tratado como
+     * restrição Meta. Evita falso positivo por confusão com códigos próximos da
+     * mesma família 1310xx; passWithError() é chamado com a razão genérica 'webhook_failed'.
      */
-    public function testReExecutionWithCodeAdjacentTo131026StillCallsFail(): void
+    public function testReExecutionWithCodeAdjacentTo131026CallsPassWithErrorGenericReason(): void
     {
         $this->enableIntegration();
         $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
@@ -1967,8 +1988,8 @@ class CampaignSubscriberActionTest extends TestCase
         $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
 
         $event->expects($this->never())->method('pass');
-        $event->expects($this->never())->method('passWithError');
-        $event->expects($this->once())->method('fail')
+        $event->expects($this->never())->method('fail');
+        $event->expects($this->once())->method('passWithError')
             ->with($this->anything(), 'dialoghsm.campaign.error.webhook_failed');
         $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
 
