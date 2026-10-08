@@ -14,6 +14,7 @@ use Mautic\LeadBundle\Helper\TokenHelper;
 use MauticPlugin\DialogHSMBundle\DialogHSMEvents;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
+use MauticPlugin\DialogHSMBundle\Exception\CampaignActionBuildException;
 use MauticPlugin\DialogHSMBundle\Form\Type\SendWhatsAppQueueType;
 use MauticPlugin\DialogHSMBundle\Form\Type\SendWhatsAppType;
 use MauticPlugin\DialogHSMBundle\Form\Type\WhatsAppMessageSendType;
@@ -37,17 +38,32 @@ class CampaignSubscriber implements EventSubscriberInterface
     private const WEBHOOK_TIMEOUT_SECONDS = 600;
 
     /**
+     * Intervalo até o core tentar de novo um contato que falhou por erro de montagem da
+     * ação (ver failForBuildError). Curto para que, corrigida a causa e republicada a
+     * campanha, o envio saia logo.
+     */
+    private const BUILD_ERROR_RETRY_INTERVAL = 'PT15M';
+
+    /**
+     * Política de falhas deste subscriber — dois tipos, tratamentos opostos:
+     *
+     * 1. Erro de montagem da ação (integração, número, API key, fila, payload ou qualquer
+     *    exceção inesperada antes do envio): fail() com intervalo de nova tentativa, sem
+     *    enviar nada. O contato NÃO é consumido — o core o reagenda (is_scheduled=1) e
+     *    mostra o motivo na timeline e na notificação. Se as falhas passarem de 10% dos
+     *    contatos, o core despublica a campanha (CampaignEventSubscriber::onEventFailed):
+     *    é o freio desejado para configuração quebrada. Ao republicar, o core zera o
+     *    contador e os contatos reagendados saem no próximo trigger.
+     *
+     * 2. Erro do contato ou do envio (telefone inválido, falha no dispatch, falha/restrição
+     *    reportada pelo webhook): passWithError(). Repetir não resolve, então o contato é
+     *    encerrado com metadata failed=1 na timeline, sem contar no threshold de 10%
+     *    (ver project_campaign_auto_disable_threshold). O status real (STATUS_FAILED)
+     *    fica em dialog_hsm_message_log via persistFailureLog().
+     *
      * Códigos de erro da Meta que indicam restrição de qualidade/entrega ou opt-out do
      * contato, não uma falha técnica do nosso lado. Usados só para escolher a mensagem
-     * de razão mostrada na timeline ('meta_restricted' vs 'webhook_failed') — todo
-     * caminho de falha deste subscriber usa passWithError()/passAllWithError() em vez de
-     * fail()/failAll(), porque fail() alimenta PendingEvent::getFailures(), que é o que
-     * o Mautic core usa em CampaignEventSubscriber::onEventFailed() para desativar a
-     * campanha automaticamente quando a taxa de falha de um evento passa de 10%
-     * (ver project_campaign_auto_disable_threshold). passWithError() registra o mesmo
-     * "falhou" na UI/timeline (metadata failed=1), mas conta como sucesso para o core,
-     * então nunca aciona esse threshold. O status real (STATUS_FAILED) continua sendo
-     * gravado em dialog_hsm_message_log normalmente, via persistFailureLog().
+     * de razão mostrada na timeline ('meta_restricted' vs 'webhook_failed').
      *
      * IMPORTANTE: esses códigos chegam via webhook (MessageLog::getWebhookErrorCode()),
      * não via HTTP status do envio síncrono. A 360dialog aceita a mensagem no envio
@@ -247,11 +263,7 @@ class CampaignSubscriber implements EventSubscriberInterface
             );
 
             if (!empty($items)) {
-                $this->bus->dispatch(new SendWhatsAppDirectBatchMessage(
-                    items:      $items,
-                    batchLimit: $batchLimit,
-                    sendDelay:  $sendDelay,
-                ));
+                $this->dispatchDirectBatch($items, $batchLimit, $sendDelay, fn (SendWhatsAppDirectBatchMessage $batch) => $this->bus->dispatch($batch));
             }
 
             return;
@@ -288,11 +300,30 @@ class CampaignSubscriber implements EventSubscriberInterface
         );
 
         if (!empty($items)) {
-            ($this->directBatchHandler)(new SendWhatsAppDirectBatchMessage(
+            $this->dispatchDirectBatch($items, $batchLimit, $sendDelay, fn (SendWhatsAppDirectBatchMessage $batch) => ($this->directBatchHandler)($batch));
+        }
+    }
+
+    /**
+     * Entrega o lote do envio direto ao handler/stream. Exceções não podem escapar daqui:
+     * o TriggerCampaignCommand em prod só captura \Exception, então um \Error derrubaria
+     * o mautic:campaigns:trigger inteiro — todas as campanhas, não só esta.
+     *
+     * @param SendWhatsAppMessage[] $items
+     */
+    private function dispatchDirectBatch(array $items, int $batchLimit, int $sendDelay, callable $deliver): void
+    {
+        try {
+            $deliver(new SendWhatsAppDirectBatchMessage(
                 items:      $items,
                 batchLimit: $batchLimit,
                 sendDelay:  $sendDelay,
             ));
+        } catch (\Throwable $e) {
+            $this->logger->error('DialogHSM: Falha ao entregar lote do envio direto', [
+                'items' => count($items),
+                'error' => $e->getMessage(),
+            ]);
         }
     }
 
@@ -303,24 +334,23 @@ class CampaignSubscriber implements EventSubscriberInterface
         }
 
         $config = $event->getEvent()->getProperties();
-        $mode   = trim($config['queue_override'] ?? '');
+        $mode   = trim((string) ($config['queue_override'] ?? ''));
+
+        $checkNumber = function (WhatsAppNumber $number) use ($mode): void {
+            if (null === $this->resolveQueueName($number, $mode)) {
+                throw new CampaignActionBuildException(sprintf(
+                    'O número WhatsApp "%s" não tem a fila %s configurada. Configure-a no cadastro do número ou troque o Tipo de Fila da ação.',
+                    $number->getName() ?? '',
+                    'batch' === $mode ? 'Batch (horário comercial)' : 'Bulk',
+                ));
+            }
+        };
 
         $this->processContacts($event, function (SendWhatsAppMessage $message, WhatsAppNumber $number) use ($mode): bool {
-            $uuid = bin2hex(random_bytes(16));
+            $uuid      = bin2hex(random_bytes(16));
+            $queueName = $this->resolveQueueName($number, $mode);
 
-            $queueName = match ($mode) {
-                'batch' => $number->getBatchQueueName(),
-                'bulk'  => $number->getQueueName(),
-                default => $number->getQueueName(),
-            };
-
-            if ($queueName === null || $queueName === '') {
-                $this->logger->warning('DialogHSM: fila não configurada para o modo, mensagem ignorada', [
-                    'mode'      => $mode ?: 'default',
-                    'number_id' => $number->getId(),
-                    'lead_id'   => $message->leadId,
-                ]);
-
+            if (null === $queueName) {
                 return false;
             }
 
@@ -337,52 +367,89 @@ class CampaignSubscriber implements EventSubscriberInterface
             $this->persistQueuedLog($message, $uuid);
 
             return true;
-        }, applyBatchSleep: false);
+        }, applyBatchSleep: false, checkNumber: $checkNumber);
     }
 
-    private function processContacts(PendingEvent $event, callable $sender, bool $applyBatchSleep = true): void
+    private function resolveQueueName(WhatsAppNumber $number, string $mode): ?string
     {
-        $integration = $this->fetchEnabledIntegration();
+        $queueName = 'batch' === $mode ? $number->getBatchQueueName() : $number->getQueueName();
 
+        return (null === $queueName || '' === $queueName) ? null : $queueName;
+    }
+
+    /**
+     * Garante que nenhuma exceção escape para o core. Uma exceção solta durante o kickoff
+     * consome o contato em silêncio — o core já gravou o log como executado
+     * (is_scheduled=0) antes de chamar a ação — e um \Error derruba o
+     * mautic:campaigns:trigger inteiro, porque o comando só captura \Exception.
+     *
+     * @param (\Closure(WhatsAppNumber): void)|null $checkNumber validação extra do número
+     *                                                          (lança CampaignActionBuildException)
+     */
+    private function processContacts(PendingEvent $event, callable $sender, bool $applyBatchSleep = true, ?\Closure $checkNumber = null): void
+    {
+        // logIds já decididos neste lote (pass/passWithError) — não podem receber fail()
+        $decided = [];
+
+        try {
+            $this->executeContacts($event, $sender, $applyBatchSleep, $checkNumber, $decided);
+        } catch (CampaignActionBuildException $e) {
+            $this->failForBuildError($event, $decided, $e->getMessage());
+        } catch (\Throwable $e) {
+            $this->failForBuildError($event, $decided, 'Erro inesperado ao montar o envio: '.$e->getMessage(), $e);
+        }
+    }
+
+    /**
+     * Três etapas, nesta ordem, para que um erro de montagem nunca resulte em envio parcial:
+     *   1. checagem prévia da configuração (integração, número, API key, fila, payload);
+     *   2. montagem da mensagem de todos os contatos, sem enviar nada;
+     *   3. envio.
+     * Erros de montagem (etapas 1 e 2) lançam CampaignActionBuildException.
+     *
+     * @param array<int|string, true> $decided
+     */
+    private function executeContacts(PendingEvent $event, callable $sender, bool $applyBatchSleep, ?\Closure $checkNumber, array &$decided): void
+    {
         $campaignEvent   = $event->getEvent();
         $campaignId      = $campaignEvent->getCampaign()?->getId();
         $campaignEventId = $campaignEvent->getId();
         $config          = $campaignEvent->getProperties();
         $numberId        = (int) ($config['whatsapp_number'] ?? 0);
 
-        if (null === $integration) {
-            $this->failAllWithLog($event, $campaignId, $campaignEventId, null, 'dialoghsm.campaign.error.integration_disabled', 'integration_disabled');
+        // 1. Checagem prévia
+        $integration = $this->fetchEnabledIntegration();
 
-            return;
+        if (null === $integration) {
+            throw new CampaignActionBuildException('A integração 360dialog está desabilitada ou não configurada.');
         }
 
         $whatsAppNumber = $this->getWhatsAppNumber($numberId);
 
         if (null === $whatsAppNumber) {
-            $this->failAllWithLog($event, $campaignId, $campaignEventId, null, 'dialoghsm.campaign.error.missing_number', 'number_not_found');
-
-            return;
+            throw new CampaignActionBuildException(sprintf('O número WhatsApp selecionado na ação (ID %d) não existe ou está despublicado.', $numberId));
         }
 
-        $apiKey  = $whatsAppNumber->getApiKey();
-        $baseUrl = $this->resolveBaseUrl($whatsAppNumber, $integration);
+        $apiKey = $whatsAppNumber->getApiKey();
 
         if (empty($apiKey)) {
-            $this->failAllWithLog($event, $campaignId, $campaignEventId, $whatsAppNumber, 'dialoghsm.campaign.error.missing_api_key', 'missing_api_key');
-
-            return;
+            throw new CampaignActionBuildException(sprintf('O número WhatsApp "%s" não tem chave de API configurada.', $whatsAppNumber->getName() ?? ''));
         }
 
-        $contacts   = $event->getContacts();
+        if (null !== $checkNumber) {
+            $checkNumber($whatsAppNumber);
+        }
+
+        $this->assertPayloadConfig($config);
+
+        $baseUrl    = $this->resolveBaseUrl($whatsAppNumber, $integration);
         $sendDelay  = (int) ($config['send_delay'] ?? 0);
         $batchLimit = (int) ($config['batch_limit'] ?? 0);
 
-        // batch_limit=N: envia N mensagens, pausa send_delay ms, repete para todos os contatos.
-        // batch_limit=0: aplica send_delay entre cada mensagem individualmente.
-        $effectiveBatch = $batchLimit > 0 ? $batchLimit : 1;
-        $sentCount      = 0;
+        // 2. Montagem — nada é enviado até todos os contatos do lote estarem montados
+        $messages = [];
 
-        foreach ($contacts as $logId => $contact) {
+        foreach ($event->getContacts() as $logId => $contact) {
             // Re-execução: webhook já chegou — decide com base no status real
             $existingLog = $this->messageLogRepository->findByCampaignEventAndLead(
                 (int) $campaignEventId,
@@ -390,17 +457,22 @@ class CampaignSubscriber implements EventSubscriberInterface
             );
 
             if ($existingLog !== null) {
-                $this->resolveFromWebhookLog($event, $logId, $existingLog);
+                if ($this->resolveFromWebhookLog($event, $logId, $existingLog)) {
+                    $decided[$logId] = true;
+                }
                 continue;
             }
 
-            // Primeira execução: valida e envia
-            $phone = $this->normalizePhone($contact->getLeadPhoneNumber() ?? '');
+            $phone        = $this->normalizePhone((string) ($contact->getLeadPhoneNumber() ?? ''));
+            $payloadData  = $this->buildPayloadFromConfig($config, $contact->getProfileFields());
+            $templateName = $this->templateNameFrom($payloadData);
 
-            // Payload construído aqui (antes da validação) para ter templateName disponível nos logs de erro.
-            $profileFields = $contact->getProfileFields();
-            $payloadData   = $this->buildPayloadFromConfig($config, $profileFields);
-            $templateName  = $payloadData['content'] ?? $payloadData['template'] ?? 'unknown';
+            if ('' === $templateName) {
+                throw new CampaignActionBuildException(sprintf(
+                    'O nome do template (item "content" dos Dados do Payload) ficou vazio para o contato #%d após substituir os tokens.',
+                    $contact->getId()
+                ));
+            }
 
             if (!$this->isValidE164($phone)) {
                 $this->persistFailureLog(
@@ -416,31 +488,42 @@ class CampaignSubscriber implements EventSubscriberInterface
                     $event->getPending()->get($logId),
                     'dialoghsm.campaign.error.invalid_phone'
                 );
+                $decided[$logId] = true;
                 continue;
             }
 
+            $messages[$logId] = new SendWhatsAppMessage(
+                leadId:             $contact->getId(),
+                phone:              $phone,
+                apiKey:             $apiKey,
+                baseUrl:            $baseUrl,
+                payloadData:        $payloadData,
+                templateName:       $templateName,
+                whatsAppNumberName: $whatsAppNumber->getName() ?? '',
+                campaignId:         $campaignId,
+                campaignEventId:    $campaignEventId,
+            );
+        }
+
+        // 3. Envio — falhas aqui são do envio (não da montagem): encerram o contato
+        // batch_limit=N: envia N mensagens, pausa send_delay ms, repete para todos os contatos.
+        // batch_limit=0: aplica send_delay entre cada mensagem individualmente.
+        $effectiveBatch = $batchLimit > 0 ? $batchLimit : 1;
+        $sentCount      = 0;
+
+        foreach ($messages as $logId => $message) {
             try {
-                $success = $sender(new SendWhatsAppMessage(
-                    leadId:             $contact->getId(),
-                    phone:              $phone,
-                    apiKey:             $apiKey,
-                    baseUrl:            $baseUrl,
-                    payloadData:        $payloadData,
-                    templateName:       $templateName,
-                    whatsAppNumberName: $whatsAppNumber->getName() ?? '',
-                    campaignId:         $campaignId,
-                    campaignEventId:    $campaignEventId,
-                ), $whatsAppNumber);
+                $success = $sender($message, $whatsAppNumber);
             } catch (\Throwable $e) {
                 $this->logger->error('DialogHSM: Exceção durante envio', [
-                    'lead_id' => $contact->getId(),
+                    'lead_id' => $message->leadId,
                     'error'   => $e->getMessage(),
                 ]);
                 $this->persistFailureLog(
-                    $contact->getId(),
-                    $phone,
-                    $templateName,
-                    $whatsAppNumber->getName() ?? '',
+                    $message->leadId,
+                    $message->phone,
+                    $message->templateName,
+                    $message->whatsAppNumberName,
                     $e->getMessage(),
                     $campaignId,
                     $campaignEventId,
@@ -449,6 +532,7 @@ class CampaignSubscriber implements EventSubscriberInterface
                     $event->getPending()->get($logId),
                     'dialoghsm.campaign.error.send_failed'
                 );
+                $decided[$logId] = true;
                 continue;
             }
 
@@ -457,6 +541,7 @@ class CampaignSubscriber implements EventSubscriberInterface
                     $event->getPending()->get($logId),
                     'dialoghsm.campaign.error.send_failed'
                 );
+                $decided[$logId] = true;
                 continue;
             }
 
@@ -471,7 +556,88 @@ class CampaignSubscriber implements EventSubscriberInterface
         }
     }
 
-    private function resolveFromWebhookLog(PendingEvent $event, mixed $logId, MessageLog $log): void
+    /**
+     * Erro de montagem: fail() com nova tentativa para todo contato ainda não decidido do
+     * lote. Todos precisam ser decididos — o ActionDispatcher do core rejeita o lote
+     * inteiro (LogNotProcessedException) se sobrar algum sem pass()/fail(), e aí nem o
+     * reagendamento nem o motivo seriam gravados.
+     *
+     * Não grava dialog_hsm_message_log: na nova tentativa, findByCampaignEventAndLead()
+     * acharia esse registro e resolveFromWebhookLog() encerraria o contato como falha de
+     * envio — exatamente o consumo que este caminho existe para evitar.
+     *
+     * @param array<int|string, true> $decided
+     */
+    private function failForBuildError(PendingEvent $event, array $decided, string $reason, ?\Throwable $exception = null): void
+    {
+        $campaignEvent = $event->getEvent();
+        $retryInterval = new \DateInterval(self::BUILD_ERROR_RETRY_INTERVAL);
+        $failedCount   = 0;
+
+        foreach ($event->getContacts() as $logId => $contact) {
+            if (isset($decided[$logId])) {
+                continue;
+            }
+
+            $log = $event->getPending()->get($logId);
+            if (null === $log) {
+                continue;
+            }
+
+            $event->fail($log, 'Envio não realizado — nova tentativa automática em 15 min. Motivo: '.$reason, $retryInterval);
+            ++$failedCount;
+        }
+
+        $this->logger->error('DialogHSM: Envio não realizado por erro na montagem da ação de campanha — contatos mantidos para nova tentativa', [
+            'campaign_id'       => $campaignEvent->getCampaign()?->getId(),
+            'campaign_event_id' => $campaignEvent->getId(),
+            'reason'            => $reason,
+            'contacts'          => $failedCount,
+            'exception'         => $exception,
+        ]);
+    }
+
+    /**
+     * Valida, uma vez por lote e antes de qualquer envio, o que depende só da configuração
+     * da ação: o payload precisa ter o nome do template, e cada variável listada em "vars"
+     * precisa existir como item do payload (senão o parâmetro iria vazio para a Meta).
+     */
+    private function assertPayloadConfig(array $config): void
+    {
+        $payload = $this->buildPayloadFromConfig($config, null);
+
+        if ('' === $this->templateNameFrom($payload)) {
+            throw new CampaignActionBuildException('Os Dados do Payload não têm o item "content" com o nome do template.');
+        }
+
+        $vars = trim((string) ($payload['vars'] ?? ''));
+        if ('' === $vars) {
+            return;
+        }
+
+        foreach (array_map('trim', explode(',', $vars)) as $varName) {
+            if ('' !== $varName && !array_key_exists($varName, $payload)) {
+                throw new CampaignActionBuildException(sprintf(
+                    'O item "vars" dos Dados do Payload referencia "%s", mas não existe item com esse rótulo.',
+                    $varName
+                ));
+            }
+        }
+    }
+
+    /**
+     * @param array<int|string, string> $payloadData
+     */
+    private function templateNameFrom(array $payloadData): string
+    {
+        return trim((string) ($payloadData['content'] ?? $payloadData['template'] ?? ''));
+    }
+
+    /**
+     * @return bool true se o contato foi decidido (pass/passWithError); false se continua
+     *              aguardando o webhook
+     */
+    private function resolveFromWebhookLog(PendingEvent $event, mixed $logId, MessageLog $log): bool
     {
         $status      = $log->getStatus();
         $campaignLog = $event->getPending()->get($logId);
@@ -484,28 +650,32 @@ class CampaignSubscriber implements EventSubscriberInterface
         if (in_array($status, $successStatuses, true)) {
             $event->pass($campaignLog);
 
-            return;
+            return true;
         }
 
         if (MessageLog::STATUS_FAILED === $status || MessageLog::STATUS_DLQ === $status) {
             if (in_array($log->getWebhookErrorCode(), self::META_RESTRICTION_CODES, true)) {
                 $event->passWithError($campaignLog, 'dialoghsm.campaign.error.meta_restricted');
 
-                return;
+                return true;
             }
 
             $event->passWithError($campaignLog, 'dialoghsm.campaign.error.webhook_failed');
 
-            return;
+            return true;
         }
 
         if (MessageLog::STATUS_PENDING_WEBHOOK === $status) {
             $elapsed = (new \DateTime())->getTimestamp() - ($log->getDateSent()?->getTimestamp() ?? 0);
             if ($elapsed > self::WEBHOOK_TIMEOUT_SECONDS) {
                 $event->passWithError($campaignLog, 'dialoghsm.campaign.error.webhook_timeout');
+
+                return true;
             }
             // Dentro do timeout: permanece is_scheduled=1, reavaliado no próximo batch
         }
+
+        return false;
     }
 
     /**
@@ -525,34 +695,6 @@ class CampaignSubscriber implements EventSubscriberInterface
             'date_sent'     => $fmtUtc($log->getDateSent()),
             'error_message' => $log->getErrorMessage(),
         ], static fn ($v) => $v !== null && $v !== '');
-    }
-
-    /**
-     * Chama failAll e cria um log de falha por contato.
-     * Garante que nenhum envio seja silenciado sem registro.
-     */
-    private function failAllWithLog(
-        PendingEvent $event,
-        ?int $campaignId,
-        ?int $campaignEventId,
-        ?WhatsAppNumber $number,
-        string $failMessage,
-        string $errorReason,
-    ): void {
-        foreach ($event->getContacts() as $contact) {
-            $phone = $contact->getLeadPhoneNumber() ?: 'unknown';
-            $this->persistFailureLog(
-                $contact->getId(),
-                $phone,
-                'unknown',
-                $number?->getName() ?? '',
-                $errorReason,
-                $campaignId,
-                $campaignEventId,
-            );
-        }
-
-        $event->passAllWithError($failMessage);
     }
 
     /**
@@ -626,9 +768,16 @@ class CampaignSubscriber implements EventSubscriberInterface
     }
 
     /**
-     * @return array<string, string>
+     * label/value são convertidos para string porque o SortableListTransformer do core
+     * grava o valor como chave de array: um valor só com dígitos ("1", "2026") volta
+     * do banco como int.
+     *
+     * @param array<string, mixed>|null $profileFields null = não substitui tokens
+     *                                                 (usado na checagem prévia)
+     *
+     * @return array<int|string, string>
      */
-    private function buildPayloadFromConfig(array $config, array $profileFields): array
+    private function buildPayloadFromConfig(array $config, ?array $profileFields): array
     {
         $payloadData = $config['payload_data'] ?? [];
 
@@ -640,18 +789,21 @@ class CampaignSubscriber implements EventSubscriberInterface
         $result = [];
 
         foreach ($list as $item) {
-            if (!is_array($item) || !isset($item['label'], $item['value'])) {
+            if (!is_array($item) || !isset($item['label'], $item['value'])
+                || !is_scalar($item['label']) || !is_scalar($item['value'])) {
                 continue;
             }
 
-            $key   = trim($item['label']);
-            $value = trim($item['value']);
+            $key   = trim((string) $item['label']);
+            $value = trim((string) $item['value']);
 
             if ('' === $key) {
                 continue;
             }
 
-            $value = TokenHelper::findLeadTokens($value, $profileFields, true);
+            if (null !== $profileFields) {
+                $value = TokenHelper::findLeadTokens($value, $profileFields, true);
+            }
 
             $result[$key] = $value;
         }

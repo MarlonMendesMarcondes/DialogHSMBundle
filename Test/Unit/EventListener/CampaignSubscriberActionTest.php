@@ -164,6 +164,39 @@ class CampaignSubscriberActionTest extends TestCase
         return $mockPendingEvent;
     }
 
+    /**
+     * @return array<int, Lead&MockObject>
+     */
+    private function twoValidContacts(): array
+    {
+        return [
+            1 => $this->buildContact('+5511999999999', 1),
+            2 => $this->buildContact('+5511988888888', 2),
+        ];
+    }
+
+    /**
+     * Erro de montagem: todo contato recebe fail() com o motivo legível e intervalo de
+     * nova tentativa (não é consumido), nada é encerrado com pass/passWithError e nenhum
+     * dialog_hsm_message_log é gravado (senão a nova tentativa o leria como falha de envio).
+     */
+    private function expectBuildFailure(PendingEvent&MockObject $event, int $contacts, string $reasonFragment): void
+    {
+        $event->expects($this->exactly($contacts))
+            ->method('fail')
+            ->with(
+                $this->anything(),
+                $this->stringContains($reasonFragment),
+                $this->isInstanceOf(\DateInterval::class)
+            );
+        $event->expects($this->never())->method('pass');
+        $event->expects($this->never())->method('passWithError');
+        $event->expects($this->never())->method('passAllWithError');
+        $this->mockEntityManager->expects($this->never())->method('persist');
+        $this->mockBus->expects($this->never())->method('dispatch');
+        $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
+    }
+
     // -------------------------------------------------------------------------
     // Testes: envio direto (síncrono via directBatchHandler)
     // -------------------------------------------------------------------------
@@ -327,11 +360,9 @@ class CampaignSubscriberActionTest extends TestCase
     {
         $this->disableIntegration();
 
-        $event = $this->buildPendingEvent('dialoghsm.send_whatsapp');
+        $event = $this->buildPendingEvent('dialoghsm.send_whatsapp', $this->twoValidContacts());
 
-        $event->expects($this->once())
-            ->method('passAllWithError')
-            ->with('dialoghsm.campaign.error.integration_disabled');
+        $this->expectBuildFailure($event, 2, 'integração 360dialog está desabilitada');
 
         $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
 
@@ -346,11 +377,9 @@ class CampaignSubscriberActionTest extends TestCase
             ->method('getEntity')
             ->willReturn(null);
 
-        $event = $this->buildPendingEvent('dialoghsm.send_whatsapp');
+        $event = $this->buildPendingEvent('dialoghsm.send_whatsapp', $this->twoValidContacts());
 
-        $event->expects($this->once())
-            ->method('passAllWithError')
-            ->with('dialoghsm.campaign.error.missing_number');
+        $this->expectBuildFailure($event, 2, 'não existe ou está despublicado');
 
         $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
 
@@ -365,11 +394,9 @@ class CampaignSubscriberActionTest extends TestCase
             ->method('getEntity')
             ->willReturn($this->buildWhatsAppNumber(apiKey: ''));
 
-        $event = $this->buildPendingEvent('dialoghsm.send_whatsapp');
+        $event = $this->buildPendingEvent('dialoghsm.send_whatsapp', $this->twoValidContacts());
 
-        $event->expects($this->once())
-            ->method('passAllWithError')
-            ->with('dialoghsm.campaign.error.missing_api_key');
+        $this->expectBuildFailure($event, 2, 'não tem chave de API');
 
         $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
 
@@ -880,30 +907,41 @@ class CampaignSubscriberActionTest extends TestCase
         $this->assertEquals('batch', $capturedStamps[0]->getRoutingKey());
     }
 
-    public function testQueueSendBatchModeSkipsContactWhenBatchQueueNameIsEmpty(): void
+    public function testQueueSendBatchModeKeepsContactsForRetryWhenBatchQueueNameIsEmpty(): void
     {
         $this->enableIntegration();
 
         $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber(queueName: 'bulk', batchQueueName: null));
 
-        $contact = $this->buildContact('+5511999999999', 1);
-        $event   = $this->buildPendingEvent(
+        $event = $this->buildPendingEvent(
             'dialoghsm.send_whatsapp_queue',
-            [1 => $contact],
+            $this->twoValidContacts(),
             ['queue_override' => 'batch']
         );
 
-        // Fila batch não configurada: nunca despacha para a fila bulk
-        $this->mockBus->expects($this->never())->method('dispatch');
+        // Fila batch não configurada é erro de configuração: nunca cai para a fila bulk
+        // (enviaria fora do horário comercial) e não consome os contatos
+        $this->expectBuildFailure($event, 2, 'fila Batch (horário comercial)');
 
-        // Logger deve registrar o aviso
-        $this->mockLogger->expects($this->once())->method('warning')
-            ->with($this->stringContains('fila não configurada'));
+        $this->mockLogger->expects($this->once())->method('error')
+            ->with($this->stringContains('Envio não realizado'));
 
-        // Contato recebe passWithError, pois o envio não ocorreu (fila não configurada) —
-        // nunca fail(), para não contar no threshold de 10% do core
-        $event->expects($this->never())->method('pass');
-        $event->expects($this->once())->method('passWithError');
+        $this->subscriber->onCampaignTriggerActionQueue($event);
+    }
+
+    public function testQueueSendBulkModeKeepsContactsForRetryWhenQueueNameIsEmpty(): void
+    {
+        $this->enableIntegration();
+
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber(queueName: '', batchQueueName: 'lote'));
+
+        $event = $this->buildPendingEvent(
+            'dialoghsm.send_whatsapp_queue',
+            $this->twoValidContacts(),
+            ['queue_override' => 'bulk']
+        );
+
+        $this->expectBuildFailure($event, 2, 'fila Bulk');
 
         $this->subscriber->onCampaignTriggerActionQueue($event);
     }
@@ -912,11 +950,9 @@ class CampaignSubscriberActionTest extends TestCase
     {
         $this->disableIntegration();
 
-        $event = $this->buildPendingEvent('dialoghsm.send_whatsapp_queue');
+        $event = $this->buildPendingEvent('dialoghsm.send_whatsapp_queue', $this->twoValidContacts());
 
-        $event->expects($this->once())
-            ->method('passAllWithError')
-            ->with('dialoghsm.campaign.error.integration_disabled');
+        $this->expectBuildFailure($event, 2, 'integração 360dialog está desabilitada');
 
         $this->mockBus->expects($this->never())->method('dispatch');
 
@@ -990,11 +1026,9 @@ class CampaignSubscriberActionTest extends TestCase
             ->method('getEntity')
             ->willReturn(null);
 
-        $event = $this->buildPendingEvent('dialoghsm.send_whatsapp_queue');
+        $event = $this->buildPendingEvent('dialoghsm.send_whatsapp_queue', $this->twoValidContacts());
 
-        $event->expects($this->once())
-            ->method('passAllWithError')
-            ->with('dialoghsm.campaign.error.missing_number');
+        $this->expectBuildFailure($event, 2, 'não existe ou está despublicado');
 
         $this->mockBus->expects($this->never())->method('dispatch');
 
@@ -1009,11 +1043,9 @@ class CampaignSubscriberActionTest extends TestCase
             ->method('getEntity')
             ->willReturn($this->buildWhatsAppNumber(apiKey: ''));
 
-        $event = $this->buildPendingEvent('dialoghsm.send_whatsapp_queue');
+        $event = $this->buildPendingEvent('dialoghsm.send_whatsapp_queue', $this->twoValidContacts());
 
-        $event->expects($this->once())
-            ->method('passAllWithError')
-            ->with('dialoghsm.campaign.error.missing_api_key');
+        $this->expectBuildFailure($event, 2, 'não tem chave de API');
 
         $this->mockBus->expects($this->never())->method('dispatch');
 
@@ -1031,11 +1063,9 @@ class CampaignSubscriberActionTest extends TestCase
             ->method('getEntity')
             ->willReturn($unpublishedNumber);
 
-        $event = $this->buildPendingEvent('dialoghsm.send_whatsapp');
+        $event = $this->buildPendingEvent('dialoghsm.send_whatsapp', $this->twoValidContacts());
 
-        $event->expects($this->once())
-            ->method('passAllWithError')
-            ->with('dialoghsm.campaign.error.missing_number');
+        $this->expectBuildFailure($event, 2, 'não existe ou está despublicado');
 
         $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
 
@@ -1048,11 +1078,9 @@ class CampaignSubscriberActionTest extends TestCase
             ->method('getIntegration')
             ->willReturn($this->makeIntegrationMock(published: false));
 
-        $event = $this->buildPendingEvent('dialoghsm.send_whatsapp');
+        $event = $this->buildPendingEvent('dialoghsm.send_whatsapp', $this->twoValidContacts());
 
-        $event->expects($this->once())
-            ->method('passAllWithError')
-            ->with('dialoghsm.campaign.error.integration_disabled');
+        $this->expectBuildFailure($event, 2, 'integração 360dialog está desabilitada');
 
         $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
 
@@ -1065,11 +1093,9 @@ class CampaignSubscriberActionTest extends TestCase
             ->method('getIntegration')
             ->willReturn($this->makeIntegrationMock(published: false));
 
-        $event = $this->buildPendingEvent('dialoghsm.send_whatsapp_queue');
+        $event = $this->buildPendingEvent('dialoghsm.send_whatsapp_queue', $this->twoValidContacts());
 
-        $event->expects($this->once())
-            ->method('passAllWithError')
-            ->with('dialoghsm.campaign.error.integration_disabled');
+        $this->expectBuildFailure($event, 2, 'integração 360dialog está desabilitada');
 
         $this->mockBus->expects($this->never())->method('dispatch');
 
@@ -2024,6 +2050,296 @@ class CampaignSubscriberActionTest extends TestCase
         $event->expects($this->once())->method('passWithError')
             ->with($this->anything(), 'dialoghsm.campaign.error.meta_restricted');
         $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
+
+        $subscriber->onCampaignTriggerAction($event);
+    }
+
+    // -------------------------------------------------------------------------
+    // Testes: erro de montagem nunca envia nem consome contatos
+    // -------------------------------------------------------------------------
+
+    /**
+     * Caso de produção (2026-10-08): o SortableListTransformer do core grava valores só
+     * com dígitos como int ("vars" => 1). trim(int) lançava TypeError com strict_types, o
+     * que no kickoff consumia o contato em silêncio.
+     */
+    public function testNumericPayloadValueSavedAsIntByCoreIsSentAsString(): void
+    {
+        $this->enableIntegration();
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
+
+        $event = $this->buildPendingEvent(
+            'dialoghsm.send_whatsapp_queue',
+            [1 => $this->buildContact('+5511999999999', 1)],
+            ['payload_data' => ['list' => [
+                ['label' => 'content', 'value' => 'cap_ops_manual'],
+                ['label' => '1', 'value' => 'Marlon'],
+                ['label' => 'vars', 'value' => 1],
+            ]]]
+        );
+
+        $captured = null;
+        $this->mockBus->expects($this->once())->method('dispatch')
+            ->willReturnCallback(function (SendWhatsAppMessage $msg) use (&$captured): Envelope {
+                $captured = $msg;
+
+                return new Envelope($msg);
+            });
+        $event->expects($this->never())->method('fail');
+
+        $this->subscriber->onCampaignTriggerActionQueue($event);
+
+        $this->assertSame('1', $captured->payloadData['vars']);
+        $this->assertSame('Marlon', $captured->payloadData['1']);
+        $this->assertSame('cap_ops_manual', $captured->templateName);
+    }
+
+    public function testNumericPayloadLabelIsAccepted(): void
+    {
+        $this->enableIntegration();
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
+
+        $event = $this->buildPendingEvent(
+            'dialoghsm.send_whatsapp_queue',
+            [1 => $this->buildContact('+5511999999999', 1)],
+            ['payload_data' => ['list' => [
+                ['label' => 'content', 'value' => 'tpl'],
+                ['label' => 2, 'value' => 'x'],
+                ['label' => 'vars', 'value' => '2'],
+            ]]]
+        );
+
+        $this->mockBus->expects($this->once())->method('dispatch')
+            ->willReturnCallback(fn (SendWhatsAppMessage $msg): Envelope => new Envelope($msg));
+        $event->expects($this->never())->method('fail');
+
+        $this->subscriber->onCampaignTriggerActionQueue($event);
+    }
+
+    public function testPayloadWithoutTemplateNameKeepsContactsForRetry(): void
+    {
+        $this->enableIntegration();
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
+
+        $event = $this->buildPendingEvent(
+            'dialoghsm.send_whatsapp_queue',
+            $this->twoValidContacts(),
+            ['payload_data' => ['list' => [['label' => 'vars', 'value' => '']]]]
+        );
+
+        $this->expectBuildFailure($event, 2, 'não têm o item "content"');
+
+        $this->subscriber->onCampaignTriggerActionQueue($event);
+    }
+
+    public function testVarsReferencingMissingItemKeepsContactsForRetry(): void
+    {
+        $this->enableIntegration();
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
+
+        $event = $this->buildPendingEvent(
+            'dialoghsm.send_whatsapp',
+            $this->twoValidContacts(),
+            ['payload_data' => ['list' => [
+                ['label' => 'content', 'value' => 'tpl'],
+                ['label' => 'nome', 'value' => '{contactfield=firstname}'],
+                ['label' => 'vars', 'value' => 'nome,curso'],
+            ]]]
+        );
+
+        $this->expectBuildFailure($event, 2, 'referencia "curso"');
+
+        $this->subscriber->onCampaignTriggerAction($event);
+    }
+
+    public function testTemplateNameEmptyAfterTokensKeepsContactsForRetry(): void
+    {
+        $this->enableIntegration();
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
+
+        // Template vindo de campo do contato que está vazio
+        $contacts = [];
+        foreach ([1 => '+5511999999999', 2 => '+5511988888888'] as $id => $phone) {
+            $contact = $this->createMock(Lead::class);
+            $contact->method('getLeadPhoneNumber')->willReturn($phone);
+            $contact->method('getId')->willReturn($id);
+            $contact->method('getProfileFields')->willReturn(['template_hsm' => '']);
+            $contacts[$id] = $contact;
+        }
+
+        $event = $this->buildPendingEvent(
+            'dialoghsm.send_whatsapp_queue',
+            $contacts,
+            ['payload_data' => ['list' => [['label' => 'content', 'value' => '{contactfield=template_hsm}']]]]
+        );
+
+        $this->expectBuildFailure($event, 2, 'ficou vazio para o contato #1');
+
+        $this->subscriber->onCampaignTriggerActionQueue($event);
+    }
+
+    /**
+     * Qualquer exceção inesperada na montagem (inclusive \Error) aborta o lote inteiro
+     * antes do envio: o contato 1, já montado, também não é enviado — sem envio parcial.
+     */
+    public function testUnexpectedErrorWhileBuildingSendsNothingAndKeepsAllContacts(): void
+    {
+        $this->enableIntegration();
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
+
+        $broken = $this->createMock(Lead::class);
+        $broken->method('getLeadPhoneNumber')->willReturn('+5511977777777');
+        $broken->method('getId')->willReturn(2);
+        $broken->method('getProfileFields')->willThrowException(new \TypeError('boom'));
+
+        $event = $this->buildPendingEvent(
+            'dialoghsm.send_whatsapp_queue',
+            [1 => $this->buildContact('+5511999999999', 1), 2 => $broken]
+        );
+
+        $this->expectBuildFailure($event, 2, 'Erro inesperado ao montar o envio: boom');
+
+        $this->subscriber->onCampaignTriggerActionQueue($event);
+    }
+
+    /**
+     * Telefone inválido é problema do contato (repetir não resolve): continua encerrado
+     * com passWithError. Um erro de montagem no mesmo lote só falha os não decididos.
+     */
+    public function testInvalidPhoneIsStillClosedWhileBuildErrorFailsOnlyUndecidedContacts(): void
+    {
+        $this->enableIntegration();
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
+
+        $broken = $this->createMock(Lead::class);
+        $broken->method('getLeadPhoneNumber')->willReturn('+5511977777777');
+        $broken->method('getId')->willReturn(2);
+        $broken->method('getProfileFields')->willThrowException(new \RuntimeException('boom'));
+
+        $event = $this->buildPendingEvent(
+            'dialoghsm.send_whatsapp_queue',
+            [1 => $this->buildContact('123', 1), 2 => $broken]
+        );
+
+        $event->expects($this->once())->method('passWithError')
+            ->with($this->anything(), 'dialoghsm.campaign.error.invalid_phone');
+        $event->expects($this->once())->method('fail')
+            ->with($this->anything(), $this->stringContains('boom'), $this->isInstanceOf(\DateInterval::class));
+        $this->mockBus->expects($this->never())->method('dispatch');
+
+        $this->subscriber->onCampaignTriggerActionQueue($event);
+    }
+
+    /**
+     * Contato aguardando webhook (sem decisão) também precisa receber fail() quando a
+     * configuração quebra — o core rejeita o lote se algum log ficar sem pass()/fail().
+     */
+    public function testBuildErrorAlsoFailsContactStillWaitingForWebhook(): void
+    {
+        $pendingLog = $this->createMock(MessageLog::class);
+        $pendingLog->method('getStatus')->willReturn(MessageLog::STATUS_PENDING_WEBHOOK);
+        $pendingLog->method('getDateSent')->willReturn(new \DateTime());
+
+        $this->mockMessageLogRepository = $this->createMock(MessageLogRepository::class);
+        $this->mockMessageLogRepository->method('findByCampaignEventAndLead')
+            ->willReturnCallback(fn (int $eventId, int $leadId) => 1 === $leadId ? $pendingLog : null);
+        $subscriber = $this->makeSubscriber();
+
+        $this->enableIntegration();
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
+
+        $broken = $this->createMock(Lead::class);
+        $broken->method('getLeadPhoneNumber')->willReturn('+5511977777777');
+        $broken->method('getId')->willReturn(2);
+        $broken->method('getProfileFields')->willThrowException(new \RuntimeException('boom'));
+
+        $event = $this->buildPendingEvent(
+            'dialoghsm.send_whatsapp_queue',
+            [1 => $this->buildContact('+5511999999999', 1), 2 => $broken]
+        );
+
+        $event->expects($this->exactly(2))->method('fail');
+        $this->mockBus->expects($this->never())->method('dispatch');
+
+        $subscriber->onCampaignTriggerActionQueue($event);
+    }
+
+    public function testBuildErrorDoesNotFailContactAlreadyResolvedByWebhook(): void
+    {
+        $sentLog = $this->createMock(MessageLog::class);
+        $sentLog->method('getStatus')->willReturn(MessageLog::STATUS_DELIVERED);
+
+        $this->mockMessageLogRepository = $this->createMock(MessageLogRepository::class);
+        $this->mockMessageLogRepository->method('findByCampaignEventAndLead')
+            ->willReturnCallback(fn (int $eventId, int $leadId) => 1 === $leadId ? $sentLog : null);
+        $subscriber = $this->makeSubscriber();
+
+        $this->enableIntegration();
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
+
+        $broken = $this->createMock(Lead::class);
+        $broken->method('getLeadPhoneNumber')->willReturn('+5511977777777');
+        $broken->method('getId')->willReturn(2);
+        $broken->method('getProfileFields')->willThrowException(new \RuntimeException('boom'));
+
+        $event = $this->buildPendingEvent(
+            'dialoghsm.send_whatsapp_queue',
+            [1 => $this->buildContact('+5511999999999', 1), 2 => $broken]
+        );
+
+        $event->expects($this->once())->method('pass');
+        $event->expects($this->once())->method('fail');
+
+        $subscriber->onCampaignTriggerActionQueue($event);
+    }
+
+    public function testBuildErrorIsLoggedWithCampaignContext(): void
+    {
+        $this->disableIntegration();
+
+        $event = $this->buildPendingEvent('dialoghsm.send_whatsapp_queue', $this->twoValidContacts());
+
+        $this->mockLogger->expects($this->once())->method('error')
+            ->with(
+                $this->stringContains('Envio não realizado'),
+                $this->callback(fn (array $ctx): bool => 10 === $ctx['campaign_id']
+                    && 20 === $ctx['campaign_event_id']
+                    && 2 === $ctx['contacts']
+                    && str_contains($ctx['reason'], 'integração'))
+            );
+
+        $this->subscriber->onCampaignTriggerActionQueue($event);
+    }
+
+    /**
+     * Um \Error no handler do envio direto não pode escapar: o TriggerCampaignCommand só
+     * captura \Exception e derrubaria o trigger de todas as campanhas.
+     */
+    public function testDirectBatchHandlerErrorDoesNotEscape(): void
+    {
+        $this->enableIntegration();
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
+
+        $event = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $this->buildContact('+5511999999999', 1)]);
+
+        $this->mockDirectBatchHandler->method('__invoke')->willThrowException(new \Error('handler quebrou'));
+        $this->mockLogger->expects($this->once())->method('error')
+            ->with($this->stringContains('Falha ao entregar lote'));
+
+        $this->subscriber->onCampaignTriggerAction($event);
+    }
+
+    public function testRedisDirectDispatchErrorDoesNotEscape(): void
+    {
+        $this->enableIntegration();
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
+
+        $subscriber = $this->makeSubscriber('redis://localhost:6379/whatsapp');
+        $event      = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $this->buildContact('+5511999999999', 1)]);
+
+        $this->mockBus->method('dispatch')->willThrowException(new \RuntimeException('redis fora'));
+        $this->mockLogger->expects($this->once())->method('error')
+            ->with($this->stringContains('Falha ao entregar lote'));
 
         $subscriber->onCampaignTriggerAction($event);
     }
