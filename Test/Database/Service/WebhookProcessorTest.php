@@ -213,4 +213,111 @@ class WebhookProcessorTest extends DatabaseTestCase
         $this->assertSame([], $this->em->find(LeadEventLog::class, $rotation2Id)->getMetadata(), 'Status do envio antigo foi gravado na rotação nova.');
         $this->assertSame('read', $this->campaignLogMetadata()['whatsapp']['status'] ?? null);
     }
+
+    private function timelineCount(string $action): int
+    {
+        return (int) $this->connection->fetchOne(
+            "SELECT COUNT(*) FROM lead_event_log WHERE lead_id = ? AND bundle = '".\MauticPlugin\DialogHSMBundle\Service\LeadEventLogWriter::BUNDLE."' AND action = ?",
+            [$this->leadId, $action]
+        );
+    }
+
+    public function testConcurrentDuplicateStatusRunsSideEffectsOnce(): void
+    {
+        $id = $this->createSentLog('wamid.corrida', 'sent');
+
+        // Esta requisição carregou o log ainda 'sent' ...
+        $this->em->find(\MauticPlugin\DialogHSMBundle\Entity\MessageLog::class, $id);
+        // ... enquanto outra requisição (mesmo webhook reentregue) já aplicou o delivered
+        $this->connection->update('dialog_hsm_message_log', ['status' => 'delivered', 'date_delivered' => $this->utcNow()], ['id' => $id]);
+
+        $this->processor->process($this->phone, ['entry' => [['changes' => [['value' => ['statuses' => [
+            ['id' => 'wamid.corrida', 'status' => 'delivered', 'timestamp' => (string) time()],
+        ]]]]]]]);
+
+        $this->assertSame(0, $this->timelineCount('delivered'), 'A requisição atrasada repetia timeline, pontos, decisão e webhook do Mautic.');
+    }
+
+    public function testConcurrentDifferentStatusesAreBothApplied(): void
+    {
+        $id = $this->createSentLog('wamid.ordem.par', 'sent');
+
+        $this->em->find(\MauticPlugin\DialogHSMBundle\Entity\MessageLog::class, $id);
+        // delivered aplicado por outra requisição enquanto esta processava o read
+        $this->connection->update('dialog_hsm_message_log', ['status' => 'delivered', 'date_delivered' => $this->utcNow()], ['id' => $id]);
+
+        $this->processor->process($this->phone, ['entry' => [['changes' => [['value' => ['statuses' => [
+            ['id' => 'wamid.ordem.par', 'status' => 'read', 'timestamp' => (string) time()],
+        ]]]]]]]);
+
+        $this->em->clear();
+        $this->assertSame('read', $this->messageLog($id)['status'], 'O read não pode se perder por causa da corrida com o delivered.');
+    }
+
+    public function testConcurrentReplyIsRegisteredOnce(): void
+    {
+        $this->connection->insert('dialog_hsm_message_log', [
+            'lead_id' => $this->leadId, 'status' => 'delivered', 'template_name' => 'template_teste',
+            'phone_number' => '+5511900000700', 'wamid' => 'wamid.resp.corrida', 'date_sent' => $this->utcNow('-1 hour'),
+        ]);
+        $id = (int) $this->connection->lastInsertId();
+
+        $this->em->find(\MauticPlugin\DialogHSMBundle\Entity\MessageLog::class, $id);
+        $this->connection->update('dialog_hsm_message_log', ['date_replied' => $this->utcNow()], ['id' => $id]);
+
+        $this->processor->process($this->phone, ['entry' => [['changes' => [['value' => ['messages' => [[
+            'from' => '5511900000700', 'id' => 'wamid.in.'.random_int(1, 999999), 'type' => 'text',
+            'timestamp' => (string) time(), 'text' => ['body' => 'oi'], 'context' => ['id' => 'wamid.resp.corrida'],
+        ]]]]]]]]);
+
+        $this->assertSame(0, (int) $this->connection->fetchOne(
+            "SELECT COUNT(*) FROM lead_event_log WHERE lead_id = ? AND bundle = '".\MauticPlugin\DialogHSMBundle\Service\LeadEventLogWriter::BUNDLE."' AND action = 'replied'",
+            [$this->leadId]
+        ), 'Resposta já registrada por outra requisição não pode repetir pontos e decisão.');
+    }
+
+    private function makeActionStillScheduled(): void
+    {
+        // Campanha com data: o core só grava is_scheduled=0 no fim do lote do trigger
+        $this->connection->update('campaign_lead_event_log', ['is_scheduled' => 1, 'trigger_date' => $this->utcNow('-1 minute')], ['id' => $this->campaignLogId]);
+    }
+
+    public function testDeliveredArrivingBeforeTheActionIsRecordedIsDeferred(): void
+    {
+        $id = $this->createSentLog('wamid.cedo', 'sent');
+        $this->makeActionStillScheduled();
+
+        try {
+            $this->webhook('wamid.cedo', 'delivered');
+            $this->fail('O webhook precisava ser adiado (503): o nó "Entregue" ainda não acha a ação.');
+        } catch (\MauticPlugin\DialogHSMBundle\Exception\WebhookRetryLaterException) {
+        }
+
+        $this->assertSame('sent', $this->messageLog($id)['status'], 'Nada pode ser gravado antes de adiar, senão a reentrega seria rejeitada.');
+    }
+
+    public function testStuckActionOfInactiveCampaignIsNotDeferred(): void
+    {
+        $id = $this->createSentLog('wamid.travado', 'sent');
+        $this->makeActionStillScheduled();
+        $this->connection->update('campaigns', ['is_published' => 0], ['id' => (int) $this->connection->fetchOne('SELECT campaign_id FROM campaign_lead_event_log WHERE id = ?', [$this->campaignLogId])]);
+
+        $this->assertSame(200, $this->webhook('wamid.travado', 'delivered'));
+        $this->assertSame('delivered', $this->messageLog($id)['status']);
+    }
+
+    public function testLateWebhookOfAnOlderSendDoesNotOverwriteTheContactStatus(): void
+    {
+        $this->createSentLog('wamid.antigo', 'delivered');
+        $this->connection->update('dialog_hsm_message_log', ['date_sent' => $this->utcNow('-3 days')], ['wamid' => 'wamid.antigo']);
+        $this->connection->insert('dialog_hsm_message_log', [
+            'lead_id' => $this->leadId, 'status' => 'failed', 'template_name' => 'template_teste',
+            'phone_number' => '+5511900000700', 'wamid' => 'wamid.novo', 'date_sent' => $this->utcNow('-1 minute'),
+        ]);
+        $this->connection->update('leads', ['dialoghsm_status' => 'failed_meta'], ['id' => $this->leadId]);
+
+        $this->webhook('wamid.antigo', 'read'); // envio de 3 dias atrás
+
+        $this->assertSame('failed_meta', $this->connection->fetchOne('SELECT dialoghsm_status FROM leads WHERE id = ?', [$this->leadId]));
+    }
 }

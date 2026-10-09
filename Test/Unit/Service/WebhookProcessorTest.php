@@ -281,9 +281,11 @@ class WebhookProcessorTest extends TestCase
         $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
         $this->logRepository->method('findByWamid')->willReturn($log);
 
+        // Contato de sistema (sem device/cookie/CURRENT_LEAD_CHANGED), limpo depois da decisão
+        $this->contactTracker->expects($this->never())->method('setTrackedContact');
         $this->contactTracker->expects($this->atLeastOnce())
-            ->method('setTrackedContact')
-            ->with($lead);
+            ->method('setSystemContact')
+            ->with($this->logicalOr($this->identicalTo($lead), $this->isNull()));
         $this->realTimeExecutioner->expects($this->once())
             ->method('execute')
             ->with('dialoghsm.decision_delivered', $log, 'whatsapp', null);
@@ -305,9 +307,11 @@ class WebhookProcessorTest extends TestCase
         $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
         $this->logRepository->method('findByWamid')->willReturn($log);
 
+        // Contato de sistema (sem device/cookie/CURRENT_LEAD_CHANGED), limpo depois da decisão
+        $this->contactTracker->expects($this->never())->method('setTrackedContact');
         $this->contactTracker->expects($this->atLeastOnce())
-            ->method('setTrackedContact')
-            ->with($lead);
+            ->method('setSystemContact')
+            ->with($this->logicalOr($this->identicalTo($lead), $this->isNull()));
         $this->realTimeExecutioner->expects($this->once())
             ->method('execute')
             ->with('dialoghsm.decision_read', $log, 'whatsapp', null);
@@ -1779,9 +1783,11 @@ class WebhookProcessorTest extends TestCase
             ->with(77, $this->isInstanceOf(\DateTimeInterface::class))
             ->willReturn($log);
 
+        // Contato de sistema (sem device/cookie/CURRENT_LEAD_CHANGED), limpo depois da decisão
+        $this->contactTracker->expects($this->never())->method('setTrackedContact');
         $this->contactTracker->expects($this->atLeastOnce())
-            ->method('setTrackedContact')
-            ->with($lead);
+            ->method('setSystemContact')
+            ->with($this->logicalOr($this->identicalTo($lead), $this->isNull()));
         $this->realTimeExecutioner->expects($this->once())
             ->method('execute')
             ->with('dialoghsm.decision_replied', $log, 'whatsapp', null);

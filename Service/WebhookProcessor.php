@@ -17,6 +17,7 @@ use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumberRepository;
 use MauticPlugin\DialogHSMBundle\Event\WebhookMessageFailedEvent;
+use MauticPlugin\DialogHSMBundle\Exception\WebhookRetryLaterException;
 use Psr\Log\LoggerInterface;
 use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
@@ -89,7 +90,15 @@ class WebhookProcessor
         }
 
         $log = $this->logRepository->findByWamid($wamid);
-        if (!$log || !$this->isValidTransition($log->getStatus(), $status)) {
+        if (!$log) {
+            return;
+        }
+
+        if (in_array($status, [MessageLog::STATUS_DELIVERED, MessageLog::STATUS_READ], true) && $this->isActionStillBeingExecuted($log)) {
+            throw new WebhookRetryLaterException(sprintf('Ação de campanha do contato #%d ainda em execução — webhook %s reentregue depois.', (int) $log->getLeadId(), $status));
+        }
+
+        if (!$this->claimTransition($log, $status)) {
             return;
         }
 
@@ -199,6 +208,13 @@ class WebhookProcessor
         }
 
         try {
+            // dialoghsm_status reflete o envio mais recente do contato: um webhook atrasado de
+            // um envio antigo (ex.: read de dias atrás) não pode sobrescrever o status atual.
+            if (null !== $log->getId() && null !== $log->getDateSent()
+                && $this->logRepository->hasNewerSendForLead($leadId, $log->getId(), $log->getDateSent())) {
+                return;
+            }
+
             $lead = $this->leadModel->getEntity($leadId);
             if (null === $lead) {
                 return;
@@ -308,8 +324,11 @@ class WebhookProcessor
 
     /**
      * Avança contatos parados no nó de decisão de campanha "Leu mensagem" / "Respondeu mensagem".
-     * ContactTracker::setTrackedContact é necessário porque RealTimeExecutioner normalmente
-     * resolve o contato via cookie de sessão HTTP — aqui a requisição é server-to-server (webhook).
+     * O RealTimeExecutioner resolve o contato pelo ContactTracker, que numa requisição normal
+     * vem do cookie — aqui o webhook é server-to-server. Contato de sistema em vez de
+     * setTrackedContact: numa requisição anônima este criava device com o User-Agent da
+     * 360dialog, cookies de rastreamento e disparava CURRENT_LEAD_CHANGED, que reatribui
+     * page_hits/asset_downloads de um contato para outro quando o payload traz vários.
      */
     private function triggerCampaignDecision(MessageLog $log, string $decisionKey): void
     {
@@ -323,7 +342,7 @@ class WebhookProcessor
                 return;
             }
 
-            $this->contactTracker->setTrackedContact($lead);
+            $this->contactTracker->setSystemContact($lead);
             $this->realTimeExecutioner->execute($decisionKey, $log, 'whatsapp', null);
         } catch (\Throwable $e) {
             $this->logger->error('DialogHSM: falha ao avançar decisão de campanha', [
@@ -331,6 +350,9 @@ class WebhookProcessor
                 'logId'       => $log->getId(),
                 'error'       => $e->getMessage(),
             ]);
+        } finally {
+            // Não vaza para o próximo status do mesmo payload (outro contato)
+            $this->contactTracker->setSystemContact(null);
         }
     }
 
@@ -611,6 +633,11 @@ class WebhookProcessor
 
     private function persistReply(MessageLog $log, Lead $lead, string $from, \DateTime $now, string $type = 'text'): void
     {
+        // Outra requisição já registrou a resposta deste envio: nada a fazer
+        if (null !== $log->getId() && !$this->logRepository->claimReply($log->getId(), $now)) {
+            return;
+        }
+
         $log->setDateReplied($now);
         $this->em->persist($log);
         $this->em->flush();
@@ -831,6 +858,71 @@ class WebhookProcessor
         }
 
         return array_unique($candidates);
+    }
+
+    /**
+     * Em ação agendada (campanha com data/intervalo), o core só grava o log da ação como
+     * executado (is_scheduled=0) no fim do lote do trigger. Um delivered/read que chega antes
+     * disso não acha a ação para o nó de decisão "Entregue"/"Leu" e a decisão se perde — o
+     * contato seguia pelo "não" mesmo tendo lido. Nesse caso o webhook é adiado (503), antes de
+     * gravar qualquer coisa.
+     *
+     * Só adia com a ação vencida e a campanha ativa: o trigger vai concluí-la no próximo cron.
+     * Log antigo travado em campanha desativada não adia (seria reentrega sem fim).
+     */
+    private function isActionStillBeingExecuted(MessageLog $log): bool
+    {
+        if (null === $log->getCampaignEventId() || null === $log->getLeadId()) {
+            return false;
+        }
+
+        $prefix = defined('MAUTIC_TABLE_PREFIX') ? MAUTIC_TABLE_PREFIX : '';
+
+        try {
+            $pending = $this->em->getConnection()->fetchOne(
+                "SELECT 1 FROM `{$prefix}campaign_lead_event_log` cle
+                 INNER JOIN `{$prefix}campaigns` c ON c.id = cle.campaign_id
+                 WHERE cle.event_id = :eventId AND cle.lead_id = :leadId
+                   AND cle.is_scheduled = 1 AND cle.trigger_date <= UTC_TIMESTAMP()
+                   AND c.is_published = 1 AND c.deleted IS NULL
+                   AND (c.publish_down IS NULL OR c.publish_down > UTC_TIMESTAMP())
+                 LIMIT 1",
+                ['eventId' => $log->getCampaignEventId(), 'leadId' => $log->getLeadId()]
+            );
+        } catch (\Throwable) {
+            return false; // sem como checar: segue o fluxo normal, como antes
+        }
+
+        return false !== $pending;
+    }
+
+    /**
+     * Valida e reserva a transição no banco antes de qualquer efeito colateral. Se outra
+     * requisição mudou o status no meio, revalida com o status atual (ex.: delivered e read
+     * do mesmo wamid em paralelo: os dois precisam passar, em ordem).
+     *
+     * Log sem id (não persistido) não tem concorrência possível: só valida.
+     */
+    private function claimTransition(MessageLog $log, string $new): bool
+    {
+        for ($attempt = 0; $attempt < 3; ++$attempt) {
+            $current = $log->getStatus();
+            if (!$this->isValidTransition($current, $new)) {
+                return false;
+            }
+
+            if (null === $log->getId() || $this->logRepository->claimStatusTransition($log->getId(), $current, $new)) {
+                return true;
+            }
+
+            $fresh = $this->logRepository->fetchStatus($log->getId());
+            if (null === $fresh) {
+                return false;
+            }
+            $log->setStatus($fresh);
+        }
+
+        return false;
     }
 
     private function isValidTransition(?string $current, string $new): bool

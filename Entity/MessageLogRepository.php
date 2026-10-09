@@ -271,6 +271,58 @@ class MessageLogRepository extends CommonRepository
      * Localiza um MessageLog pelo wamid (inclui UUIDs temporários de logs queued).
      * Retorna o registro mais recente caso haja duplicatas.
      */
+    /**
+     * Troca atômica de status (compare-and-set): só grava se o status no banco ainda for
+     * $expected. Webhooks iguais processados em paralelo (reentrega da 360dialog, rajada)
+     * leriam o mesmo status e os dois aplicariam a transição — com pontos, decisão de
+     * campanha e webhook do Mautic em dobro.
+     */
+    public function claimStatusTransition(int $id, ?string $expected, string $new): bool
+    {
+        $table = $this->getEntityManager()->getClassMetadata(MessageLog::class)->getTableName();
+
+        return 1 === (int) $this->getEntityManager()->getConnection()->executeStatement(
+            "UPDATE `{$table}` SET status = :new WHERE id = :id AND status <=> :expected",
+            ['new' => $new, 'id' => $id, 'expected' => $expected]
+        );
+    }
+
+    public function fetchStatus(int $id): ?string
+    {
+        $table  = $this->getEntityManager()->getClassMetadata(MessageLog::class)->getTableName();
+        $status = $this->getEntityManager()->getConnection()->fetchOne("SELECT status FROM `{$table}` WHERE id = ?", [$id]);
+
+        return false === $status ? null : (string) $status;
+    }
+
+    /**
+     * Marca a resposta só se ainda não houver uma: respostas simultâneas do mesmo contato
+     * (mensagens seguidas, reentrega) registrariam pontos e decisão "respondeu" em dobro.
+     */
+    public function claimReply(int $id, \DateTimeInterface $repliedAt): bool
+    {
+        $table = $this->getEntityManager()->getClassMetadata(MessageLog::class)->getTableName();
+
+        return 1 === (int) $this->getEntityManager()->getConnection()->executeStatement(
+            "UPDATE `{$table}` SET date_replied = :at WHERE id = :id AND date_replied IS NULL",
+            ['at' => \DateTime::createFromInterface($repliedAt)->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s'), 'id' => $id]
+        );
+    }
+
+    public function hasNewerSendForLead(int $leadId, int $logId, \DateTimeInterface $sentAt): bool
+    {
+        $table = $this->getEntityManager()->getClassMetadata(MessageLog::class)->getTableName();
+
+        return false !== $this->getEntityManager()->getConnection()->fetchOne(
+            "SELECT 1 FROM `{$table}` WHERE lead_id = :leadId AND id <> :id AND date_sent > :sentAt LIMIT 1",
+            [
+                'leadId' => $leadId,
+                'id'     => $logId,
+                'sentAt' => \DateTime::createFromInterface($sentAt)->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s'),
+            ]
+        );
+    }
+
     public function findByWamid(string $wamid): ?MessageLog
     {
         $results = $this->createQueryBuilder('dhml')
