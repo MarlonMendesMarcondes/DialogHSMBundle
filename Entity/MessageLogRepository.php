@@ -423,6 +423,9 @@ class MessageLogRepository extends CommonRepository
      *     ultrapassar $maxRecords, remove os mais antigos até o limite.
      *     Desabilitado quando $maxRecords = 0 (padrão).
      *
+     * Logs 'queued' nunca são removidos: a mensagem ainda está no RabbitMQ (por exemplo, retida
+     * por campanha desativada) e o consumidor precisa achar o log pelo queueLogId ao enviar.
+     *
      * Ambas as deleções usam lotes de PRUNE_BATCH_SIZE para evitar table locks longos.
      * O loop de idade continua enquanto o lote estiver cheio (indica que há mais registros).
      * O loop de contagem continua até zerar o excesso ou até o banco retornar 0 linhas.
@@ -439,7 +442,8 @@ class MessageLogRepository extends CommonRepository
         if ($maxDays > 0) {
             do {
                 $deleted = (int) $conn->executeStatement(
-                    "DELETE FROM `{$tableName}` WHERE date_sent < DATE_SUB(NOW(), INTERVAL {$maxDays} DAY) LIMIT ".self::PRUNE_BATCH_SIZE
+                    "DELETE FROM `{$tableName}` WHERE date_sent < DATE_SUB(NOW(), INTERVAL {$maxDays} DAY) AND status <> :queued LIMIT ".self::PRUNE_BATCH_SIZE,
+                    ['queued' => MessageLog::STATUS_QUEUED]
                 );
             } while ($deleted === self::PRUNE_BATCH_SIZE);
         }
@@ -449,6 +453,7 @@ class MessageLogRepository extends CommonRepository
             return;
         }
 
+        // O limite vale para o tamanho total da tabela, 'queued' incluído; só não os apaga.
         $count = (int) $conn->fetchOne("SELECT COUNT(*) FROM `{$tableName}`");
 
         if ($count <= $maxRecords) {
@@ -460,7 +465,8 @@ class MessageLogRepository extends CommonRepository
         while ($toDelete > 0) {
             $batch   = min(self::PRUNE_BATCH_SIZE, $toDelete);
             $deleted = (int) $conn->executeStatement(
-                "DELETE FROM `{$tableName}` ORDER BY date_sent ASC, id ASC LIMIT {$batch}"
+                "DELETE FROM `{$tableName}` WHERE status <> :queued ORDER BY date_sent ASC, id ASC LIMIT {$batch}",
+                ['queued' => MessageLog::STATUS_QUEUED]
             );
 
             if (0 === $deleted) {

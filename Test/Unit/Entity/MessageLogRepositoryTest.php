@@ -319,7 +319,7 @@ class MessageLogRepositoryTest extends TestCase
         $this->mockConnection
             ->expects($this->once())
             ->method('executeStatement')
-            ->with('DELETE FROM `dialog_hsm_message_log` ORDER BY date_sent ASC, id ASC LIMIT 500');
+            ->with('DELETE FROM `dialog_hsm_message_log` WHERE status <> :queued ORDER BY date_sent ASC, id ASC LIMIT 500');
 
         $this->mockConnection
             ->method('fetchOne')
@@ -333,7 +333,7 @@ class MessageLogRepositoryTest extends TestCase
         $this->mockConnection
             ->expects($this->once())
             ->method('executeStatement')
-            ->with('DELETE FROM `dialog_hsm_message_log` ORDER BY date_sent ASC, id ASC LIMIT 1');
+            ->with('DELETE FROM `dialog_hsm_message_log` WHERE status <> :queued ORDER BY date_sent ASC, id ASC LIMIT 1');
 
         $this->mockConnection
             ->method('fetchOne')
@@ -347,7 +347,7 @@ class MessageLogRepositoryTest extends TestCase
         $this->mockConnection
             ->expects($this->once())
             ->method('executeStatement')
-            ->with('DELETE FROM `dialog_hsm_message_log` ORDER BY date_sent ASC, id ASC LIMIT 100');
+            ->with('DELETE FROM `dialog_hsm_message_log` WHERE status <> :queued ORDER BY date_sent ASC, id ASC LIMIT 100');
 
         $this->mockConnection
             ->method('fetchOne')

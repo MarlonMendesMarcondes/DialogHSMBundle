@@ -40,6 +40,14 @@ class SendWhatsAppMessageHandler
      */
     private const INACTIVE_CAMPAIGN_RECHECK_MS = 300000;
 
+    /**
+     * Intervalo mínimo entre limpezas da tabela de logs no mesmo processo. O worker da fila
+     * processa centenas de mensagens por execução: limpar a cada uma pesaria no banco.
+     */
+    private const PRUNE_INTERVAL_SECONDS = 300;
+
+    private float $lastPruneAt = 0.0;
+
     private int   $cachedMaxRecords = -1;
     private int   $cachedMaxDays    = -1;
     private float $cacheExp         = 0.0;
@@ -292,7 +300,10 @@ class SendWhatsAppMessageHandler
             // falha silenciosa — não interrompe o registro do envio
         }
 
-        if (!$skipHousekeeping && $queueLogId === null) {
+        // Vale também para o consumo da fila (queueLogId preenchido): antes só o envio direto e
+        // o broadcast limpavam, e numa instalação só com fila log_max_days era ignorado.
+        if (!$skipHousekeeping && microtime(true) - $this->lastPruneAt >= self::PRUNE_INTERVAL_SECONDS) {
+            $this->lastPruneAt = microtime(true);
             $this->messageLogRepository->prune($this->getLogMaxRecords(), $this->getLogMaxDays());
         }
     }
