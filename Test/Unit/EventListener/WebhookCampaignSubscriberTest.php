@@ -78,9 +78,11 @@ class WebhookCampaignSubscriberTest extends TestCase
                     $this->stringContains('campaign_lead_event_log'),
                     $this->stringContains('is_scheduled = 0'),
                     $this->stringContains('date_triggered IS NOT NULL'),
-                    $this->stringContains('ORDER BY id DESC')
+                    $this->stringContains('ORDER BY id DESC'),
+                    // falha atrasada de um envio antigo não marca a rotação nova do contato
+                    $this->stringContains('date_triggered <= :sentAt')
                 ),
-                ['eventId' => 10, 'leadId' => 42]
+                $this->callback(fn (array $params): bool => 10 === $params['eventId'] && 42 === $params['leadId'] && isset($params['sentAt']))
             )
             ->willReturn(false);
         $this->connection->expects($this->never())->method('update');

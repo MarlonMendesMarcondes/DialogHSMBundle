@@ -30,13 +30,17 @@ class WebhookCampaignSubscriber implements EventSubscriberInterface
         $table  = $prefix . 'campaign_lead_event_log';
 
         // Usa metadata.failed (padrão Mautic) — a tabela campaign_lead_event_log não tem coluna
-        // `failed`. Só marca entradas já disparadas, na execução mais recente do contato.
+        // `failed`. Só marca entradas já disparadas, na execução do contato iniciada até o envio
+        // (falha atrasada de um envio antigo não marca a rotação nova).
+        $sentAt = \DateTime::createFromInterface($log->getDateSent() ?? new \DateTime())
+            ->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+
         $row = $this->connection->fetchAssociative(
             "SELECT id, metadata FROM `{$table}`
              WHERE event_id = :eventId AND lead_id = :leadId
-               AND is_scheduled = 0 AND date_triggered IS NOT NULL
+               AND is_scheduled = 0 AND date_triggered IS NOT NULL AND date_triggered <= :sentAt
              ORDER BY id DESC LIMIT 1",
-            ['eventId' => $log->getCampaignEventId(), 'leadId' => $log->getLeadId()]
+            ['eventId' => $log->getCampaignEventId(), 'leadId' => $log->getLeadId(), 'sentAt' => $sentAt]
         );
 
         if (false === $row) {

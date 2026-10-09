@@ -162,7 +162,17 @@ class WebhookProcessor
         }
 
         if (MessageLog::STATUS_FAILED === $status) {
-            $this->dispatcher->dispatch(new WebhookMessageFailedEvent($log));
+            // Se a marcação falhasse com exceção, o webhook voltaria 503 e o retry seria
+            // rejeitado pela transição failed→failed: a marca e o webhook do Mautic "failed"
+            // nunca aconteceriam. O status já está gravado; a marcação é complementar.
+            try {
+                $this->dispatcher->dispatch(new WebhookMessageFailedEvent($log));
+            } catch (\Throwable $e) {
+                $this->logger->error('DialogHSM: falha ao marcar a falha na ação da campanha', [
+                    'logId' => $log->getId(),
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
 
         $webhookEventKey = match ($status) {
@@ -227,10 +237,18 @@ class WebhookProcessor
             $conn = $this->em->getConnection();
             $row  = $conn->fetchAssociative(
                 // A ação HSM é concluída (is_scheduled=0) ao entregar a mensagem à fila, antes
-                // do webhook chegar — filtrar por is_scheduled=1 não acharia o log. ORDER BY id
-                // DESC pega a execução mais recente se o contato reentrou na campanha.
-                'SELECT id, metadata FROM campaign_lead_event_log WHERE event_id = :eventId AND lead_id = :leadId ORDER BY id DESC LIMIT 1',
-                ['eventId' => $log->getCampaignEventId(), 'leadId' => $log->getLeadId()]
+                // do webhook chegar — filtrar por is_scheduled=1 não acharia o log. A execução
+                // certa é a mais recente iniciada até o envio: um webhook atrasado de um envio
+                // antigo não pode sobrescrever a metadata de uma rotação nova do contato.
+                'SELECT id, metadata FROM campaign_lead_event_log
+                 WHERE event_id = :eventId AND lead_id = :leadId
+                   AND (date_triggered IS NULL OR date_triggered <= :sentAt)
+                 ORDER BY id DESC LIMIT 1',
+                [
+                    'eventId' => $log->getCampaignEventId(),
+                    'leadId'  => $log->getLeadId(),
+                    'sentAt'  => self::utcString($log->getDateSent() ?? new \DateTime()),
+                ]
             );
 
             if (!$row) {
@@ -253,6 +271,11 @@ class WebhookProcessor
         } catch (\Throwable) {
             // falha silenciosa — não interrompe o fluxo do webhook
         }
+    }
+
+    private static function utcString(\DateTimeInterface $date): string
+    {
+        return \DateTime::createFromInterface($date)->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s');
     }
 
     private function triggerPointAction(MessageLog $log, string $status): void
@@ -344,11 +367,12 @@ class WebhookProcessor
                 }
             }
 
-            $persisted = $contextId !== null
-                // Scenario A: resposta direta ao HSM — correlação precisa via wamid
-                ? $this->processInboundDirect($from, $contextId, $type)
-                // Scenario B: texto livre — correlação por telefone + janela de 24h
-                : $this->processInboundFreeText($from, $receivedAt, $type);
+            // Scenario A: resposta direta ao HSM — correlação precisa via wamid.
+            // null = o context.id não é de um HSM (ex.: o contato citou uma mensagem do
+            // atendente no Chatwoot): segue como texto livre em vez de descartar a resposta.
+            $persisted = null !== $contextId ? $this->processInboundDirect($from, $contextId, $type) : null;
+            // Scenario B: texto livre — correlação por telefone + janela de 24h
+            $persisted ??= $this->processInboundFreeText($from, $receivedAt, $type);
 
             // Clique em quick-reply button: distinto da resposta genérica acima.
             // A Meta contabiliza clique de botão separadamente de "respondeu" —
@@ -371,6 +395,13 @@ class WebhookProcessor
                 'error'     => $e->getMessage(),
                 'trace'     => $e->getTraceAsString(),
             ]);
+
+            // Banco indisponível é transitório: propaga para o controller responder 503 e a
+            // 360dialog reentregar (como já acontece com os status). Com 200 a resposta se
+            // perdia. Outros erros seguem engolidos para não gerar reentrega sem fim.
+            if ($e instanceof \Doctrine\DBAL\Exception || $e instanceof \Doctrine\ORM\Exception\ORMException) {
+                throw $e;
+            }
         }
     }
 
@@ -378,7 +409,10 @@ class WebhookProcessor
      * Scenario A: context.id presente — localiza o MessageLog exato pelo wamid do HSM original.
      * Cache key usa o contextId para não bloquear respostas a outros HSMs do mesmo contato.
      */
-    private function processInboundDirect(string $from, string $contextId, string $type = 'text'): bool
+    /**
+     * @return bool|null null quando o context.id não é de nenhum HSM registrado
+     */
+    private function processInboundDirect(string $from, string $contextId, string $type = 'text'): ?bool
     {
         $redis    = $this->getRedis();
         $cacheKey = self::REPLIED_CACHE_PREFIX . $contextId;
@@ -388,7 +422,11 @@ class WebhookProcessor
         }
 
         $log = $this->logRepository->findByWamid($contextId);
-        if (null === $log || null === $log->getLeadId()) {
+        if (null === $log) {
+            return null;
+        }
+
+        if (null === $log->getLeadId()) {
             return false;
         }
 

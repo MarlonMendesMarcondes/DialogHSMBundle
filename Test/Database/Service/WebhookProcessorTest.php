@@ -173,4 +173,44 @@ class WebhookProcessorTest extends DatabaseTestCase
 
         $this->assertSame([$deliveredId], array_map('intval', $replied), 'A resposta foi atribuída à mensagem que ainda está na fila.');
     }
+
+    public function testReplyQuotingANonHsmMessageIsStillCounted(): void
+    {
+        $this->connection->insert('dialog_hsm_message_log', [
+            'lead_id' => $this->leadId, 'status' => 'delivered', 'template_name' => 'hsm_entregue',
+            'phone_number' => '+5511900000700', 'wamid' => 'wamid.hsm.citado', 'date_sent' => $this->utcNow('-1 hour'),
+        ]);
+        $hsmId = (int) $this->connection->lastInsertId();
+
+        // O contato cita uma mensagem do atendente (Chatwoot), não o HSM
+        $this->processor->process($this->phone, ['entry' => [['changes' => [['value' => ['messages' => [[
+            'from' => '5511900000700', 'id' => 'wamid.in.'.random_int(1, 999999), 'type' => 'text',
+            'timestamp' => (string) time(), 'text' => ['body' => 'ok'], 'context' => ['id' => 'wamid.do.atendente'],
+        ]]]]]]]]);
+
+        $this->assertNotNull($this->messageLog($hsmId)['date_replied'], 'Resposta citando mensagem que não é HSM era descartada.');
+    }
+
+    public function testLateWebhookOfAnOldRotationDoesNotTouchTheNewRotation(): void
+    {
+        // Rotação 2 do mesmo contato no mesmo evento, iniciada depois do envio da rotação 1
+        $this->connection->update('campaign_lead_event_log', ['date_triggered' => $this->utcNow('-3 days')], ['id' => $this->campaignLogId]);
+        $this->connection->insert('campaign_lead_event_log', [
+            'event_id' => $this->eventId, 'lead_id' => $this->leadId, 'campaign_id' => (int) $this->connection->fetchOne('SELECT campaign_id FROM campaign_lead_event_log WHERE id = ?', [$this->campaignLogId]),
+            'rotation' => 2, 'is_scheduled' => 0, 'system_triggered' => 1,
+            'date_triggered' => $this->utcNow('-1 hour'), 'metadata' => serialize([]),
+        ]);
+        $rotation2Id = (int) $this->connection->lastInsertId();
+
+        $this->connection->insert('dialog_hsm_message_log', [
+            'lead_id' => $this->leadId, 'campaign_event_id' => $this->eventId, 'status' => 'delivered', 'template_name' => 'template_teste',
+            'phone_number' => '+5511900000700', 'wamid' => 'wamid.rotacao1', 'date_sent' => $this->utcNow('-3 days'),
+        ]);
+
+        $this->webhook('wamid.rotacao1', 'read'); // chega com dias de atraso
+
+        $this->em->clear();
+        $this->assertSame([], $this->em->find(LeadEventLog::class, $rotation2Id)->getMetadata(), 'Status do envio antigo foi gravado na rotação nova.');
+        $this->assertSame('read', $this->campaignLogMetadata()['whatsapp']['status'] ?? null);
+    }
 }

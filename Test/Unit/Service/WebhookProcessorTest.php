@@ -2632,4 +2632,23 @@ class WebhookProcessorTest extends TestCase
 
         $this->processor->process('+5511999999999', $this->makeInboundPayload('5511888888888'));
     }
+
+    public function testInboundDatabaseFailurePropagatesSoTheWebhookIsRedelivered(): void
+    {
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willThrowException(new \Doctrine\DBAL\Exception('MySQL server has gone away'));
+
+        // O controller transforma a exceção em 503 e a 360dialog reentrega; com 200 a resposta se perdia
+        $this->expectException(\Doctrine\DBAL\Exception::class);
+
+        $this->processor->process('+5511999999999', $this->makeInboundPayloadWithContext('5511988887777', 'wamid.hsm'));
+    }
+
+    public function testInboundNonDatabaseFailureIsSwallowed(): void
+    {
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willThrowException(new \RuntimeException('dado inesperado'));
+
+        $this->assertSame(200, $this->processor->process('+5511999999999', $this->makeInboundPayloadWithContext('5511988887777', 'wamid.hsm')));
+    }
 }
