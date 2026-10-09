@@ -15,10 +15,16 @@ use MauticPlugin\DialogHSMBundle\Exception\TransientApiException;
 use MauticPlugin\DialogHSMBundle\Integration\DialogHSMIntegration;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use MauticPlugin\DialogHSMBundle\Service\BulkRateLimiter;
+use MauticPlugin\DialogHSMBundle\Service\CampaignActivityChecker;
 use MauticPlugin\DialogHSMBundle\Service\LeadEventLogWriter;
 use MauticPlugin\DialogHSMBundle\Service\RedisContactCache;
+use MauticPlugin\DialogHSMBundle\Service\WorkerQueueContext;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
+use Symfony\Component\Messenger\Bridge\Amqp\Transport\AmqpStamp;
+use Symfony\Component\Messenger\Exception\RecoverableMessageHandlingException;
+use Symfony\Component\Messenger\MessageBusInterface;
+use Symfony\Component\Messenger\Stamp\DelayStamp;
 
 #[AsMessageHandler]
 class SendWhatsAppMessageHandler
@@ -26,6 +32,13 @@ class SendWhatsAppMessageHandler
     private const CACHE_TTL_SECONDS   = 30;
     private const DEFAULT_MAX_RECORDS = 0;      // 0 = sem limite por contagem (padrão)
     private const DEFAULT_MAX_DAYS    = 30;
+
+    /**
+     * Quanto tempo a mensagem de campanha desativada espera na fila de atraso do RabbitMQ
+     * antes de voltar para a fila e a campanha ser verificada de novo. É também o atraso
+     * máximo para o envio recomeçar depois que a campanha é reativada.
+     */
+    private const INACTIVE_CAMPAIGN_RECHECK_MS = 300000;
 
     private int   $cachedMaxRecords = -1;
     private int   $cachedMaxDays    = -1;
@@ -42,6 +55,9 @@ class SendWhatsAppMessageHandler
         private RedisContactCache $contactCache,
         private WhatsAppNumberRepository $whatsAppNumberRepository,
         private LeadEventLogWriter $leadEventLogWriter,
+        private CampaignActivityChecker $campaignActivityChecker,
+        private WorkerQueueContext $queueContext,
+        private MessageBusInterface $bus,
     ) {
     }
 
@@ -56,7 +72,7 @@ class SendWhatsAppMessageHandler
      *                               erros transitórios — registra como 'failed' e retorna.
      *                               Use em contexto de lote onde o retry individual não é suportado.
      *
-     * @return array{success: bool, response: array|null, error: string|null, http_status: int|null, retryable: bool}
+     * @return array{success: bool, response: array|null, error: string|null, http_status: int|null, retryable: bool, paused?: bool}
      *
      * @throws TransientApiException quando o erro é transitório (rede, rate limit, 5xx) e $skipRetry=false,
      *                               para que o Symfony Messenger aplique a retry strategy configurada.
@@ -91,6 +107,36 @@ class SendWhatsAppMessageHandler
 
                     return ['success' => true, 'response' => null, 'error' => null, 'http_status' => null, 'retryable' => false];
                 }
+            }
+        }
+
+        // Campanha desativada (ou fora do período) com a mensagem já na fila: não envia e devolve
+        // a mensagem ao RabbitMQ, para sair quando a campanha for reativada. Só no consumo da
+        // fila (skipRetry=false) — o envio direto roda dentro do próprio trigger da campanha.
+        if (!$skipRetry && null !== $message->campaignId) {
+            $campaignStatus = $this->campaignActivityChecker->getStatus($message->campaignId);
+
+            if (CampaignActivityChecker::INACTIVE === $campaignStatus) {
+                $this->requeueForInactiveCampaign($message);
+
+                return ['success' => false, 'paused' => true, 'response' => null, 'error' => null, 'http_status' => null, 'retryable' => false];
+            }
+
+            // Campanha removida nunca volta: devolver à fila deixaria a mensagem circulando
+            // para sempre. Descarta e registra o motivo.
+            if (CampaignActivityChecker::DELETED === $campaignStatus) {
+                $result = ['success' => false, 'response' => null, 'error' => 'Campanha removida', 'http_status' => null, 'wamid' => null, 'retryable' => false];
+
+                try {
+                    $this->logMessage($message->leadId, $message->templateName, $message->phone, $message->whatsAppNumberName, $result, $message->campaignId, $message->campaignEventId, $message->queueLogId, $skipHousekeeping);
+                } catch (\Throwable $e) {
+                    $this->logger->warning('DialogHSM: Falha ao registrar log da mensagem', [
+                        'lead_id' => $message->leadId,
+                        'error'   => $e->getMessage(),
+                    ]);
+                }
+
+                return $result;
             }
         }
 
@@ -176,6 +222,31 @@ class SendWhatsAppMessageHandler
         $this->updateContactFields($message->leadId, $result);
 
         return $result;
+    }
+
+    /**
+     * Publica a mensagem de novo na mesma fila, com atraso, e deixa o Messenger confirmar
+     * (ack) a original. Sem a fila de origem, recorre ao retry do Messenger, que preserva o
+     * routing key — a mensagem continua no RabbitMQ de qualquer forma.
+     */
+    private function requeueForInactiveCampaign(SendWhatsAppMessage $message): void
+    {
+        $queueName = $this->queueContext->getCurrentQueueName();
+
+        if (null === $queueName || '' === $queueName) {
+            throw new RecoverableMessageHandlingException(sprintf('Campanha #%d desativada — mensagem mantida na fila', $message->campaignId));
+        }
+
+        $this->bus->dispatch($message, [
+            new AmqpStamp($queueName),
+            new DelayStamp(self::INACTIVE_CAMPAIGN_RECHECK_MS),
+        ]);
+
+        $this->logger->info('DialogHSM: campanha desativada — mensagem devolvida à fila', [
+            'lead_id'     => $message->leadId,
+            'campaign_id' => $message->campaignId,
+            'queue'       => $queueName,
+        ]);
     }
 
     private function logMessage(int $leadId, string $templateName, string $phone, string $senderName, array $result, ?int $campaignId = null, ?int $campaignEventId = null, ?string $queueLogId = null, bool $skipHousekeeping = false): void

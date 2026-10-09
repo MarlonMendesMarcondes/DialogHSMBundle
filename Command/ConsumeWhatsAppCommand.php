@@ -6,6 +6,7 @@ namespace MauticPlugin\DialogHSMBundle\Command;
 
 use Mautic\IntegrationsBundle\Helper\IntegrationsHelper;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumberRepository;
+use MauticPlugin\DialogHSMBundle\EventListener\WorkerQueueSubscriber;
 use MauticPlugin\DialogHSMBundle\Integration\DialogHSMIntegration;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -140,13 +141,15 @@ class ConsumeWhatsAppCommand extends Command
         $processes = [];
 
         foreach ($queues as $queue) {
+            // O limite vai por variável de ambiente, não por --limit: o --limit nativo conta
+            // também as mensagens devolvidas à fila por campanha desativada, que travariam as
+            // campanhas ativas da mesma fila (ver WorkerQueueSubscriber).
             $args = [
                 $phpBinary,
                 $consolePath,
                 'messenger:consume',
                 'whatsapp',
                 '--queues='.$queue,
-                '--limit='.$limit,
             ];
 
             if ($timeLimit > 0) {
@@ -154,6 +157,7 @@ class ConsumeWhatsAppCommand extends Command
             }
 
             $process = ($this->processFactory)($args);
+            $process->setEnv([WorkerQueueSubscriber::SEND_LIMIT_ENV => (string) $limit]);
             $process->setTimeout($timeLimit > 0 ? $timeLimit + 30 : null);
             $process->start(function (string $type, string $buffer) use ($queue, $output): void {
                 foreach (explode("\n", rtrim($buffer)) as $line) {

@@ -469,6 +469,28 @@ class ConsumeWhatsAppCommandTest extends TestCase
         $this->assertStringContainsString('limit=25', $tester->getDisplay());
     }
 
+    public function testParallelWorkersReceiveLimitByEnvironmentInsteadOfLimitOption(): void
+    {
+        $this->mockRepository
+            ->method('getDistinctBulkQueueNames')
+            ->willReturn(['queue_a']);
+
+        $processes      = [];
+        $processFactory = function (array $args) use (&$processes): Process {
+            $process     = new Process(['bash', '-c', 'exit 0']);
+            $processes[] = [$args, $process];
+
+            return $process;
+        };
+
+        $this->runCommandTester(['--mode' => 'bulk', '--limit' => '25'], null, $processFactory);
+
+        [$args, $process] = $processes[0];
+        // --limit nativo contaria as mensagens devolvidas por campanha desativada
+        $this->assertEmpty(array_filter($args, fn ($a) => str_starts_with($a, '--limit')));
+        $this->assertSame('25', $process->getEnv()[\MauticPlugin\DialogHSMBundle\EventListener\WorkerQueueSubscriber::SEND_LIMIT_ENV]);
+    }
+
     public function testParallelModeOutputsWorkerStartedMessageForEachQueue(): void
     {
         $this->mockRepository

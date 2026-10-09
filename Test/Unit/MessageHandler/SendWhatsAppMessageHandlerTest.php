@@ -14,11 +14,18 @@ use MauticPlugin\DialogHSMBundle\Exception\TransientApiException;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppMessageHandler;
 use MauticPlugin\DialogHSMBundle\Service\BulkRateLimiter;
+use MauticPlugin\DialogHSMBundle\Service\CampaignActivityChecker;
 use MauticPlugin\DialogHSMBundle\Service\LeadEventLogWriter;
 use MauticPlugin\DialogHSMBundle\Service\RedisContactCache;
+use MauticPlugin\DialogHSMBundle\Service\WorkerQueueContext;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
+use Symfony\Component\Messenger\Bridge\Amqp\Transport\AmqpStamp;
+use Symfony\Component\Messenger\Envelope;
+use Symfony\Component\Messenger\Exception\RecoverableMessageHandlingException;
+use Symfony\Component\Messenger\MessageBusInterface;
+use Symfony\Component\Messenger\Stamp\DelayStamp;
 
 class SendWhatsAppMessageHandlerTest extends TestCase
 {
@@ -33,6 +40,10 @@ class SendWhatsAppMessageHandlerTest extends TestCase
     private RedisContactCache&MockObject $mockContactCache;
     private WhatsAppNumberRepository&MockObject $mockWhatsAppNumberRepository;
     private LeadEventLogWriter&MockObject $mockLeadEventLogWriter;
+    private CampaignActivityChecker&MockObject $mockCampaignActivityChecker;
+    private WorkerQueueContext $queueContext;
+    private MessageBusInterface&MockObject $mockBus;
+    private string $campaignStatus = CampaignActivityChecker::ACTIVE;
     private SendWhatsAppMessageHandler $handler;
 
     protected function setUp(): void
@@ -48,6 +59,10 @@ class SendWhatsAppMessageHandlerTest extends TestCase
         $this->mockContactCache         = $this->createMock(RedisContactCache::class);
         $this->mockWhatsAppNumberRepository = $this->createMock(WhatsAppNumberRepository::class);
         $this->mockLeadEventLogWriter    = $this->createMock(LeadEventLogWriter::class);
+        $this->mockCampaignActivityChecker = $this->createMock(CampaignActivityChecker::class);
+        $this->mockCampaignActivityChecker->method('getStatus')->willReturnCallback(fn () => $this->campaignStatus);
+        $this->queueContext = new WorkerQueueContext();
+        $this->mockBus      = $this->createMock(MessageBusInterface::class);
 
         // Default: getIntegration throws (fail-open → DEFAULT_MAX_RECORDS=10000)
         $this->mockIntegrationsHelper->method('getIntegration')->willThrowException(new \RuntimeException('not configured'));
@@ -63,6 +78,9 @@ class SendWhatsAppMessageHandlerTest extends TestCase
             $this->mockContactCache,
             $this->mockWhatsAppNumberRepository,
             $this->mockLeadEventLogWriter,
+            $this->mockCampaignActivityChecker,
+            $this->queueContext,
+            $this->mockBus,
         );
     }
 
@@ -876,6 +894,96 @@ class SendWhatsAppMessageHandlerTest extends TestCase
         $this->mockLeadModel->expects($this->once())->method('saveEntity');
 
         // Não deve lançar exceção
+        ($this->handler)($this->makeMessage());
+    }
+
+    // -------------------------------------------------------------------------
+    // Campanha desativada com a mensagem já na fila
+    // -------------------------------------------------------------------------
+
+    public function testInactiveCampaignRequeuesMessageToSameQueueWithDelayAndDoesNotSend(): void
+    {
+        $this->campaignStatus = CampaignActivityChecker::INACTIVE;
+        $this->queueContext->setCurrentQueueName('wpp_unimax_lote');
+        $message = $this->makeMessageWithCampaign();
+
+        $this->mockApi->expects($this->never())->method('sendMessage');
+        $this->mockEntityManager->expects($this->never())->method('persist');
+        $this->mockBus->expects($this->once())
+            ->method('dispatch')
+            ->willReturnCallback(function (object $dispatched, array $stamps) use ($message): Envelope {
+                $this->assertSame($message, $dispatched);
+                $amqp  = array_values(array_filter($stamps, fn ($s) => $s instanceof AmqpStamp));
+                $delay = array_values(array_filter($stamps, fn ($s) => $s instanceof DelayStamp));
+                $this->assertSame('wpp_unimax_lote', $amqp[0]->getRoutingKey());
+                $this->assertGreaterThan(0, $delay[0]->getDelay());
+
+                return new Envelope($dispatched);
+            });
+
+        $result = ($this->handler)($message);
+
+        $this->assertTrue($result['paused']);
+        $this->assertFalse($result['success']);
+    }
+
+    public function testInactiveCampaignWithoutKnownQueueFallsBackToMessengerRetry(): void
+    {
+        $this->campaignStatus = CampaignActivityChecker::INACTIVE;
+
+        $this->mockApi->expects($this->never())->method('sendMessage');
+        $this->mockBus->expects($this->never())->method('dispatch');
+        $this->expectException(RecoverableMessageHandlingException::class);
+
+        ($this->handler)($this->makeMessageWithCampaign());
+    }
+
+    public function testDeletedCampaignDiscardsMessageAndLogsReason(): void
+    {
+        $this->campaignStatus = CampaignActivityChecker::DELETED;
+
+        $this->mockApi->expects($this->never())->method('sendMessage');
+        $this->mockBus->expects($this->never())->method('dispatch');
+        $this->mockEntityManager->expects($this->once())
+            ->method('persist')
+            ->with($this->callback(fn (MessageLog $log) => MessageLog::STATUS_FAILED === $log->getStatus()
+                && str_contains((string) $log->getErrorMessage(), 'Campanha removida')));
+
+        $result = ($this->handler)($this->makeMessageWithCampaign());
+
+        $this->assertFalse($result['success']);
+        $this->assertArrayNotHasKey('paused', $result);
+    }
+
+    public function testActiveCampaignSendsNormally(): void
+    {
+        $this->mockApi->expects($this->once())->method('sendMessage')
+            ->willReturn(['success' => true, 'response' => [], 'error' => null, 'http_status' => 200, 'wamid' => 'wamid.x']);
+        $this->mockBus->expects($this->never())->method('dispatch');
+
+        $result = ($this->handler)($this->makeMessageWithCampaign());
+
+        $this->assertTrue($result['success']);
+    }
+
+    public function testDirectBatchContextIgnoresCampaignStatus(): void
+    {
+        // skipRetry=true é o envio direto, que roda dentro do próprio trigger da campanha
+        $this->campaignStatus = CampaignActivityChecker::INACTIVE;
+
+        $this->mockApi->expects($this->once())->method('sendMessage')
+            ->willReturn(['success' => true, 'response' => [], 'error' => null, 'http_status' => 200, 'wamid' => 'wamid.x']);
+        $this->mockBus->expects($this->never())->method('dispatch');
+
+        ($this->handler)($this->makeMessageWithCampaign(), skipHousekeeping: true, skipRateLimit: true, skipRetry: true);
+    }
+
+    public function testMessageWithoutCampaignIsNotChecked(): void
+    {
+        $this->mockCampaignActivityChecker->expects($this->never())->method('getStatus');
+        $this->mockApi->expects($this->once())->method('sendMessage')
+            ->willReturn(['success' => true, 'response' => [], 'error' => null, 'http_status' => 200, 'wamid' => 'wamid.x']);
+
         ($this->handler)($this->makeMessage());
     }
 }
