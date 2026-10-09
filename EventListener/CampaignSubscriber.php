@@ -457,9 +457,8 @@ class CampaignSubscriber implements EventSubscriberInterface
             );
 
             if ($existingLog !== null) {
-                if ($this->resolveFromWebhookLog($event, $logId, $existingLog)) {
-                    $decided[$logId] = true;
-                }
+                $this->resolveFromWebhookLog($event, $logId, $existingLog);
+                $decided[$logId] = true;
                 continue;
             }
 
@@ -545,8 +544,14 @@ class CampaignSubscriber implements EventSubscriberInterface
                 continue;
             }
 
-            // Mensagem enviada: aguarda webhook da Meta antes de avançar na campanha.
-            // O contato permanece is_scheduled=1 e será reavaliado no próximo batch.
+            // Mensagem entregue à fila/envio direto: o contato é decidido agora. O core exige
+            // pass()/fail() para todo log do lote — sem isso lança LogNotProcessedException,
+            // o mautic:campaigns:trigger abandona a campanha até o próximo cron e o disparo
+            // sai picado (um lote por execução). O status real da Meta chega depois pelo
+            // webhook: metadata da ação (WebhookProcessor/WebhookCampaignSubscriber) e nós
+            // de decisão entregue/lido/respondeu.
+            $event->pass($event->getPending()->get($logId));
+            $decided[$logId] = true;
 
             ++$sentCount;
 
@@ -634,10 +639,10 @@ class CampaignSubscriber implements EventSubscriberInterface
     }
 
     /**
-     * @return bool true se o contato foi decidido (pass/passWithError); false se continua
-     *              aguardando o webhook
+     * Re-execução de um contato que já tem MessageLog: decide sempre (pass/passWithError),
+     * nunca reenvia.
      */
-    private function resolveFromWebhookLog(PendingEvent $event, mixed $logId, MessageLog $log): bool
+    private function resolveFromWebhookLog(PendingEvent $event, mixed $logId, MessageLog $log): void
     {
         $status      = $log->getStatus();
         $campaignLog = $event->getPending()->get($logId);
@@ -650,19 +655,19 @@ class CampaignSubscriber implements EventSubscriberInterface
         if (in_array($status, $successStatuses, true)) {
             $event->pass($campaignLog);
 
-            return true;
+            return;
         }
 
         if (MessageLog::STATUS_FAILED === $status || MessageLog::STATUS_DLQ === $status) {
             if (in_array($log->getWebhookErrorCode(), self::META_RESTRICTION_CODES, true)) {
                 $event->passWithError($campaignLog, 'dialoghsm.campaign.error.meta_restricted');
 
-                return true;
+                return;
             }
 
             $event->passWithError($campaignLog, 'dialoghsm.campaign.error.webhook_failed');
 
-            return true;
+            return;
         }
 
         if (MessageLog::STATUS_PENDING_WEBHOOK === $status) {
@@ -670,12 +675,13 @@ class CampaignSubscriber implements EventSubscriberInterface
             if ($elapsed > self::WEBHOOK_TIMEOUT_SECONDS) {
                 $event->passWithError($campaignLog, 'dialoghsm.campaign.error.webhook_timeout');
 
-                return true;
+                return;
             }
-            // Dentro do timeout: permanece is_scheduled=1, reavaliado no próximo batch
         }
 
-        return false;
+        // Mensagem ainda em trânsito (queued ou aguardando webhook): já foi enviada, então
+        // não reenvia — decide agora para não deixar o log do lote sem pass()/fail().
+        $event->pass($campaignLog);
     }
 
     /**

@@ -41,6 +41,10 @@ use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
  *
  * O MessageLog é o objeto de estado compartilhado entre os três momentos,
  * exatamente como acontece em produção via banco de dados.
+ *
+ * O Batch #1 já decide o contato com pass() ao entregar a mensagem — o core exige
+ * pass()/fail() para todo log do lote. O Batch #2 cobre contatos que versões
+ * anteriores deixaram is_scheduled=1 aguardando o webhook: são decididos sem reenvio.
  */
 class WebhookSentFlowTest extends TestCase
 {
@@ -213,8 +217,8 @@ class WebhookSentFlowTest extends TestCase
         $subscriber1  = $this->makeSubscriber($logRepo1, $batchHandler1);
         $pendingEvent1 = $this->makePendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
 
-        // Primeira execução: pass() NÃO é chamado — aguarda webhook
-        $pendingEvent1->expects($this->never())->method('pass');
+        // Primeira execução: pass() ao entregar a mensagem, sem esperar o webhook
+        $pendingEvent1->expects($this->once())->method('pass');
         $pendingEvent1->expects($this->never())->method('fail');
 
         $subscriber1->onCampaignTriggerAction($pendingEvent1);
@@ -278,7 +282,7 @@ class WebhookSentFlowTest extends TestCase
         $subscriber1   = $this->makeSubscriber($logRepo1, $batchHandler1);
         $pendingEvent1 = $this->makePendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
 
-        $pendingEvent1->expects($this->never())->method('pass');
+        $pendingEvent1->expects($this->once())->method('pass');
         $pendingEvent1->expects($this->never())->method('fail');
 
         $subscriber1->onCampaignTriggerAction($pendingEvent1);
@@ -364,7 +368,7 @@ class WebhookSentFlowTest extends TestCase
         $subscriber1   = $this->makeSubscriber($logRepo1, $batchHandler1);
         $pendingEvent1 = $this->makePendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
 
-        $pendingEvent1->expects($this->never())->method('pass');
+        $pendingEvent1->expects($this->once())->method('pass');
         $pendingEvent1->expects($this->never())->method('fail');
 
         $subscriber1->onCampaignTriggerAction($pendingEvent1);
@@ -393,14 +397,15 @@ class WebhookSentFlowTest extends TestCase
     }
 
     // =========================================================================
-    // Cenário 4: pending_webhook dentro do timeout → nenhuma decisão ainda
+    // Cenário 4: pending_webhook dentro do timeout → pass() sem reenvio
     // =========================================================================
 
     /**
-     * Batch #2 roda rapidamente após o Batch #1 (< 120s) e o webhook ainda não chegou.
-     * O contato deve permanecer aguardando — nem pass() nem fail().
+     * Batch #2 roda logo após o Batch #1 e o webhook ainda não chegou. A mensagem já
+     * saiu, então o contato é decidido com pass() sem reenviar — deixá-lo sem decisão
+     * faria o core abortar o lote (LogNotProcessedException).
      */
-    public function testBatch2WithinTimeoutTakesNoDecision(): void
+    public function testBatch2WithinTimeoutPassesWithoutResending(): void
     {
         $contact = $this->makeContact(id: 1);
 
@@ -420,8 +425,8 @@ class WebhookSentFlowTest extends TestCase
         $subscriber   = $this->makeSubscriber($logRepo, $batchHandler);
         $pendingEvent = $this->makePendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
 
-        // Dentro do timeout: nenhuma decisão — contato permanece is_scheduled=1
-        $pendingEvent->expects($this->never())->method('pass');
+        // Dentro do timeout: pass() sem reenvio
+        $pendingEvent->expects($this->once())->method('pass');
         $pendingEvent->expects($this->never())->method('fail');
 
         $subscriber->onCampaignTriggerAction($pendingEvent);

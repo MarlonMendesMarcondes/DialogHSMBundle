@@ -208,7 +208,10 @@ class WebhookProcessor
         try {
             $conn = $this->em->getConnection();
             $row  = $conn->fetchAssociative(
-                'SELECT id, metadata FROM campaign_lead_event_log WHERE event_id = :eventId AND lead_id = :leadId AND is_scheduled = 1 LIMIT 1',
+                // A ação HSM é concluída (is_scheduled=0) ao entregar a mensagem à fila, antes
+                // do webhook chegar — filtrar por is_scheduled=1 não acharia o log. ORDER BY id
+                // DESC pega a execução mais recente se o contato reentrou na campanha.
+                'SELECT id, metadata FROM campaign_lead_event_log WHERE event_id = :eventId AND lead_id = :leadId ORDER BY id DESC LIMIT 1',
                 ['eventId' => $log->getCampaignEventId(), 'leadId' => $log->getLeadId()]
             );
 

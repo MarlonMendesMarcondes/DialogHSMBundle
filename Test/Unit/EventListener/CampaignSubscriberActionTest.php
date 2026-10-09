@@ -222,8 +222,8 @@ class CampaignSubscriberActionTest extends TestCase
         $this->mockHandler->expects($this->never())->method('__invoke');
         $this->mockBus->expects($this->never())->method('dispatch');
 
-        // Primeira execução: pass() não é chamado (contato fica is_scheduled=1)
-        $event->expects($this->never())->method('pass');
+        // Mensagem entregue à fila/envio direto: o contato é decidido na hora
+        $event->expects($this->exactly(1))->method('pass');
 
         $this->subscriber->onCampaignTriggerAction($event);
     }
@@ -250,8 +250,8 @@ class CampaignSubscriberActionTest extends TestCase
         $this->mockHandler->expects($this->never())->method('__invoke');
         $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
 
-        // Primeira execução: pass() não é chamado (contato fica is_scheduled=1)
-        $event->expects($this->never())->method('pass');
+        // Mensagem entregue à fila/envio direto: o contato é decidido na hora
+        $event->expects($this->exactly(1))->method('pass');
 
         $this->subscriber->onCampaignTriggerActionQueue($event);
     }
@@ -287,8 +287,8 @@ class CampaignSubscriberActionTest extends TestCase
 
         $this->mockLogger->expects($this->once())->method('warning');
 
-        // Primeira execução: pass() não é chamado (contatos ficam is_scheduled=1)
-        $event->expects($this->never())->method('pass');
+        // Mensagem entregue à fila/envio direto: o contato é decidido na hora
+        $event->expects($this->exactly(2))->method('pass');
 
         $this->subscriber->onCampaignTriggerAction($event);
 
@@ -322,8 +322,8 @@ class CampaignSubscriberActionTest extends TestCase
                 $capturedBatch = $batch;
             });
 
-        // Primeira execução: pass() não é chamado (contatos ficam is_scheduled=1)
-        $event->expects($this->never())->method('pass');
+        // Mensagem entregue à fila/envio direto: o contato é decidido na hora
+        $event->expects($this->exactly(3))->method('pass');
 
         $this->subscriber->onCampaignTriggerAction($event);
 
@@ -470,8 +470,8 @@ class CampaignSubscriberActionTest extends TestCase
                 $capturedBatch = $batch;
             });
 
-        // Primeira execução: pass() não é chamado (contatos válidos ficam is_scheduled=1)
-        $event->expects($this->never())->method('pass');
+        // Mensagem entregue à fila/envio direto: o contato é decidido na hora
+        $event->expects($this->exactly(2))->method('pass');
         $event->expects($this->once())
             ->method('passWithError')
             ->with($this->anything(), 'dialoghsm.campaign.error.invalid_phone');
@@ -512,8 +512,8 @@ class CampaignSubscriberActionTest extends TestCase
 
         $this->mockLogger->expects($this->once())->method('warning');
 
-        // Primeira execução: pass() não é chamado (contato fica is_scheduled=1)
-        $event->expects($this->never())->method('pass');
+        // Mensagem entregue à fila/envio direto: o contato é decidido na hora
+        $event->expects($this->exactly(1))->method('pass');
 
         $this->subscriber->onCampaignTriggerAction($event);
 
@@ -539,8 +539,8 @@ class CampaignSubscriberActionTest extends TestCase
         $this->mockDirectBatchHandler->method('__invoke');
         $this->mockLogger->expects($this->never())->method('warning');
 
-        // Primeira execução: pass() não é chamado (contato fica is_scheduled=1)
-        $event->expects($this->never())->method('pass');
+        // Mensagem entregue à fila/envio direto: o contato é decidido na hora
+        $event->expects($this->exactly(1))->method('pass');
 
         $this->subscriber->onCampaignTriggerAction($event);
     }
@@ -577,8 +577,8 @@ class CampaignSubscriberActionTest extends TestCase
 
         $this->mockLogger->expects($this->never())->method('warning');
 
-        // Primeira execução: pass() não é chamado (contatos ficam is_scheduled=1)
-        $event->expects($this->never())->method('pass');
+        // Mensagem entregue à fila/envio direto: o contato é decidido na hora
+        $event->expects($this->exactly(2))->method('pass');
 
         $subscriber = $this->makeSubscriber('redis://localhost:6379');
         $subscriber->onCampaignTriggerAction($event);
@@ -614,8 +614,8 @@ class CampaignSubscriberActionTest extends TestCase
                 $capturedBatch = $batch;
             });
 
-        // Primeira execução: pass() não é chamado (contato fica is_scheduled=1)
-        $event->expects($this->never())->method('pass');
+        // Mensagem entregue à fila/envio direto: o contato é decidido na hora
+        $event->expects($this->exactly(1))->method('pass');
 
         $this->subscriber->onCampaignTriggerAction($event);
 
@@ -652,8 +652,8 @@ class CampaignSubscriberActionTest extends TestCase
             ->method('dispatch')
             ->willReturn(new Envelope(new \stdClass()));
 
-        // Primeira execução: pass() não é chamado (contatos ficam is_scheduled=1)
-        $event->expects($this->never())->method('pass');
+        // Mensagem entregue à fila/envio direto: o contato é decidido na hora
+        $event->expects($this->exactly(3))->method('pass');
 
         $start = microtime(true);
         $this->subscriber->onCampaignTriggerActionQueue($event);
@@ -691,8 +691,8 @@ class CampaignSubscriberActionTest extends TestCase
                 return new Envelope($msg);
             });
 
-        // Primeira execução: pass() não é chamado (contato fica is_scheduled=1)
-        $event->expects($this->never())->method('pass');
+        // Mensagem entregue à fila/envio direto: o contato é decidido na hora
+        $event->expects($this->exactly(1))->method('pass');
 
         $this->subscriber->onCampaignTriggerActionQueue($event);
 
@@ -725,8 +725,8 @@ class CampaignSubscriberActionTest extends TestCase
             ->with($this->isInstanceOf(SendWhatsAppMessage::class))
             ->willReturn(new Envelope(new \stdClass()));
 
-        // Primeira execução: pass() não é chamado (contato fica is_scheduled=1)
-        $event->expects($this->never())->method('pass');
+        // Mensagem entregue à fila/envio direto: o contato é decidido na hora
+        $event->expects($this->exactly(1))->method('pass');
 
         $this->subscriber->onCampaignTriggerActionQueue($event);
     }
@@ -761,8 +761,8 @@ class CampaignSubscriberActionTest extends TestCase
                 return new Envelope($msg);
             });
 
-        // Primeira execução: pass() não é chamado (contatos ficam is_scheduled=1)
-        $event->expects($this->never())->method('pass');
+        // Mensagem entregue à fila/envio direto: o contato é decidido na hora
+        $event->expects($this->exactly(3))->method('pass');
 
         $this->subscriber->onCampaignTriggerActionQueue($event);
 
@@ -800,8 +800,8 @@ class CampaignSubscriberActionTest extends TestCase
                 return new Envelope($msg);
             });
 
-        // Primeira execução: pass() não é chamado (contatos ficam is_scheduled=1)
-        $event->expects($this->never())->method('pass');
+        // Mensagem entregue à fila/envio direto: o contato é decidido na hora
+        $event->expects($this->exactly(3))->method('pass');
 
         $this->subscriber->onCampaignTriggerActionQueue($event);
 
@@ -831,8 +831,8 @@ class CampaignSubscriberActionTest extends TestCase
                 return new Envelope($msg);
             });
 
-        // Primeira execução: pass() não é chamado (contato fica is_scheduled=1)
-        $event->expects($this->never())->method('pass');
+        // Mensagem entregue à fila/envio direto: o contato é decidido na hora
+        $event->expects($this->exactly(1))->method('pass');
 
         $this->subscriber->onCampaignTriggerActionQueue($event);
 
@@ -864,8 +864,8 @@ class CampaignSubscriberActionTest extends TestCase
                 return new Envelope($msg);
             });
 
-        // Primeira execução: pass() não é chamado (contato fica is_scheduled=1)
-        $event->expects($this->never())->method('pass');
+        // Mensagem entregue à fila/envio direto: o contato é decidido na hora
+        $event->expects($this->exactly(1))->method('pass');
 
         $this->subscriber->onCampaignTriggerActionQueue($event);
 
@@ -897,8 +897,8 @@ class CampaignSubscriberActionTest extends TestCase
                 return new Envelope($msg);
             });
 
-        // Primeira execução: pass() não é chamado (contato fica is_scheduled=1)
-        $event->expects($this->never())->method('pass');
+        // Mensagem entregue à fila/envio direto: o contato é decidido na hora
+        $event->expects($this->exactly(1))->method('pass');
 
         $this->subscriber->onCampaignTriggerActionQueue($event);
 
@@ -1002,8 +1002,8 @@ class CampaignSubscriberActionTest extends TestCase
                 $capturedBatch = $batch;
             });
 
-        // Primeira execução: pass() não é chamado (contato fica is_scheduled=1)
-        $event->expects($this->never())->method('pass');
+        // Mensagem entregue à fila/envio direto: o contato é decidido na hora
+        $event->expects($this->exactly(1))->method('pass');
         $this->subscriber->onCampaignTriggerAction($event);
 
         $item = $capturedBatch->items[0];
@@ -1119,8 +1119,8 @@ class CampaignSubscriberActionTest extends TestCase
         $contact = $this->buildContact('+5511999999999', 1);
         $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
 
-        // Primeira execução: pass() não é chamado (contato fica is_scheduled=1)
-        $event->expects($this->never())->method('pass');
+        // Mensagem entregue à fila/envio direto: o contato é decidido na hora
+        $event->expects($this->exactly(1))->method('pass');
 
         $this->subscriber->onCampaignTriggerAction($event);
     }
@@ -1146,8 +1146,8 @@ class CampaignSubscriberActionTest extends TestCase
                 $capturedBatch = $batch;
             });
 
-        // Primeira execução: pass() não é chamado (contato fica is_scheduled=1)
-        $event->expects($this->never())->method('pass');
+        // Mensagem entregue à fila/envio direto: o contato é decidido na hora
+        $event->expects($this->exactly(1))->method('pass');
         $this->subscriber->onCampaignTriggerAction($event);
 
         $this->assertEquals('https://custom.plugin.url/messages', $capturedBatch->items[0]->baseUrl);
@@ -1170,8 +1170,8 @@ class CampaignSubscriberActionTest extends TestCase
                 $capturedBatch = $batch;
             });
 
-        // Primeira execução: pass() não é chamado (contato fica is_scheduled=1)
-        $event->expects($this->never())->method('pass');
+        // Mensagem entregue à fila/envio direto: o contato é decidido na hora
+        $event->expects($this->exactly(1))->method('pass');
         $this->subscriber->onCampaignTriggerAction($event);
 
         $this->assertEquals('https://waba-v2.360dialog.io/messages', $capturedBatch->items[0]->baseUrl);
@@ -1204,8 +1204,8 @@ class CampaignSubscriberActionTest extends TestCase
             }))
             ->willReturn(new Envelope(new \stdClass()));
 
-        // Primeira execução: pass() não é chamado (contato fica is_scheduled=1)
-        $event->expects($this->never())->method('pass');
+        // Mensagem entregue à fila/envio direto: o contato é decidido na hora
+        $event->expects($this->exactly(1))->method('pass');
 
         $subscriber = $this->makeSubscriber('redis://localhost:6379');
         $subscriber->onCampaignTriggerAction($event);
@@ -1243,8 +1243,8 @@ class CampaignSubscriberActionTest extends TestCase
             }))
             ->willReturn(new Envelope(new \stdClass()));
 
-        // Primeira execução: pass() não é chamado (contatos ficam is_scheduled=1)
-        $event->expects($this->never())->method('pass');
+        // Mensagem entregue à fila/envio direto: o contato é decidido na hora
+        $event->expects($this->exactly(3))->method('pass');
 
         $start      = microtime(true);
         $subscriber = $this->makeSubscriber('redis://localhost:6379');
@@ -1283,8 +1283,8 @@ class CampaignSubscriberActionTest extends TestCase
                 $capturedPayload = $batch->items[0]->payloadData;
             });
 
-        // Primeira execução: pass() não é chamado
-        $event->expects($this->never())->method('pass');
+        // Mensagem entregue à fila/envio direto: o contato é decidido na hora
+        $event->expects($this->exactly(1))->method('pass');
         $this->subscriber->onCampaignTriggerAction($event);
 
         $this->assertArrayHasKey('content', $capturedPayload);
@@ -1315,8 +1315,8 @@ class CampaignSubscriberActionTest extends TestCase
                 $capturedPayload = $batch->items[0]->payloadData;
             });
 
-        // Primeira execução: pass() não é chamado
-        $event->expects($this->never())->method('pass');
+        // Mensagem entregue à fila/envio direto: o contato é decidido na hora
+        $event->expects($this->exactly(1))->method('pass');
         $this->subscriber->onCampaignTriggerAction($event);
 
         $this->assertArrayHasKey('content', $capturedPayload);
@@ -1348,8 +1348,8 @@ class CampaignSubscriberActionTest extends TestCase
                 $capturedPayload = $batch->items[0]->payloadData;
             });
 
-        // Primeira execução: pass() não é chamado
-        $event->expects($this->never())->method('pass');
+        // Mensagem entregue à fila/envio direto: o contato é decidido na hora
+        $event->expects($this->exactly(1))->method('pass');
         $this->subscriber->onCampaignTriggerAction($event);
 
         $this->assertArrayHasKey('content', $capturedPayload);
@@ -1372,8 +1372,8 @@ class CampaignSubscriberActionTest extends TestCase
         $this->mockBus->expects($this->never())->method('dispatch');
         $this->mockHandler->expects($this->never())->method('__invoke');
 
-        // Primeira execução: pass() não é chamado (contato fica is_scheduled=1)
-        $event->expects($this->never())->method('pass');
+        // Mensagem entregue à fila/envio direto: o contato é decidido na hora
+        $event->expects($this->exactly(1))->method('pass');
 
         $subscriber = $this->makeSubscriber('null://null');
         $subscriber->onCampaignTriggerAction($event);
@@ -1400,8 +1400,8 @@ class CampaignSubscriberActionTest extends TestCase
         $this->mockDirectBatchHandler->expects($this->once())->method('__invoke');
 
         $event->expects($this->never())->method('fail');
-        // Primeira execução: pass() não é chamado (contato fica is_scheduled=1)
-        $event->expects($this->never())->method('pass');
+        // Mensagem entregue à fila/envio direto: o contato é decidido na hora
+        $event->expects($this->exactly(1))->method('pass');
 
         $this->subscriber->onCampaignTriggerAction($event);
     }
@@ -1471,8 +1471,8 @@ class CampaignSubscriberActionTest extends TestCase
 
         $contact = $this->buildContact('+5511999999999', 1);
         $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
-        // Primeira execução: pass() não é chamado
-        $event->expects($this->never())->method('pass');
+        // Mensagem entregue à fila/envio direto: o contato é decidido na hora
+        $event->expects($this->exactly(1))->method('pass');
         $this->subscriber->onCampaignTriggerAction($event);
 
         $this->assertNotNull($capturedBatch);
@@ -1496,8 +1496,8 @@ class CampaignSubscriberActionTest extends TestCase
 
         $contact = $this->buildContact('+5511999999999', 1);
         $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp_queue', [1 => $contact]);
-        // Primeira execução: pass() não é chamado
-        $event->expects($this->never())->method('pass');
+        // Mensagem entregue à fila/envio direto: o contato é decidido na hora
+        $event->expects($this->exactly(1))->method('pass');
         $this->subscriber->onCampaignTriggerActionQueue($event);
 
         $this->assertNotNull($captured);
@@ -1579,8 +1579,8 @@ class CampaignSubscriberActionTest extends TestCase
         $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
 
         $event->expects($this->never())->method('fail');
-        // Primeira execução: pass() não é chamado (contato fica is_scheduled=1)
-        $event->expects($this->never())->method('pass');
+        // Mensagem entregue à fila/envio direto: o contato é decidido na hora
+        $event->expects($this->exactly(1))->method('pass');
 
         $this->subscriber->onCampaignTriggerAction($event);
 
@@ -1766,10 +1766,11 @@ class CampaignSubscriberActionTest extends TestCase
     }
 
     /**
-     * Re-execução: log com status 'pending_webhook' dentro do timeout → nenhum pass/fail,
-     * contato permanece agendado aguardando webhook.
+     * Re-execução: log com status 'pending_webhook' dentro do timeout → pass() sem reenvio.
+     * Deixar o contato sem decisão faria o core lançar LogNotProcessedException e abortar
+     * o lote inteiro.
      */
-    public function testReExecutionWithPendingWebhookWithinTimeoutWaits(): void
+    public function testReExecutionWithPendingWebhookWithinTimeoutPassesWithoutResending(): void
     {
         $this->enableIntegration();
         $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
@@ -1783,7 +1784,7 @@ class CampaignSubscriberActionTest extends TestCase
         $contact = $this->buildContact('+5511999999999', 1);
         $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
 
-        $event->expects($this->never())->method('pass');
+        $event->expects($this->once())->method('pass');
         $event->expects($this->never())->method('fail');
         $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
 
@@ -2231,10 +2232,10 @@ class CampaignSubscriberActionTest extends TestCase
     }
 
     /**
-     * Contato aguardando webhook (sem decisão) também precisa receber fail() quando a
-     * configuração quebra — o core rejeita o lote se algum log ficar sem pass()/fail().
+     * Contato com mensagem já em trânsito é decidido com pass() antes do erro de montagem
+     * de outro contato — não recebe fail(), senão seria reenviado na nova tentativa.
      */
-    public function testBuildErrorAlsoFailsContactStillWaitingForWebhook(): void
+    public function testBuildErrorDoesNotFailContactStillWaitingForWebhook(): void
     {
         $pendingLog = $this->createMock(MessageLog::class);
         $pendingLog->method('getStatus')->willReturn(MessageLog::STATUS_PENDING_WEBHOOK);
@@ -2258,7 +2259,8 @@ class CampaignSubscriberActionTest extends TestCase
             [1 => $this->buildContact('+5511999999999', 1), 2 => $broken]
         );
 
-        $event->expects($this->exactly(2))->method('fail');
+        $event->expects($this->once())->method('fail');
+        $event->expects($this->once())->method('pass');
         $this->mockBus->expects($this->never())->method('dispatch');
 
         $subscriber->onCampaignTriggerActionQueue($event);
