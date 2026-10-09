@@ -1,0 +1,2 @@
+# Scripts shell precisam de LF: com core.autocrlf=true o checkout converteria para CRLF e o bash quebraria.
+*.sh text eol=lf

@@ -13,9 +13,14 @@
         <testsuite name="integration">
             <directory>Test/Integration</directory>
         </testsuite>
+        <!-- Kernel real + MySQL real. Requer Test/Database/setup-test-database.sh; sem o banco, os testes são pulados. -->
+        <testsuite name="database">
+            <directory>Test/Database</directory>
+        </testsuite>
         <testsuite name="all">
             <directory>Test/Unit</directory>
             <directory>Test/Integration</directory>
+            <directory>Test/Database</directory>
         </testsuite>
     </testsuites>
 </phpunit>
