@@ -214,13 +214,16 @@ class MessageLogRepository extends CommonRepository
         $abs           = abs($offsetSeconds);
         $utcOffset     = sprintf('%s%02d:%02d', $sign, intdiv($abs, 3600), ($abs % 3600) / 60);
 
+        // date_sent é UTC: o início do período (meia-noite local) vai convertido para UTC
+        $fromUtc = (clone $from)->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+
         $rows = $conn->fetchAllAssociative(
             "SELECT DATE(date_sent + INTERVAL ? SECOND) AS day, status, COUNT(*) AS cnt
              FROM `{$tableName}`
              WHERE date_sent >= ?
              GROUP BY DATE(date_sent + INTERVAL ? SECOND), status
              ORDER BY day ASC",
-            [$offsetSeconds, $from->format('Y-m-d H:i:s'), $offsetSeconds]
+            [$offsetSeconds, $fromUtc, $offsetSeconds]
         );
 
         $repliedRows = $conn->fetchAllAssociative(
@@ -229,10 +232,12 @@ class MessageLogRepository extends CommonRepository
              WHERE date_sent >= ? AND date_replied IS NOT NULL
              GROUP BY DATE(date_sent + INTERVAL ? SECOND)
              ORDER BY day ASC",
-            [$offsetSeconds, $from->format('Y-m-d H:i:s'), $offsetSeconds]
+            [$offsetSeconds, $fromUtc, $offsetSeconds]
         );
 
-        $empty = ['queued' => 0, 'sent' => 0, 'delivered' => 0, 'read' => 0, 'replied' => 0, 'failed' => 0, 'dlq' => 0];
+        // pending_webhook (aceita pela 360dialog, aguardando a Meta) era descartado: o gráfico
+        // não mostrava essas mensagens em lugar nenhum. Série própria, como nos cards.
+        $empty = ['queued' => 0, 'pending_webhook' => 0, 'sent' => 0, 'delivered' => 0, 'read' => 0, 'replied' => 0, 'failed' => 0, 'dlq' => 0];
         $data  = [];
 
         // Preenche todos os dias do período com zeros para o gráfico ficar contínuo

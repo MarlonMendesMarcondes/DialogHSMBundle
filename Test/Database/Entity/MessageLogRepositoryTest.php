@@ -80,4 +80,17 @@ class MessageLogRepositoryTest extends DatabaseTestCase
 
         $this->assertSame($id, $this->repository->findByWamid('uuid-da-fila')?->getId());
     }
+
+    public function testChartShowsMessagesWaitingForMetaConfirmation(): void
+    {
+        $this->insertLog('pending_webhook', '-1 minute');
+        $this->insertLog('pending_webhook', '-1 minute');
+        $this->insertLog('delivered', '-1 minute');
+
+        $today = (new \DateTime('now', new \DateTimeZone('America/Sao_Paulo')))->format('Y-m-d');
+        $chart = $this->repository->getChartData(1, 'America/Sao_Paulo');
+
+        $this->assertSame(2, $chart[$today]['pending_webhook'] ?? null, 'pending_webhook era descartado do gráfico.');
+        $this->assertSame(1, $chart[$today]['sent'], 'Funil cumulativo preservado: delivered conta em sent.');
+    }
 }
