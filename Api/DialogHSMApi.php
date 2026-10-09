@@ -10,6 +10,17 @@ use Psr\Log\LoggerInterface;
 
 class DialogHSMApi
 {
+    /**
+     * Sem timeout o Guzzle espera para sempre: uma requisição pendurada prendia o worker até o
+     * time-limit do cron, e o dialoghsm:consume matava (SIGKILL) todos os workers irmãos.
+     */
+    private const CONNECT_TIMEOUT_SECONDS = 10;
+    private const REQUEST_TIMEOUT_SECONDS = 30;
+
+    private const URL_OK          = 'ok';
+    private const URL_BLOCKED     = 'blocked';
+    private const URL_DNS_FAILURE = 'dns_failure';
+
     /** @var callable(string): string */
     private $hostnameResolver;
 
@@ -50,9 +61,24 @@ class DialogHSMApi
             // Valida o endpoint antes de fazer qualquer request (previne SSRF via baseUrl configurada).
             // resolveUrlSafely() resolve o hostname UMA vez; o IP é fixado via CURLOPT_RESOLVE abaixo
             // para que um DNS rebinding entre a validação e o request seja ineficaz.
-            $resolvedIp = $this->resolveUrlSafely($url);
+            ['result' => $urlCheck, 'ip' => $resolvedIp] = $this->resolveUrlSafely($url);
 
-            if (null === $resolvedIp) {
+            // DNS sem resposta é instabilidade, não configuração errada: vale retry. Antes caía no
+            // mesmo caminho da URL bloqueada e a mensagem virava falha definitiva.
+            if (self::URL_DNS_FAILURE === $urlCheck) {
+                $this->logger->warning('DialogHSM: falha ao resolver o DNS da API', ['url' => $url]);
+
+                return [
+                    'success'     => false,
+                    'response'    => null,
+                    'error'       => sprintf('Falha ao resolver o DNS de %s.', $baseHost),
+                    'http_status' => null,
+                    'wamid'       => null,
+                    'retryable'   => true,
+                ];
+            }
+
+            if (self::URL_OK !== $urlCheck) {
                 $this->logger->error('DialogHSM: URL da API rejeitada (SSRF/esquema inválido)', ['url' => $url]);
 
                 return [
@@ -70,7 +96,22 @@ class DialogHSMApi
             ]);
         }
 
-        $payload = $this->buildPayload($mobile, $payloadData);
+        // Fora do try da requisição: dado inválido no payload (ex.: data de limited_time_offer)
+        // é erro permanente — no catch genérico abaixo viraria retry.
+        try {
+            $payload = $this->buildPayload($mobile, $payloadData);
+        } catch (\Throwable $e) {
+            $this->logger->error('DialogHSM: payload inválido', ['error' => $e->getMessage()]);
+
+            return [
+                'success'     => false,
+                'response'    => null,
+                'error'       => 'Payload inválido: '.$e->getMessage(),
+                'http_status' => null,
+                'wamid'       => null,
+                'retryable'   => false,
+            ];
+        }
 
         $this->logger->debug('DialogHSM: Enviando mensagem', [
             'url'      => $url,
@@ -84,9 +125,11 @@ class DialogHSMApi
 
         try {
             $requestOptions = [
-                'headers'     => $headers,
-                'json'        => $payload,
-                'http_errors' => false,
+                'headers'         => $headers,
+                'json'            => $payload,
+                'http_errors'     => false,
+                'connect_timeout' => self::CONNECT_TIMEOUT_SECONDS,
+                'timeout'         => self::REQUEST_TIMEOUT_SECONDS,
             ];
 
             // Fixa o IP já resolvido e validado: mesmo que o DNS seja alterado entre a validação
@@ -349,28 +392,33 @@ class DialogHSMApi
 
     /**
      * Resolve o hostname da URL, valida que o IP resultante é público e retorna o IP.
-     * Retorna null se a URL for inválida, não usar HTTPS, ou o IP for privado/reservado.
+     * result = URL_BLOCKED se a URL for inválida, não usar HTTPS ou o IP for privado/reservado;
+     * URL_DNS_FAILURE se o hostname não resolver (instabilidade de DNS, retryable).
      *
      * O retorno do IP (em vez de bool) permite ao chamador fixar o IP na requisição via
      * CURLOPT_RESOLVE, eliminando a janela de DNS rebinding (TOCTOU).
+     *
+     * @return array{result: string, ip: string|null}
      */
-    private function resolveUrlSafely(string $url): ?string
+    private function resolveUrlSafely(string $url): array
     {
         $parsed = parse_url($url);
 
+        $blocked = ['result' => self::URL_BLOCKED, 'ip' => null];
+
         if (!$parsed || !isset($parsed['scheme'], $parsed['host'])) {
-            return null;
+            return $blocked;
         }
 
         if ('https' !== strtolower($parsed['scheme'])) {
-            return null;
+            return $blocked;
         }
 
         $host = strtolower($parsed['host']);
 
         // Rejeita localhost e variações antes de tentar resolver
         if (in_array($host, ['localhost', 'localhost.localdomain'], true)) {
-            return null;
+            return $blocked;
         }
 
         // Se já é um IP literal, valida diretamente sem resolução DNS
@@ -380,16 +428,16 @@ class DialogHSMApi
             $ip = ($this->hostnameResolver)($host);
             // gethostbyname() retorna o host original se a resolução falhar
             if ($ip === $host || !filter_var($ip, FILTER_VALIDATE_IP)) {
-                return null;
+                return ['result' => self::URL_DNS_FAILURE, 'ip' => null];
             }
         }
 
         // Rejeita IPs privados, loopback e link-local
         if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
-            return null;
+            return $blocked;
         }
 
-        return $ip;
+        return ['result' => self::URL_OK, 'ip' => $ip];
     }
 
 }

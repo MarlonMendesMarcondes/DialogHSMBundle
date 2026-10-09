@@ -759,6 +759,47 @@ class DialogHsmApiTest extends TestCase
         ]);
 
         $this->assertFalse($result['success']);
+        $this->assertTrue($result['retryable'], 'DNS sem resposta é instabilidade: precisa de retry, não falha definitiva.');
+        $this->assertStringContainsString('DNS', $result['error']);
+    }
+
+    public function testBlockedUrlIsNotRetryable(): void
+    {
+        $result = $this->api->sendMessage('API_KEY', 'https://10.0.0.1/api', '11999999999', [
+            'content' => 'template', 'language' => 'pt_BR',
+        ]);
+
+        $this->assertFalse($result['retryable']);
+    }
+
+    public function testRequestHasConnectAndTotalTimeout(): void
+    {
+        $this->mockClient->expects($this->once())
+            ->method('request')
+            ->with('POST', $this->anything(), $this->callback(function (array $options): bool {
+                $this->assertGreaterThan(0, $options['connect_timeout'] ?? 0);
+                $this->assertGreaterThan(0, $options['timeout'] ?? 0);
+
+                return true;
+            }))
+            ->willReturn(new Response(200, [], json_encode(['messages' => [['id' => 'wamid.t']]])));
+
+        $this->api->sendMessage('API_KEY', 'https://api.360dialog.com/v1/messages', '11999999999', [
+            'content' => 'template', 'language' => 'pt_BR',
+        ]);
+    }
+
+    public function testInvalidPayloadDataIsAPermanentFailureWithoutRequest(): void
+    {
+        $this->mockClient->expects($this->never())->method('request');
+
+        $result = $this->api->sendMessage('API_KEY', 'https://api.360dialog.com/v1/messages', '11999999999', [
+            'content' => 'template', 'language' => 'pt_BR', 'limited_time_offer' => 'não é uma data',
+        ]);
+
+        $this->assertFalse($result['success']);
+        $this->assertFalse($result['retryable']);
+        $this->assertStringContainsString('Payload inválido', $result['error']);
     }
 
     // =========================================================================
