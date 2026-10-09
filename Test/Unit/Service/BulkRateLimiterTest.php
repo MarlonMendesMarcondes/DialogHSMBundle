@@ -431,4 +431,35 @@ class BulkRateLimiterTest extends TestCase
         $this->assertStringContainsString(':bulk:', $capturedKey);
         $this->assertStringNotContainsString(':batch:', $capturedKey);
     }
+
+    // -------------------------------------------------------------------------
+    // Janela: a taxa configurada é respeitada exatamente, sem arredondar para cima
+    // -------------------------------------------------------------------------
+
+    /**
+     * @return iterable<string, array{0: int, 1: int, 2: int}>
+     */
+    public static function windowProvider(): iterable
+    {
+        yield '60/min'   => [60, 1, 1];
+        yield '120/min'  => [120, 1, 2];
+        yield '90/min'   => [90, 2, 3];   // antes: 2/s = 120/min
+        yield '30/min'   => [30, 2, 1];   // antes: 1/s = 60/min
+        yield '45/min'   => [45, 4, 3];
+        yield '7/min'    => [7, 60, 7];
+        yield '1/min'    => [1, 60, 1];
+        yield '3000/min' => [3000, 1, 50];
+    }
+
+    /**
+     * @dataProvider windowProvider
+     */
+    public function testWindowKeepsTheConfiguredRateExactly(int $ratePerMinute, int $expectedSeconds, int $expectedAllowance): void
+    {
+        [$seconds, $allowance] = BulkRateLimiter::window($ratePerMinute);
+
+        $this->assertSame([$expectedSeconds, $expectedAllowance], [$seconds, $allowance]);
+        // A janela sempre divide 60 (é 60 / mdc(taxa, 60)), então janelas por minuto × cota = taxa
+        $this->assertSame($ratePerMinute, intdiv(60, $seconds) * $allowance, 'A cota por minuto deve ser exatamente a taxa configurada.');
+    }
 }

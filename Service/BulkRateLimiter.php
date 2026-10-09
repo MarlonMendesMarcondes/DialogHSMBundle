@@ -8,13 +8,18 @@ use Mautic\IntegrationsBundle\Helper\IntegrationsHelper;
 use MauticPlugin\DialogHSMBundle\Integration\DialogHSMIntegration;
 
 /**
- * Rate limiter para envio bulk e batch via Redis sliding window (por segundo).
+ * Rate limiter para envio bulk e batch via Redis, por janela fixa de tempo.
  *
  * Algoritmo:
- *   1. INCR na chave do segundo atual
- *   2. Se count <= ratePerSecond → slot adquirido, prossegue sem bloqueio
- *   3. Se count > ratePerSecond  → devolve o slot (DECR), aguarda o início do próximo segundo
- *   4. Tenta novamente (máx. 5 tentativas — fail-open após isso)
+ *   1. Janela = menor número de segundos em que a taxa por minuto cabe inteira
+ *      (60/min → 1 por 1s; 90/min → 3 por 2s; 30/min → 1 por 2s; 7/min → 7 por 60s)
+ *   2. INCR na chave da janela atual
+ *   3. Se count <= cota da janela → slot adquirido, prossegue sem bloqueio
+ *   4. Se count > cota → devolve o slot (DECR), aguarda o início da próxima janela
+ *   5. Tenta novamente (máx. 5 tentativas — fail-open após isso)
+ *
+ * Antes a cota era ceil(rate/60) por segundo: taxas abaixo de 60/min viravam 60/min e
+ * 90/min virava 120/min — o limite configurado nunca era respeitado.
  *
  * Propriedades:
  *   - Atômico: INCR/DECR do Redis são operações atômicas, sem mutex nem lock
@@ -77,6 +82,22 @@ class BulkRateLimiter
         return $rate > 0 ? round(60.0 / $rate, 3) : 0.0;
     }
 
+    /**
+     * Menor janela (em segundos, até 60) em que a taxa por minuto vira uma cota inteira.
+     *
+     * @return array{0: int, 1: int} [segundos da janela, mensagens permitidas na janela]
+     */
+    public static function window(int $ratePerMinute): array
+    {
+        for ($seconds = 1; $seconds < 60; ++$seconds) {
+            if (0 === ($ratePerMinute * $seconds) % 60) {
+                return [$seconds, intdiv($ratePerMinute * $seconds, 60)];
+            }
+        }
+
+        return [60, $ratePerMinute];
+    }
+
     private function applyThrottle(string $namespace, int $ratePerMinute, string $numberKey): void
     {
         if ($ratePerMinute <= 0) {
@@ -88,25 +109,25 @@ class BulkRateLimiter
             return; // fail-open: Redis indisponível
         }
 
-        $ratePerSecond = max(1, (int) ceil($ratePerMinute / 60));
-        $ns            = $this->sanitizeKey($numberKey);
+        [$windowSeconds, $allowance] = self::window($ratePerMinute);
+        $ns = $this->sanitizeKey($numberKey);
 
         for ($attempt = 0; $attempt < self::MAX_RETRIES; ++$attempt) {
             try {
-                $second = (int) microtime(true);
-                $key    = 'dialoghsm:rate:' . $namespace . ':' . $ns . ':' . $second;
+                $window = intdiv((int) microtime(true), $windowSeconds);
+                $key    = 'dialoghsm:rate:' . $namespace . ':' . $ns . ':' . $window;
 
                 $count = $redis->incr($key);
-                $redis->expire($key, 2); // TTL = 2s (janela atual + folga)
+                $redis->expire($key, $windowSeconds + 1); // janela atual + folga
 
-                if ($count <= $ratePerSecond) {
+                if ($count <= $allowance) {
                     return; // slot adquirido — sem bloqueio
                 }
 
-                // Devolve o slot e aguarda o próximo segundo
+                // Devolve o slot e aguarda a próxima janela
                 $redis->decr($key);
                 $now    = microtime(true);
-                $waitUs = (int) (($second + 1 - $now) * 1_000_000);
+                $waitUs = (int) ((($window + 1) * $windowSeconds - $now) * 1_000_000);
                 if ($waitUs > 0) {
                     usleep($waitUs);
                 }
