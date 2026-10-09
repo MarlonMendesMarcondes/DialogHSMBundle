@@ -23,6 +23,7 @@ use MauticPlugin\DialogHSMBundle\Migrations\Version_1_2_0;
 use MauticPlugin\DialogHSMBundle\Migrations\Version_1_4_1;
 use MauticPlugin\DialogHSMBundle\Migrations\Version_1_4_2;
 use MauticPlugin\DialogHSMBundle\Migrations\Version_1_4_8;
+use MauticPlugin\DialogHSMBundle\Migrations\Version_1_4_9;
 use Mautic\IntegrationsBundle\Migration\AbstractMigration;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
@@ -699,5 +700,43 @@ class MigrationIdempotencyTest extends TestCase
             [Version_1_4_2::class],
             [Version_1_4_8::class],
         ];
+    }
+
+    // =========================================================================
+    // Version_1_4_9 — índices de dialog_hsm_message_log (isApplicable via SHOW INDEX)
+    // =========================================================================
+
+    public function testV149ApplicableWhileAnyIndexIsMissing(): void
+    {
+        $this->mockConn->method('fetchAllAssociative')->willReturn([['Key_name' => 'PRIMARY'], ['Key_name' => 'campaign_id_idx']]);
+
+        $this->assertTrue($this->callProtected($this->migration(Version_1_4_9::class), 'isApplicable', $this->schemaWithoutTable()));
+    }
+
+    public function testV149NotApplicableWhenAllIndexesExist(): void
+    {
+        $this->mockConn->method('fetchAllAssociative')->willReturn(
+            array_map(static fn (string $name): array => ['Key_name' => $name], array_keys(Version_1_4_9::INDEXES))
+        );
+
+        $this->assertFalse($this->callProtected($this->migration(Version_1_4_9::class), 'isApplicable', $this->schemaWithoutTable()));
+    }
+
+    public function testV149NotApplicableWhenQueryThrows(): void
+    {
+        $this->mockConn->method('fetchAllAssociative')->willThrowException(new \Exception('table not found'));
+
+        $this->assertFalse($this->callProtected($this->migration(Version_1_4_9::class), 'isApplicable', $this->schemaWithoutTable()));
+    }
+
+    public function testV149SqlIsIdempotentAndCoversEveryIndex(): void
+    {
+        $sql = $this->collectSql($this->migration(Version_1_4_9::class));
+
+        $this->assertCount(count(Version_1_4_9::INDEXES), $sql);
+        foreach ($sql as $statement) {
+            $this->assertStringContainsString('ADD INDEX IF NOT EXISTS', $statement);
+            $this->assertStringContainsString('dialog_hsm_message_log', $statement);
+        }
     }
 }

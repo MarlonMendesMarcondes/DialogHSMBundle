@@ -52,7 +52,11 @@ class MessageLog
             ->addIndex(['lead_id'], 'lead_id_idx')
             ->addIndex(['wamid'], 'wamid_idx')
             ->addIndex(['status'], 'status_idx')
-            ->addIndex(['date_sent'], 'date_sent_idx');
+            ->addIndex(['date_sent'], 'date_sent_idx')
+            ->addIndex(['campaign_event_id', 'lead_id'], 'campaign_event_lead_idx')
+            ->addIndex(['campaign_id'], 'campaign_id_idx')
+            ->addIndex(['whatsapp_message_id'], 'whatsapp_message_id_idx')
+            ->addIndex(['date_replied'], 'date_replied_idx');
 
         $builder->addId();
 

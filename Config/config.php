@@ -5,7 +5,7 @@ declare(strict_types=1);
 return [
     'name'        => '360dialog WhatsApp',
     'description' => 'Envia mensagens WhatsApp HSM via API 360dialog',
-    'version'     => '1.4.8',
+    'version'     => '1.4.9',
     'author'      => 'DialogHSM',
     'routes'      => [
         'main' => [
