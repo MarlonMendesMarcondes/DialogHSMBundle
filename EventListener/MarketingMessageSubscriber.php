@@ -67,14 +67,23 @@ class MarketingMessageSubscriber implements EventSubscriberInterface
         $apiKey    = $number->getApiKey();
         $numberUrl = $number->getBaseUrl();
         $baseUrl   = !empty($numberUrl) ? rtrim($numberUrl, '/') : 'https://waba-v2.360dialog.io/messages';
-        $queueName = $number->getQueueName() ?? $number->getBatchQueueName();
+        $queueName = $number->getQueueName() ?: $number->getBatchQueueName();
+        // Sem fila bulk, a mensagem vai para a fila batch e segue a taxa do batch
+        $isBatch   = !$number->getQueueName();
 
         if (empty($apiKey)) {
             $pendingEvent->failRemaining('dialoghsm.campaign.error.missing_api_key');
             return;
         }
 
-        $stamps          = $queueName ? [new AmqpStamp($queueName)] : [];
+        // Sem fila, a publicação no exchange default não tem rota: o RabbitMQ descartaria a
+        // mensagem em silêncio e o contato ficaria como enviado.
+        if (!$queueName) {
+            $pendingEvent->failRemaining('dialoghsm.campaign.error.missing_queue');
+            return;
+        }
+
+        $stamps          = [new AmqpStamp($queueName)];
         $campaignEvent   = $pendingEvent->getEvent();
         $campaignId      = $campaignEvent->getCampaign()?->getId();
         $campaignEventId = $campaignEvent->getId();
@@ -84,8 +93,10 @@ class MarketingMessageSubscriber implements EventSubscriberInterface
             $log   = $pendingEvent->getPending()->get($logId);
             $phone = trim((string) ($contact->getLeadPhoneNumber() ?? ''));
 
+            // Erro do contato, não da configuração: passWithError não conta no limite de 10% que
+            // despublica a campanha, nem reagenda o contato para falhar de novo.
             if ('' === $phone) {
-                $pendingEvent->fail($log, 'dialoghsm.campaign.error.missing_phone');
+                $pendingEvent->passWithError($log, 'dialoghsm.campaign.error.missing_phone');
                 continue;
             }
 
@@ -115,7 +126,11 @@ class MarketingMessageSubscriber implements EventSubscriberInterface
                     templateName:       $message->getTemplateName(),
                     whatsAppNumberName: $number->getName() ?? '',
                     queueLogId:         (string) $msgLog->getId(),
-                    isBatch:            true,
+                    isBatch:            $isBatch,
+                    // Sem estes, o consumidor não retém a mensagem de campanha desativada nem
+                    // aplica a proteção contra envio duplicado.
+                    campaignId:         $campaignId,
+                    campaignEventId:    $campaignEventId,
                 ), $stamps);
                 $this->eventLogWriter->write($msgLog, LeadEventLogWriter::ACTION_DISPATCHED, new \DateTime());
                 $pendingEvent->pass($log);
@@ -160,13 +175,15 @@ class MarketingMessageSubscriber implements EventSubscriberInterface
         $apiKey    = $number->getApiKey();
         $numberUrl = $number->getBaseUrl();
         $baseUrl   = !empty($numberUrl) ? rtrim($numberUrl, '/') : 'https://waba-v2.360dialog.io/messages';
-        $queueName = $number->getQueueName() ?? $number->getBatchQueueName();
+        $queueName = $number->getQueueName() ?: $number->getBatchQueueName();
+        // Sem fila bulk, a mensagem vai para a fila batch e segue a taxa do batch
+        $isBatch   = !$number->getQueueName();
 
-        if (empty($apiKey)) {
+        if (empty($apiKey) || !$queueName) {
             return;
         }
 
-        $stamps = $queueName ? [new AmqpStamp($queueName)] : [];
+        $stamps = [new AmqpStamp($queueName)];
 
         foreach ($event->getMessages() as $queuedMessage) {
             $contact = $queuedMessage->getLead();
@@ -206,7 +223,7 @@ class MarketingMessageSubscriber implements EventSubscriberInterface
                     templateName:       $message->getTemplateName(),
                     whatsAppNumberName: $number->getName() ?? '',
                     queueLogId:         (string) $msgLog->getId(),
-                    isBatch:            true,
+                    isBatch:            $isBatch,
                 ), $stamps);
                 $this->eventLogWriter->write($msgLog, LeadEventLogWriter::ACTION_DISPATCHED, new \DateTime());
                 $queuedMessage->setProcessed();

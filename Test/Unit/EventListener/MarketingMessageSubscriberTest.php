@@ -56,24 +56,24 @@ class MarketingMessageSubscriberTest extends TestCase
         );
     }
 
-    private function makeNumber(string $apiKey = 'api-key-123', string $queueName = ''): WhatsAppNumber&MockObject
+    private function makeNumber(string $apiKey = 'api-key-123', ?string $queueName = 'whatsapp_bulk', ?string $batchQueueName = null): WhatsAppNumber&MockObject
     {
         $number = $this->createMock(WhatsAppNumber::class);
         $number->method('getApiKey')->willReturn($apiKey);
         $number->method('getBaseUrl')->willReturn('https://waba.360dialog.io');
         $number->method('getName')->willReturn('Test Number');
-        $number->method('getQueueName')->willReturn($queueName ?: null);
-        $number->method('getBatchQueueName')->willReturn(null);
+        $number->method('getQueueName')->willReturn($queueName);
+        $number->method('getBatchQueueName')->willReturn($batchQueueName);
 
         return $number;
     }
 
-    private function makeWhatsAppMessage(array $payloadData, string $templateName = 'regua_teste'): WhatsAppMessage&MockObject
+    private function makeWhatsAppMessage(array $payloadData, string $templateName = 'regua_teste', ?WhatsAppNumber $number = null): WhatsAppMessage&MockObject
     {
         $message = $this->createMock(WhatsAppMessage::class);
         $message->method('getId')->willReturn(1);
         $message->method('isPublished')->willReturn(true);
-        $message->method('getWhatsAppNumber')->willReturn($this->makeNumber());
+        $message->method('getWhatsAppNumber')->willReturn($number ?? $this->makeNumber());
         $message->method('getTemplateName')->willReturn($templateName);
         $message->method('getPayloadData')->willReturn($payloadData);
 
@@ -611,6 +611,70 @@ class MarketingMessageSubscriberTest extends TestCase
         $pendingEvent = $this->buildPendingEvent(1, [100 => $lead]);
         $pendingEvent->expects($this->never())->method('pass');
         $pendingEvent->expects($this->once())->method('fail');
+
+        $this->makeSubscriber()->onMarketingMessageSend($pendingEvent);
+    }
+
+    // -------------------------------------------------------------------------
+    // Ação de campanha: campanha na mensagem, fila e erro do contato
+    // -------------------------------------------------------------------------
+
+    private function dispatchFromCampaign(?WhatsAppNumber $number = null): ?SendWhatsAppMessage
+    {
+        $this->mockModel->method('getEntity')->willReturn($this->makeWhatsAppMessage([], 'regua_teste', $number));
+
+        $captured = null;
+        $this->mockBus->method('dispatch')
+            ->willReturnCallback(function (SendWhatsAppMessage $msg) use (&$captured): Envelope {
+                $captured = $msg;
+
+                return new Envelope($msg);
+            });
+
+        $this->makeSubscriber()->onMarketingMessageSend($this->buildPendingEvent(1, [100 => $this->makeLead()]));
+
+        return $captured;
+    }
+
+    public function testCampaignMessageCarriesCampaignAndEvent(): void
+    {
+        $message = $this->dispatchFromCampaign();
+
+        // Sem eles o consumidor não retém mensagem de campanha desativada nem evita duplicidade
+        $this->assertSame(10, $message->campaignId);
+        $this->assertSame(20, $message->campaignEventId);
+    }
+
+    public function testBulkQueueUsesBulkRate(): void
+    {
+        $this->assertFalse($this->dispatchFromCampaign($this->makeNumber())->isBatch);
+    }
+
+    public function testNumberWithOnlyBatchQueueUsesBatchRate(): void
+    {
+        $this->assertTrue($this->dispatchFromCampaign($this->makeNumber('api-key-123', null, 'whatsapp_lote'))->isBatch);
+    }
+
+    public function testNumberWithoutAnyQueueFailsAsConfigurationErrorWithoutDispatching(): void
+    {
+        $this->mockModel->method('getEntity')->willReturn($this->makeWhatsAppMessage([], 'regua_teste', $this->makeNumber('api-key-123', null, null)));
+        $this->mockBus->expects($this->never())->method('dispatch');
+
+        $pendingEvent = $this->buildPendingEvent(1, [100 => $this->makeLead()]);
+        $pendingEvent->expects($this->once())->method('failRemaining')->with('dialoghsm.campaign.error.missing_queue');
+
+        $this->makeSubscriber()->onMarketingMessageSend($pendingEvent);
+    }
+
+    public function testContactWithoutPhoneIsClosedWithErrorNotFailed(): void
+    {
+        $this->mockModel->method('getEntity')->willReturn($this->makeWhatsAppMessage([]));
+        $this->mockBus->expects($this->never())->method('dispatch');
+
+        $pendingEvent = $this->buildPendingEvent(1, [100 => $this->makeLead('')]);
+        // fail() contaria no limite de 10% que despublica a campanha
+        $pendingEvent->expects($this->never())->method('fail');
+        $pendingEvent->expects($this->once())->method('passWithError')->with($this->anything(), 'dialoghsm.campaign.error.missing_phone');
 
         $this->makeSubscriber()->onMarketingMessageSend($pendingEvent);
     }
