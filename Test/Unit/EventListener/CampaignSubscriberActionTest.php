@@ -2345,4 +2345,36 @@ class CampaignSubscriberActionTest extends TestCase
 
         $subscriber->onCampaignTriggerAction($event);
     }
+
+    // -------------------------------------------------------------------------
+    // Inline: o resultado síncrono da API marca a ação
+    // -------------------------------------------------------------------------
+
+    public function testInlineSendRejectedByTheApiMarksTheContactAsFailed(): void
+    {
+        $this->enableIntegration();
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
+
+        // Contato 1 aceito pela API, contato 2 recusado (ex.: template inexistente)
+        $this->mockDirectBatchHandler->method('__invoke')->willReturn([0 => ['success' => true], 1 => ['success' => false]]);
+
+        $event = $this->buildPendingEvent('dialoghsm.send_whatsapp', $this->twoValidContacts());
+        $event->expects($this->exactly(2))->method('pass');
+        $event->expects($this->once())->method('passWithError')->with($this->anything(), 'dialoghsm.campaign.error.send_failed');
+        $event->expects($this->never())->method('fail');
+
+        $this->subscriber->onCampaignTriggerAction($event);
+    }
+
+    public function testInlineSendAcceptedByTheApiIsNotMarked(): void
+    {
+        $this->enableIntegration();
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
+        $this->mockDirectBatchHandler->method('__invoke')->willReturn([0 => ['success' => true], 1 => ['success' => true]]);
+
+        $event = $this->buildPendingEvent('dialoghsm.send_whatsapp', $this->twoValidContacts());
+        $event->expects($this->never())->method('passWithError');
+
+        $this->subscriber->onCampaignTriggerAction($event);
+    }
 }

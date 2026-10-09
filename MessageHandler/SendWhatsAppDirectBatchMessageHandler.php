@@ -46,12 +46,17 @@ class SendWhatsAppDirectBatchMessageHandler
         $this->sleepFn = $sleepFn ?? 'usleep';
     }
 
-    public function __invoke(SendWhatsAppDirectBatchMessage $batch): void
+    /**
+     * @return array<int, array{success: bool}> resultado de cada item, pela posição no lote —
+     *                                          item não enviado (lote interrompido) fica sem entrada
+     */
+    public function __invoke(SendWhatsAppDirectBatchMessage $batch): array
     {
         $effectiveBatch = $batch->batchLimit > 0 ? $batch->batchLimit : 1;
         $sentCount      = 0;
+        $results        = [];
 
-        foreach ($batch->items as $item) {
+        foreach ($batch->items as $i => $item) {
             if (!$item instanceof SendWhatsAppMessage) {
                 $this->logger->warning('DialogHSM: Item inválido no lote, ignorado', [
                     'type' => get_debug_type($item),
@@ -70,8 +75,9 @@ class SendWhatsAppDirectBatchMessageHandler
             }
 
             try {
-                $this->handler->__invoke($item, skipHousekeeping: true, skipRateLimit: true, skipRetry: true);
+                $results[$i] = $this->handler->__invoke($item, skipHousekeeping: true, skipRateLimit: true, skipRetry: true);
             } catch (\Throwable $e) {
+                $results[$i] = ['success' => false];
                 $this->logger->error('DialogHSM: Erro ao processar item do lote', [
                     'lead_id' => $item->leadId,
                     'error'   => $e->getMessage(),
@@ -94,5 +100,7 @@ class SendWhatsAppDirectBatchMessageHandler
                 'error' => $e->getMessage(),
             ]);
         }
+
+        return $results;
     }
 }

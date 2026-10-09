@@ -252,4 +252,30 @@ class SendWhatsAppDirectBatchMessageHandlerTest extends TestCase
         $this->assertSame(10, $batch->batchLimit);
         $this->assertSame(2.0, $batch->sendDelay);
     }
+
+    public function testReturnsTheResultOfEveryItemByPosition(): void
+    {
+        $this->mockBaseHandler->method('__invoke')->willReturnOnConsecutiveCalls(
+            ['success' => true],
+            $this->throwException(new \RuntimeException('erro no item')),
+        );
+
+        $results = ($this->handler)(new SendWhatsAppDirectBatchMessage([$this->makeMessage(1), $this->makeMessage(2)], 0, 0));
+
+        $this->assertTrue($results[0]['success']);
+        $this->assertFalse($results[1]['success'], 'Item com exceção precisa voltar como falha, para a campanha marcar o contato.');
+    }
+
+    public function testStopsSendingWhenTheEntityManagerIsClosed(): void
+    {
+        $em = $this->createMock(\Doctrine\ORM\EntityManagerInterface::class);
+        $em->method('isOpen')->willReturnOnConsecutiveCalls(true, false);
+
+        $handler = new SendWhatsAppDirectBatchMessageHandler($this->mockBaseHandler, new NullLogger(), $this->mockRepo, fn () => null, $em);
+        $this->mockBaseHandler->expects($this->once())->method('__invoke')->willReturn(['success' => true]);
+
+        $results = $handler(new SendWhatsAppDirectBatchMessage([$this->makeMessage(1), $this->makeMessage(2)], 0, 0));
+
+        $this->assertArrayNotHasKey(1, $results, 'Sem banco, o segundo item não pode ser enviado (não haveria log).');
+    }
 }

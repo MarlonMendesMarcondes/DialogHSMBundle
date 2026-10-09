@@ -301,7 +301,40 @@ class CampaignSubscriber implements EventSubscriberInterface
         );
 
         if (!empty($items)) {
-            $this->dispatchDirectBatch($items, $batchLimit, $sendDelay, fn (SendWhatsAppDirectBatchMessage $batch) => ($this->directBatchHandler)($batch));
+            $results = $this->dispatchDirectBatch($items, $batchLimit, $sendDelay, fn (SendWhatsAppDirectBatchMessage $batch) => ($this->directBatchHandler)($batch));
+            $this->markInlineSendFailures($event, $items, $results);
+        }
+    }
+
+    /**
+     * No modo inline o envio acontece neste mesmo processo, depois de o contato ser concluído
+     * com pass(): o resultado da API já está disponível, então o envio recusado (template
+     * inexistente, telefone recusado, parâmetro vazio) é marcado na ação como falha — antes
+     * ficava como sucesso na campanha. passWithError sobre um log já aprovado só acrescenta
+     * failed=1 e o motivo; não conta no limite de 10% do core.
+     *
+     * @param SendWhatsAppMessage[] $items
+     */
+    private function markInlineSendFailures(PendingEvent $event, array $items, mixed $results): void
+    {
+        if (!is_array($results)) {
+            return;
+        }
+
+        $logIdByLead = [];
+        foreach ($event->getContacts() as $logId => $contact) {
+            $logIdByLead[(int) $contact->getId()] = $logId;
+        }
+
+        foreach ($items as $i => $item) {
+            if (true === ($results[$i]['success'] ?? false) || !isset($logIdByLead[$item->leadId])) {
+                continue;
+            }
+
+            $log = $event->getPending()->get($logIdByLead[$item->leadId]);
+            if (null !== $log) {
+                $event->passWithError($log, 'dialoghsm.campaign.error.send_failed');
+            }
         }
     }
 
@@ -312,10 +345,10 @@ class CampaignSubscriber implements EventSubscriberInterface
      *
      * @param SendWhatsAppMessage[] $items
      */
-    private function dispatchDirectBatch(array $items, int $batchLimit, int $sendDelay, callable $deliver): void
+    private function dispatchDirectBatch(array $items, int $batchLimit, int $sendDelay, callable $deliver): mixed
     {
         try {
-            $deliver(new SendWhatsAppDirectBatchMessage(
+            return $deliver(new SendWhatsAppDirectBatchMessage(
                 items:      $items,
                 batchLimit: $batchLimit,
                 sendDelay:  $sendDelay,
@@ -338,6 +371,8 @@ class CampaignSubscriber implements EventSubscriberInterface
                     $item->campaignEventId,
                 );
             }
+
+            return null;
         }
     }
 
