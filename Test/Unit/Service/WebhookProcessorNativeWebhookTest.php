@@ -192,6 +192,24 @@ class WebhookProcessorNativeWebhookTest extends TestCase
         $this->processor->process('+5511999999999', $this->makeStatusPayload('wamid.abc', 'read'));
     }
 
+    public function testReadWithoutDeliveredQueuesDeliveredWebhookBeforeRead(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_SENT);
+
+        $this->logRepository->method('findByWamid')->willReturn($log);
+
+        $events = [];
+        $this->webhookModel->expects($this->exactly(2))
+            ->method('queueWebhooksByType')
+            ->willReturnCallback(function (string $type) use (&$events): void {
+                $events[] = $type;
+            });
+
+        $this->processor->process('+5511999999999', $this->makeStatusPayload('wamid.abc', 'read'));
+
+        $this->assertSame([DialogHSMEvents::WEBHOOK_MESSAGE_DELIVERED, DialogHSMEvents::WEBHOOK_MESSAGE_READ], $events);
+    }
+
     public function testFailedStatusQueuesMessageFailedWebhookWithErrorDetails(): void
     {
         $log = $this->makeLog(MessageLog::STATUS_SENT);

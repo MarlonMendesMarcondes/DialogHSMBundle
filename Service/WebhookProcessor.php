@@ -93,6 +93,14 @@ class WebhookProcessor
             return;
         }
 
+        // read sem delivered registrado (a Meta não garante a ordem dos webhooks, e o delivered
+        // que chega depois do read é rejeitado pela transição): ler implica ter recebido, então
+        // a entrega é registrada junto — senão o nó "Entregue" nunca dispara para quem leu.
+        // O status anterior também é checado: logs antigos podem estar 'delivered' sem date_delivered.
+        $impliedDelivered = MessageLog::STATUS_READ === $status
+            && MessageLog::STATUS_DELIVERED !== $log->getStatus()
+            && null === $log->getDateDelivered();
+
         $log->setStatus($status);
 
         $now = new \DateTime();
@@ -100,6 +108,9 @@ class WebhookProcessor
             $log->setDateDelivered($now);
         } elseif (MessageLog::STATUS_READ === $status) {
             $log->setDateRead($now);
+            if ($impliedDelivered) {
+                $log->setDateDelivered($now);
+            }
         } elseif (MessageLog::STATUS_FAILED === $status) {
             // failed via webhook = rejeição da Meta (ex: janela 24h, número inválido).
             // Distinto de failed por erro de API (que não tem webhookErrorCode).
@@ -130,6 +141,9 @@ class WebhookProcessor
             if (in_array($status, [MessageLog::STATUS_DELIVERED, MessageLog::STATUS_READ], true)) {
                 $this->eventLogWriter->write($log, MessageLog::STATUS_SENT, $log->getDateSent() ?? $now);
             }
+            if ($impliedDelivered) {
+                $this->eventLogWriter->write($log, MessageLog::STATUS_DELIVERED, $now);
+            }
             $this->eventLogWriter->write($log, $status, $eventDate);
         } catch (\Throwable) {
             // falha silenciosa — não interrompe o fluxo do webhook
@@ -139,7 +153,7 @@ class WebhookProcessor
         $this->updateLeadStatus($log, $status);
         $this->triggerPointAction($log, $status);
 
-        if (MessageLog::STATUS_DELIVERED === $status) {
+        if (MessageLog::STATUS_DELIVERED === $status || $impliedDelivered) {
             $this->triggerCampaignDecision($log, 'dialoghsm.decision_delivered');
         }
 
@@ -158,6 +172,10 @@ class WebhookProcessor
             MessageLog::STATUS_FAILED    => DialogHSMEvents::WEBHOOK_MESSAGE_FAILED,
             default                      => null,
         };
+        if ($impliedDelivered) {
+            $this->queueMessageWebhook(DialogHSMEvents::WEBHOOK_MESSAGE_DELIVERED, $log);
+        }
+
         if (null !== $webhookEventKey) {
             $this->queueMessageWebhook($webhookEventKey, $log);
         }

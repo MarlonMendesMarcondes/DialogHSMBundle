@@ -317,6 +317,69 @@ class WebhookProcessorTest extends TestCase
         ]));
     }
 
+    /**
+     * read chegando antes do delivered (a Meta não garante a ordem): o delivered que viria
+     * depois é rejeitado pela transição, então a entrega é registrada junto com a leitura.
+     */
+    public function testReadWithoutDeliveredAlsoRegistersDeliveryAndTriggersDeliveredDecision(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_SENT);
+        $log->setLeadId(42);
+        $log->setCampaignEventId(7);
+
+        $this->leadModel->method('getEntity')->with(42)->willReturn($this->createMock(Lead::class));
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+
+        $decisions = [];
+        $this->realTimeExecutioner->expects($this->exactly(2))
+            ->method('execute')
+            ->willReturnCallback(function (string $key) use (&$decisions) {
+                $decisions[] = $key;
+
+                return $this->createMock(\Mautic\CampaignBundle\Executioner\Result\Responses::class);
+            });
+
+        $written = [];
+        $this->eventLogWriter->method('write')
+            ->willReturnCallback(function (MessageLog $l, string $action) use (&$written): void {
+                $written[] = $action;
+            });
+
+        $this->processor->process('+5511999999999', $this->makePayload([
+            $this->makeStatusEntry('wamid.abc', 'read'),
+        ]));
+
+        $this->assertSame(MessageLog::STATUS_READ, $log->getStatus());
+        $this->assertNotNull($log->getDateDelivered());
+        $this->assertNotNull($log->getDateRead());
+        $this->assertSame(['dialoghsm.decision_delivered', 'dialoghsm.decision_read'], $decisions);
+        $this->assertContains(MessageLog::STATUS_DELIVERED, $written);
+    }
+
+    public function testReadAfterDeliveredDoesNotRepeatDeliveredDecision(): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_DELIVERED);
+        $log->setLeadId(42);
+        $log->setCampaignEventId(7);
+        $log->setDateDelivered(new \DateTime('-1 minute'));
+        $deliveredAt = $log->getDateDelivered();
+
+        $this->leadModel->method('getEntity')->with(42)->willReturn($this->createMock(Lead::class));
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+
+        $this->realTimeExecutioner->expects($this->once())
+            ->method('execute')
+            ->with('dialoghsm.decision_read', $log, 'whatsapp', null);
+
+        $this->processor->process('+5511999999999', $this->makePayload([
+            $this->makeStatusEntry('wamid.abc', 'read'),
+        ]));
+
+        $this->assertSame($deliveredAt, $log->getDateDelivered());
+    }
+
     public function testSentStatusDoesNotTriggerCampaignDecision(): void
     {
         $log = $this->makeLog(MessageLog::STATUS_QUEUED);
