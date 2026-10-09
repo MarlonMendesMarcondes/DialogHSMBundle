@@ -2,8 +2,9 @@
 #
 # Cria (ou recria do zero) o banco de teste dos testes de banco do DialogHSM.
 #
-# Copia só a ESTRUTURA do banco do Mautic — nenhum contato, campanha ou log — e os
-# registros da tabela plugins. A configuração da integração DialogHSM é criada vazia,
+# Copia só a ESTRUTURA do banco do Mautic — nenhum contato, campanha ou log — e duas
+# tabelas de configuração: plugins e lead_fields (definição dos campos de contato, sem
+# dados — sem ela o Mautic ignora campos como dialoghsm_status). A configuração da integração DialogHSM é criada vazia,
 # sem chaves de API. Os testes rodam cada caso dentro de uma transação desfeita no fim.
 #
 # Uso (no host, com o docker compose do ambiente local no ar):
@@ -50,9 +51,10 @@ docker exec "$DB_CONTAINER" mysqldump -uroot -p"$DB_ROOT_PASSWORD" \
     --no-data --skip-triggers --single-transaction "$SOURCE_DB" \
     | mysql_root "$TEST_DB"
 
-echo "Copiando o registro dos plugins e criando a integração DialogHSM sem credenciais..."
+echo "Copiando plugins e definições de campos; criando a integração DialogHSM sem credenciais..."
 mysql_root "$TEST_DB" -e "
 INSERT INTO plugins SELECT * FROM \`$SOURCE_DB\`.plugins;
+INSERT INTO lead_fields SELECT * FROM \`$SOURCE_DB\`.lead_fields;
 INSERT INTO plugin_integration_settings (plugin_id, name, is_published, supported_features, api_keys, feature_settings)
 SELECT id, 'DialogHSM', 1, 'a:0:{}', 'a:0:{}', 'a:0:{}' FROM plugins WHERE bundle = 'DialogHSMBundle';"
 
