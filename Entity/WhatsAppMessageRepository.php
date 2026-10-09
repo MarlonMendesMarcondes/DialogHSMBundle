@@ -78,13 +78,16 @@ class WhatsAppMessageRepository extends CommonRepository
     /**
      * Returns pending contacts that have not yet received this broadcast.
      *
-     * @return array<int, array{id: int, listId: int, phone: string}>
+     * @return array<int, array{id: int, phone: string}>
      */
     public function getPendingContacts(int $messageId, int $batchMinId = 0, int $batchSize = 100): array
     {
         $q = $this->getSegmentsContactsQuery($messageId);
 
-        $q->select('DISTINCT l.id, ll.id as listId, COALESCE(l.mobile, l.phone) as phone');
+        // Uma linha por contato: com o id do segmento no DISTINCT, contato em 2+ segmentos da
+        // mensagem vinha repetido no mesmo lote e recebia um HSM por segmento.
+        // NULLIF: mobile vazio ('') cai para phone, como Lead::getLeadPhoneNumber() do core.
+        $q->select("DISTINCT l.id, COALESCE(NULLIF(l.mobile, ''), l.phone) as phone");
 
         // Exclude contacts that already received this broadcast
         $sentQb = $this->getEntityManager()->getConnection()->createQueryBuilder();
