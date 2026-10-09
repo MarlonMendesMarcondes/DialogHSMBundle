@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MauticPlugin\DialogHSMBundle\MessageHandler;
 
+use Doctrine\ORM\EntityManagerInterface;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppDirectBatchMessage;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
@@ -40,6 +41,7 @@ class SendWhatsAppDirectBatchMessageHandler
         private LoggerInterface $logger,
         private MessageLogRepository $messageLogRepository,
         ?callable $sleepFn = null,
+        private ?EntityManagerInterface $entityManager = null,
     ) {
         $this->sleepFn = $sleepFn ?? 'usleep';
     }
@@ -55,6 +57,16 @@ class SendWhatsAppDirectBatchMessageHandler
                     'type' => get_debug_type($item),
                 ]);
                 continue;
+            }
+
+            // O EntityManager fecha em qualquer erro de flush (deadlock, constraint) e só é
+            // reaberto entre mensagens do Messenger — e o lote inteiro é UMA mensagem. Seguir
+            // chamaria a API sem conseguir gravar o log: envio sem wamid, webhooks perdidos.
+            if (null !== $this->entityManager && !$this->entityManager->isOpen()) {
+                $this->logger->error('DialogHSM: banco indisponível no meio do lote — envio interrompido', [
+                    'lead_id' => $item->leadId,
+                ]);
+                break;
             }
 
             try {

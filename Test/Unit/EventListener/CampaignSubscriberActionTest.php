@@ -1506,9 +1506,9 @@ class CampaignSubscriberActionTest extends TestCase
     }
 
     /**
-     * Se bus->dispatch() lançar exceção, nenhum log 'queued' órfão deve ser criado.
-     * O EntityManager deve ser chamado uma única vez — para o log 'failed'
-     * gerado pelo try/catch de processContacts — e não duas vezes (queued + failed).
+     * Se bus->dispatch() lançar exceção, nenhum log 'queued' órfão pode sobrar: o log é
+     * gravado antes do dispatch (para o worker nunca consumir antes dele existir) e, na
+     * falha, o MESMO log vira 'failed' — um único registro, nunca queued + failed.
      */
     public function testQueueDispatchFailureDoesNotCreateOrphanQueuedLog(): void
     {
@@ -1536,9 +1536,9 @@ class CampaignSubscriberActionTest extends TestCase
 
         $this->subscriber->onCampaignTriggerActionQueue($event);
 
-        // Deve ter persistido exatamente UM log (o de falha), não dois (queued + failed)
-        $this->assertCount(1, $persistedEntities, 'dispatch falhou: apenas 1 log deve ser criado (failed), sem log queued órfão');
-        $this->assertSame('failed', $persistedEntities[0]->getStatus());
+        $distinct = array_values(array_unique($persistedEntities, SORT_REGULAR));
+        $this->assertCount(1, array_unique(array_map('spl_object_id', $persistedEntities)), 'dispatch falhou: apenas 1 log (o queued que vira failed), sem log órfão');
+        $this->assertSame('failed', $distinct[0]->getStatus());
     }
 
     /**

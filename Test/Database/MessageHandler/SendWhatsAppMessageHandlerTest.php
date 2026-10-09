@@ -101,4 +101,28 @@ class SendWhatsAppMessageHandlerTest extends DatabaseTestCase
         $this->assertSame('failed', $row['status']);
         $this->assertStringContainsString('Campanha removida', (string) $row['error_message']);
     }
+
+    public function testMessageWhoseQueuedLogWasClearedIsNotSent(): void
+    {
+        // "Limpar mensagens pendentes" apaga o log; a mensagem continua no RabbitMQ
+        $campaignId = $this->createCampaign(['is_published' => 0]);
+        $lead       = $this->createLead('+5511900000604');
+
+        /** @var SendWhatsAppMessageHandler $handler */
+        $handler = $this->getService(SendWhatsAppMessageHandler::class);
+        $result  = $handler(new SendWhatsAppMessage(
+            leadId:       $lead,
+            phone:        '+5511900000604',
+            apiKey:       'TEST_FAKE_KEY',
+            baseUrl:      'https://127.0.0.1/messages',
+            payloadData:  ['content' => 'template_teste'],
+            templateName: 'template_teste',
+            campaignId:   $campaignId, // pausada: o cancelamento vale antes da retenção
+            queueLogId:   'uuid-removido',
+        ));
+
+        $this->assertTrue($result['cancelled'] ?? false);
+        $this->assertArrayNotHasKey('paused', $result, 'Mensagem cancelada não pode voltar para a fila.');
+        $this->assertSame(0, (int) $this->connection->fetchOne('SELECT COUNT(*) FROM dialog_hsm_message_log WHERE lead_id = ?', [$lead]), 'Nenhum log novo pode ser recriado.');
+    }
 }

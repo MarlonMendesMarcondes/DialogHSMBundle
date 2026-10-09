@@ -118,6 +118,18 @@ class SendWhatsAppMessageHandler
             }
         }
 
+        // Log 'queued' apagado com a mensagem ainda na fila ("Limpar mensagens pendentes"): o
+        // envio foi cancelado. Todo caminho que usa queueLogId grava o log antes de publicar a
+        // mensagem, então log ausente nunca é corrida com o dispatch.
+        if (null !== $message->queueLogId && null === $this->findQueueLog($message->queueLogId)) {
+            $this->logger->info('DialogHSM: log da fila removido — envio cancelado', [
+                'lead_id'      => $message->leadId,
+                'queue_log_id' => $message->queueLogId,
+            ]);
+
+            return ['success' => false, 'cancelled' => true, 'response' => null, 'error' => 'Envio cancelado', 'http_status' => null, 'retryable' => false];
+        }
+
         // Campanha desativada (ou fora do período) com a mensagem já na fila: não envia e devolve
         // a mensagem ao RabbitMQ, para sair quando a campanha for reativada. Só no consumo da
         // fila (skipRetry=false) — o envio direto roda dentro do próprio trigger da campanha.
@@ -257,16 +269,21 @@ class SendWhatsAppMessageHandler
         ]);
     }
 
+    /**
+     * Log 'queued' gravado no dispatch: CampaignSubscriber usa UUID (no wamid); Marketing
+     * Messages e broadcast usam o id numérico do log.
+     */
+    private function findQueueLog(string $queueLogId): ?MessageLog
+    {
+        return ctype_digit($queueLogId)
+            ? $this->messageLogRepository->find((int) $queueLogId)
+            : $this->messageLogRepository->findByWamid($queueLogId);
+    }
+
     private function logMessage(int $leadId, string $templateName, string $phone, string $senderName, array $result, ?int $campaignId = null, ?int $campaignEventId = null, ?string $queueLogId = null, bool $skipHousekeeping = false): void
     {
         // Se existe log queued criado no dispatch, atualiza-o em vez de criar novo.
-        // CampaignSubscriber usa UUID (armazenado em wamid); MM path usa integer ID.
-        $log = null;
-        if ($queueLogId !== null) {
-            $log = ctype_digit($queueLogId)
-                ? $this->messageLogRepository->find((int) $queueLogId)
-                : $this->messageLogRepository->findByWamid($queueLogId);
-        }
+        $log = null !== $queueLogId ? $this->findQueueLog($queueLogId) : null;
 
         if ($log === null) {
             $log = new MessageLog();

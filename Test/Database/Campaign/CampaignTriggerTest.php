@@ -114,4 +114,29 @@ class CampaignTriggerTest extends DatabaseTestCase
             [$this->eventId, $lead]
         ), 'O contato em trânsito deve ser concluído.');
     }
+
+    public function testQueuedLogExistsBeforeTheMessageIsPublished(): void
+    {
+        $lead = $this->createLead('+5511900000412');
+        $this->addLeadToCampaign($this->campaignId, $lead);
+
+        // O transporte in-memory não deixa observar a ordem; um listener no bus sim
+        $logAtDispatch = null;
+        $dispatcher    = $this->getService('event_dispatcher');
+        $listener      = function (\Symfony\Component\Messenger\Event\SendMessageToTransportsEvent $event) use (&$logAtDispatch, $lead): void {
+            $logAtDispatch = $this->connection->fetchOne(
+                'SELECT status FROM dialog_hsm_message_log WHERE lead_id = ? AND wamid = ?',
+                [$lead, $event->getEnvelope()->getMessage()->queueLogId]
+            );
+        };
+        $dispatcher->addListener(\Symfony\Component\Messenger\Event\SendMessageToTransportsEvent::class, $listener);
+
+        try {
+            $this->trigger();
+        } finally {
+            $dispatcher->removeListener(\Symfony\Component\Messenger\Event\SendMessageToTransportsEvent::class, $listener);
+        }
+
+        $this->assertSame('queued', $logAtDispatch, 'Um worker rápido consumia antes do log existir e o queued ficava órfão.');
+    }
 }

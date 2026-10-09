@@ -325,6 +325,19 @@ class CampaignSubscriber implements EventSubscriberInterface
                 'items' => count($items),
                 'error' => $e->getMessage(),
             ]);
+
+            // Os contatos já foram concluídos na campanha: sem isto, sumiam sem nenhum registro.
+            foreach ($items as $item) {
+                $this->persistFailureLog(
+                    $item->leadId,
+                    $item->phone,
+                    $item->templateName,
+                    $item->whatsAppNumberName,
+                    'Falha ao entregar lote do envio direto: '.$e->getMessage(),
+                    $item->campaignId,
+                    $item->campaignEventId,
+                );
+            }
         }
     }
 
@@ -355,17 +368,32 @@ class CampaignSubscriber implements EventSubscriberInterface
                 return false;
             }
 
+            // O log 'queued' é gravado ANTES do dispatch: com o log depois, um worker rápido
+            // consumia a mensagem antes do flush, criava outro log e o 'queued' ficava órfão.
+            // Sem log gravado a mensagem não sai — o consumidor trata log ausente como envio
+            // cancelado (ex.: "Limpar mensagens pendentes").
+            $queuedLog = $this->persistQueuedLog($message, $uuid);
+            if (null === $queuedLog) {
+                return false;
+            }
+
             $stamps  = [new AmqpStamp($queueName)];
             $payload = $message->withQueueLogId($uuid);
             if ($mode === 'batch') {
                 $payload = $payload->withBatchMode();
             }
-            $this->bus->dispatch($payload, $stamps);
 
-            // Só persiste o log após confirmação do dispatch.
-            // Se o dispatch lançar, o try/catch de processContacts captura
-            // e chama persistFailureLog — nenhum log queued órfão é criado.
-            $this->persistQueuedLog($message, $uuid);
+            try {
+                $this->bus->dispatch($payload, $stamps);
+            } catch (\Throwable $e) {
+                $this->logger->error('DialogHSM: Falha ao publicar mensagem na fila', [
+                    'lead_id' => $message->leadId,
+                    'error'   => $e->getMessage(),
+                ]);
+                $this->markQueuedLogFailed($queuedLog, 'Falha ao enfileirar envio: '.$e->getMessage());
+
+                return false;
+            }
 
             return true;
         }, applyBatchSleep: false, checkNumber: $checkNumber);
@@ -728,7 +756,7 @@ class CampaignSubscriber implements EventSubscriberInterface
      * Persiste um MessageLog com status 'queued' no momento do dispatch para a fila.
      * O wamid recebe o UUID temporário para que o handler possa localizar e atualizar este registro.
      */
-    private function persistQueuedLog(SendWhatsAppMessage $message, string $uuid): void
+    private function persistQueuedLog(SendWhatsAppMessage $message, string $uuid): ?MessageLog
     {
         try {
             $log = new MessageLog();
@@ -744,9 +772,29 @@ class CampaignSubscriber implements EventSubscriberInterface
 
             $this->entityManager->persist($log);
             $this->entityManager->flush();
+
+            return $log;
         } catch (\Throwable $e) {
             $this->logger->warning('DialogHSM: Falha ao registrar log queued', [
                 'lead_id' => $message->leadId,
+                'error'   => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+    }
+
+    private function markQueuedLogFailed(MessageLog $log, string $errorMessage): void
+    {
+        try {
+            $log->setStatus(MessageLog::STATUS_FAILED);
+            $log->setWamid(null);
+            $log->setErrorMessage(mb_substr($errorMessage, 0, 500));
+            $this->entityManager->persist($log);
+            $this->entityManager->flush();
+        } catch (\Throwable $e) {
+            $this->logger->warning('DialogHSM: Falha ao marcar log como falha', [
+                'lead_id' => $log->getLeadId(),
                 'error'   => $e->getMessage(),
             ]);
         }
