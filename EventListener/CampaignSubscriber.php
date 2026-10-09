@@ -6,6 +6,7 @@ namespace MauticPlugin\DialogHSMBundle\EventListener;
 
 use Doctrine\ORM\EntityManagerInterface;
 use Mautic\CampaignBundle\CampaignEvents;
+use Mautic\CampaignBundle\Entity\LeadEventLog;
 use Mautic\CampaignBundle\Event\CampaignBuilderEvent;
 use Mautic\CampaignBundle\Event\CampaignExecutionEvent;
 use Mautic\CampaignBundle\Event\PendingEvent;
@@ -450,13 +451,13 @@ class CampaignSubscriber implements EventSubscriberInterface
         $messages = [];
 
         foreach ($event->getContacts() as $logId => $contact) {
-            // Re-execução: webhook já chegou — decide com base no status real
+            // Re-execução: já existe envio desta execução — decide com base no status real
             $existingLog = $this->messageLogRepository->findByCampaignEventAndLead(
                 (int) $campaignEventId,
                 (int) $contact->getId()
             );
 
-            if ($existingLog !== null) {
+            if ($existingLog !== null && $this->isFromCurrentExecution($existingLog, $event->getPending()->get($logId))) {
                 $this->resolveFromWebhookLog($event, $logId, $existingLog);
                 $decided[$logId] = true;
                 continue;
@@ -636,6 +637,26 @@ class CampaignSubscriber implements EventSubscriberInterface
     private function templateNameFrom(array $payloadData): string
     {
         return trim((string) ($payloadData['content'] ?? $payloadData['template'] ?? ''));
+    }
+
+    /**
+     * O MessageLog é desta execução da ação ou de uma rotação anterior do contato?
+     *
+     * Quando o contato reentra na campanha (allow_restart, removido e readicionado), o core cria
+     * um LeadEventLog novo com date_triggered = agora; o envio da rotação anterior é mais antigo
+     * que isso e não pode impedir o novo envio. Já o envio desta execução nasce depois do log de
+     * campanha. MessageLog não guarda a rotação, por isso a comparação é por data.
+     */
+    private function isFromCurrentExecution(MessageLog $messageLog, ?LeadEventLog $campaignLog): bool
+    {
+        $triggeredAt = $campaignLog?->getDateTriggered();
+        $sentAt      = $messageLog->getDateSent();
+
+        if (null === $triggeredAt || null === $sentAt) {
+            return true;
+        }
+
+        return $sentAt >= $triggeredAt;
     }
 
     /**
