@@ -53,8 +53,9 @@ class SendWhatsAppType extends AbstractType
                     'tooltip' => 'dialoghsm.campaign.send_delay.tooltip',
                 ],
                 'required'    => false,
+                // Sem 'data': essa opção sobrescreve o valor salvo ao abrir a edição, e salvar a
+                // ação (ex.: para trocar o payload) gravava 0 sem o usuário perceber.
                 'empty_data'  => 0,
-                'data'        => 0,
                 'constraints' => [new Range(['min' => 0, 'max' => 60])],
                 'help'        => 'dialoghsm.campaign.send_delay.help',
             ]
@@ -73,8 +74,9 @@ class SendWhatsAppType extends AbstractType
                     'tooltip' => 'dialoghsm.campaign.batch_limit.tooltip',
                 ],
                 'required'    => false,
+                // Sem 'data': essa opção sobrescreve o valor salvo ao abrir a edição, e salvar a
+                // ação (ex.: para trocar o payload) gravava 0 sem o usuário perceber.
                 'empty_data'  => 0,
-                'data'        => 0,
                 'constraints' => [new Range(['min' => 0, 'max' => 10000])],
                 'help'        => 'dialoghsm.campaign.batch_limit.help',
             ]

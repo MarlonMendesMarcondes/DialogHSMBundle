@@ -164,6 +164,20 @@ class BackfillLeadEventLogCommandTest extends TestCase
         $this->assertContains(MessageLog::STATUS_SENT, $insertedActions);
     }
 
+    public function testQueuedRowIsNotRecordedAsSent(): void
+    {
+        // O wamid de 'queued' é o UUID temporário da fila: a mensagem ainda não saiu
+        $this->connection->method('fetchOne')
+            ->willReturnOnConsecutiveCalls('1', false);
+
+        $this->connection->method('fetchAllAssociative')
+            ->willReturnOnConsecutiveCalls([$this->makeRow(['status' => MessageLog::STATUS_QUEUED, 'wamid' => 'uuid-da-fila', 'date_sent' => '2025-01-10 10:00:00'])], []);
+
+        $this->connection->expects($this->never())->method('insert');
+
+        $this->tester->execute([]);
+    }
+
     public function testRowWithDateDeliveredCreatesDeliveredEvent(): void
     {
         $row = $this->makeRow([

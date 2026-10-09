@@ -44,7 +44,7 @@ class MessageLogControllerTest extends TestCase
      *
      * @param string[] $extraMethods
      */
-    private function makeController(array $extraMethods = [], bool $withParams = false): MessageLogController&MockObject
+    private function makeController(array $extraMethods = [], bool $withParams = false, string $timezone = 'UTC'): MessageLogController&MockObject
     {
         $methods = array_unique(array_merge(
             ['isCsrfTokenValid', 'postActionRedirect', 'delegateView', 'generateUrl'],
@@ -58,7 +58,7 @@ class MessageLogControllerTest extends TestCase
 
         if ($withParams) {
             $params = $this->createMock(CoreParametersHelper::class);
-            $params->method('get')->willReturn('UTC');
+            $params->method('get')->willReturn($timezone);
 
             $prop = new \ReflectionProperty(\Mautic\CoreBundle\Controller\CommonController::class, 'coreParametersHelper');
             $prop->setValue($controller, $params);
@@ -478,5 +478,28 @@ class MessageLogControllerTest extends TestCase
             'campaignId'   => '0',
         ]);
         $controller->purgeQueuedAction($request, $this->repo);
+    }
+
+    public function testDashboardPeriodsAreQueriedInUtcWhateverTheMauticTimezone(): void
+    {
+        // date_sent é UTC: com o limite formatado em BRT o card "24h" cobria 27h
+        $controller = $this->makeController([], withParams: true, timezone: 'America/Sao_Paulo');
+
+        $since = [];
+        $this->repo->method('getStatsByPeriod')->willReturnCallback(function (\DateTimeInterface $from) use (&$since): array {
+            $since[] = $from;
+
+            return ['total' => 0, 'queued' => 0, 'sent' => 0, 'delivered' => 0, 'read' => 0, 'failed' => 0, 'dlq' => 0];
+        });
+        $this->repo->method('getChartData')->willReturn([]);
+        $this->repo->method('getGroupedDispatches')->willReturn([]);
+        $controller->method('delegateView')->willReturn(new Response());
+        $controller->method('generateUrl')->willReturn('/');
+
+        $controller->dashboardAction(Request::create('/dashboard'), $this->repo);
+
+        $this->assertSame('UTC', $since[0]->getTimezone()->getName());
+        $expected = (new \DateTime('-24 hours', new \DateTimeZone('UTC')))->format('Y-m-d H:i');
+        $this->assertSame($expected, $since[0]->format('Y-m-d H:i'), 'Janela de 24h deslocada pelo fuso do Mautic.');
     }
 }

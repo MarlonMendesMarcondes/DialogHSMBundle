@@ -66,8 +66,11 @@ class MessageLogController extends FormController
 
         $timezone = $this->coreParametersHelper->get('default_timezone', 'UTC');
         $now      = new \DateTime('now', new \DateTimeZone($timezone));
-        $from24h  = (clone $now)->modify('-24 hours');
-        $from7d   = (clone $now)->modify('-7 days')->setTime(0, 0, 0);
+        // date_sent é gravado em UTC: os limites vão em UTC (meia-noite local de 7 dias atrás
+        // convertida). Formatados no fuso do Mautic, o card "24h" cobria 27h em BRT.
+        $utc      = new \DateTimeZone('UTC');
+        $from24h  = (clone $now)->modify('-24 hours')->setTimezone($utc);
+        $from7d   = (clone $now)->modify('-7 days')->setTime(0, 0, 0)->setTimezone($utc);
 
         // Chave inclui hora atual para que o cache expire organicamente a cada 60s
         // e o slot horário garante que não haja stale excessivo entre janelas.
