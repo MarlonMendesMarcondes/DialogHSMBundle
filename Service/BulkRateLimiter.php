@@ -217,6 +217,13 @@ class BulkRateLimiter
 
             $r = new \Redis();
             $r->connect($host, $port, 1.0); // timeout 1s
+            // Senha do DSN (redis://usuario:senha@host ou redis://senha@host, como o transporte Redis
+            // do Symfony). Sem isso, num Redis com senha todo comando falhava e o fail-open
+            // desligava o recurso em silêncio.
+            $pass = ($parsed['pass'] ?? '') !== '' ? $parsed['pass'] : ($parsed['user'] ?? null);
+            if (null !== $pass && '' !== $pass) {
+                $r->auth(isset($parsed['pass']) && '' !== ($parsed['user'] ?? '') ? [rawurldecode($parsed['user']), rawurldecode($pass)] : rawurldecode($pass));
+            }
             if ($db > 0) {
                 $r->select($db);
             }
