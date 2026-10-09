@@ -80,7 +80,7 @@ class WhatsAppMessageRepository extends CommonRepository
      *
      * @return array<int, array{id: int, phone: string}>
      */
-    public function getPendingContacts(int $messageId, int $batchMinId = 0, int $batchSize = 100): array
+    public function getPendingContacts(int $messageId, int $batchMinId = 0, int $batchSize = 100, ?int $batchMaxId = null): array
     {
         $q = $this->getSegmentsContactsQuery($messageId);
 
@@ -105,6 +105,11 @@ class WhatsAppMessageRepository extends CommonRepository
         if ($batchMinId > 0) {
             $q->andWhere($q->expr()->gte('l.id', ':batchMinId'))
               ->setParameter('batchMinId', $batchMinId);
+        }
+
+        if (null !== $batchMaxId) {
+            $q->andWhere($q->expr()->lte('l.id', ':batchMaxId'))
+              ->setParameter('batchMaxId', $batchMaxId);
         }
 
         $q->setMaxResults($batchSize);

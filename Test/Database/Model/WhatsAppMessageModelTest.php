@@ -37,6 +37,11 @@ class WhatsAppMessageModelTest extends DatabaseTestCase
 
     private function broadcast(int ...$segmentIds): array
     {
+        return $this->broadcastWith(null, ...$segmentIds);
+    }
+
+    private function broadcastWith(?callable $configure, int ...$segmentIds): array
+    {
         $this->connection->insert('dialog_hsm_whatsapp_messages', [
             'name' => 'Broadcast teste', 'whatsapp_number_id' => $this->createWhatsAppNumber(),
             'template_name' => 'template_teste', 'is_published' => 1,
@@ -51,7 +56,12 @@ class WhatsAppMessageModelTest extends DatabaseTestCase
         $model   = $this->getService(WhatsAppMessageModel::class);
         $message = $this->em->find(WhatsAppMessage::class, $messageId);
 
-        return [$messageId, $model->sendToLists($message, new ChannelBroadcastEvent('dialoghsm', $messageId, new NullOutput()))];
+        $event = new ChannelBroadcastEvent('dialoghsm', $messageId, new NullOutput());
+        if (null !== $configure) {
+            $configure($event);
+        }
+
+        return [$messageId, $model->sendToLists($message, $event)];
     }
 
     private function logsForBroadcast(int $messageId): array
@@ -83,5 +93,39 @@ class WhatsAppMessageModelTest extends DatabaseTestCase
         $model->sendToLists($this->em->find(WhatsAppMessage::class, $messageId), new ChannelBroadcastEvent('dialoghsm', $messageId, new NullOutput()));
 
         $this->assertSame([$lead], $this->logsForBroadcast($messageId));
+    }
+
+    /**
+     * @return int[]
+     */
+    private function fiveLeads(): array
+    {
+        return array_map(fn (int $i): int => $this->createLead(sprintf('+55119000008%02d', 10 + $i)), range(1, 5));
+    }
+
+    public function testLimitCapsTheContactsOfOneRun(): void
+    {
+        [$messageId] = $this->broadcastWith(fn (ChannelBroadcastEvent $e) => $e->setLimit(2), $this->createSegment(...$this->fiveLeads()));
+
+        $this->assertCount(2, $this->logsForBroadcast($messageId), '--limit era ignorado: a base inteira saía em toda execução.');
+    }
+
+    public function testSmallBatchStillReachesEveryContact(): void
+    {
+        $leads = $this->fiveLeads();
+        [$messageId] = $this->broadcastWith(fn (ChannelBroadcastEvent $e) => $e->setBatch(2), $this->createSegment(...$leads));
+
+        $this->assertSame($leads, $this->logsForBroadcast($messageId));
+    }
+
+    public function testContactIdRangeIsRespected(): void
+    {
+        $leads = $this->fiveLeads();
+        [$messageId] = $this->broadcastWith(function (ChannelBroadcastEvent $e) use ($leads): void {
+            $e->setMinContactIdFilter($leads[1]);
+            $e->setMaxContactIdFilter($leads[3]);
+        }, $this->createSegment(...$leads));
+
+        $this->assertSame(array_slice($leads, 1, 3), $this->logsForBroadcast($messageId));
     }
 }

@@ -131,12 +131,24 @@ class WhatsAppMessageModel extends FormModel implements AjaxLookupModelInterface
         $baseUrl   = !empty($numberUrl) ? rtrim($numberUrl, '/') : 'https://waba-v2.360dialog.io/messages';
         $sent      = 0;
         $failed    = 0;
-        $batchMin  = 0;
+        // Parâmetros do mautic:broadcasts:send (--limit, --batch, --min-id/--max-id, threads),
+        // antes ignorados: o comando enviava a base inteira em toda execução do cron.
+        $batchSize = $event->getBatch() > 0 ? $event->getBatch() : self::BATCH_SIZE;
+        $limit     = $event->getLimit(); // 0 = sem limite
+        $maxId     = $event->getMaxContactIdFilter() ? (int) $event->getMaxContactIdFilter() : null;
+        $batchMin  = max(0, (int) $event->getMinContactIdFilter());
+        $processed = 0;
         $repo      = $this->getRepository();
         $sendDelay = $this->rateLimiter->getBulkSendDelay();
 
         do {
-            $contacts = $repo->getPendingContacts($message->getId(), $batchMin, self::BATCH_SIZE);
+            $requested = $limit > 0 ? min($batchSize, $limit - $processed) : $batchSize;
+            if ($requested <= 0) {
+                break;
+            }
+
+            $contacts   = $repo->getPendingContacts($message->getId(), $batchMin, $requested, $maxId);
+            $processed += count($contacts);
             $items    = [];
 
             foreach ($contacts as $contact) {
@@ -219,7 +231,7 @@ class WhatsAppMessageModel extends FormModel implements AjaxLookupModelInterface
             }
 
             $this->em->clear(MessageLog::class);
-        } while (count($contacts) === self::BATCH_SIZE);
+        } while (count($contacts) === $requested);
 
         $this->em->createQueryBuilder()
             ->update(WhatsAppMessage::class, 'wm')
