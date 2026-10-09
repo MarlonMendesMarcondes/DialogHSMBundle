@@ -102,15 +102,23 @@ MAUTIC_MESSENGER_DSN_WHATSAPP=amqp://user:password@localhost:5672/%2f
 # Transport direto (Redis) — para a ação síncrona não bloquear o worker
 MAUTIC_MESSENGER_DSN_WHATSAPP_DIRECT=redis://localhost:6379/3
 
-# Dead Letter Queue — mensagens que esgotam os 3 retries
-MAUTIC_MESSENGER_DSN_WHATSAPP_FAILED=amqp://user:password@localhost:5672/%2f
+# Falhas que esgotam os 3 retries vão para o failure transport global do Mautic
+# (MAUTIC_MESSENGER_DSN_FAILED). Sem ele configurado, a mensagem é descartada e só fica
+# o registro com status DLQ no log do plugin.
+MAUTIC_MESSENGER_DSN_FAILED=doctrine://default?queue_name=failed
 ```
 
 Sem configuração, o padrão é `null://null` (envio inline, sem fila).
 
 ### 2. Setup inicial do RabbitMQ
 
-O plugin usa o **exchange default do RabbitMQ** (`name=''`), que roteia mensagens diretamente para a fila pelo routing key (= nome da fila). Não é necessário criar exchanges nomeados nem bindings manuais.
+O plugin usa o **exchange default do RabbitMQ** (`name=''`), que roteia mensagens diretamente para a fila pelo routing key (= nome da fila). Não é necessário criar bindings manuais.
+
+A única exchange nomeada necessária é a **`delays`**, usada pelo Messenger para os retries de falha transitória e para reter mensagens de campanha desativada. Sem ela, a publicação com atraso falha, o worker morre sem confirmar a mensagem e a fila daquele número trava:
+
+```bash
+rabbitmqadmin declare exchange name=delays type=direct durable=true
+```
 
 > ⚠️ **Não execute `messenger:setup-transports`** — o exchange default é um exchange built-in do RabbitMQ que não pode ser declarado via protocolo AMQP. O comando retornará `ACCESS_REFUSED` e falhará. A criação das filas deve ser feita manualmente conforme abaixo.
 
@@ -124,24 +132,23 @@ rabbitmqadmin declare queue name=queue durable=true
 rabbitmqadmin declare queue name=batch durable=true
 ```
 
-**Dead Letter Queue** (opcional):
-
-```bash
-rabbitmqadmin declare queue name=whatsapp_failed durable=true
-```
 
 ### 3. Cron
 
 ```bash
 # Consumer direto (Redis) — a cada minuto
-* * * * * php bin/console messenger:consume whatsapp_direct --limit=120 --time-limit=55
+* * * * * flock -n /tmp/dialoghsm-direct.lock php bin/console messenger:consume whatsapp_direct --limit=120 --time-limit=55
 
-# Fila bulk — a cada minuto
-* * * * * php bin/console dialoghsm:consume --mode=bulk --limit=120 --time-limit=55
+# Fila bulk — a cada minuto (limite por execução: "Consumer Limit" nas configurações do plugin)
+* * * * * flock -n /tmp/dialoghsm-bulk.lock php bin/console dialoghsm:consume --mode=bulk --time-limit=55
 
-# Fila batch — seg a sex, a cada 10 minutos
-*/10 * * * 1-5 php bin/console dialoghsm:consume --mode=batch --limit=100 --time-limit=540
+# Fila batch — seg a sex, a cada 10 minutos (limite: "Batch Consumer Limit" nas configurações)
+*/10 * * * 1-5 flock -n /tmp/dialoghsm-batch.lock php bin/console dialoghsm:consume --mode=batch --time-limit=540
 ```
+
+- `flock -n` impede duas execuções simultâneas da mesma linha. No consumer Redis isso é obrigatório: o nome do consumer é fixo por servidor, e duas execuções sobrepostas releem o mesmo lote pendente e enviam em duplicidade.
+- Não passe `--limit` no `dialoghsm:consume`: ele sobrescreve o limite das configurações do plugin.
+- Os horários do cron seguem o fuso do servidor (normalmente UTC). Para restringir o batch ao horário comercial de Brasília, use as horas em UTC (11h–19h BRT = `14-21`).
 
 ### Consumer manual
 
