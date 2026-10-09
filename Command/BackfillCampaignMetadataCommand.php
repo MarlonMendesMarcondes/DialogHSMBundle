@@ -8,6 +8,7 @@ use Doctrine\DBAL\ParameterType;
 use Doctrine\ORM\EntityManagerInterface;
 use Mautic\CampaignBundle\Entity\LeadEventLog as CampaignLeadEventLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
+use MauticPlugin\DialogHSMBundle\Service\CampaignLogMetadata;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -82,7 +83,9 @@ class BackfillCampaignMetadataCommand extends Command
             return Command::SUCCESS;
         }
 
-        $offset  = 0;
+        // Paginação por id, não por OFFSET: cada lote gravado sai do conjunto filtrado e o OFFSET
+        // pularia os registros seguintes (só ~metade era processada).
+        $lastId  = 0;
         $updated = 0;
         $skipped = 0;
 
@@ -98,9 +101,10 @@ class BackfillCampaignMetadataCommand extends Command
                  INNER JOIN {$logTable} m ON m.campaign_event_id = cle.event_id AND m.lead_id = cle.lead_id
                  WHERE ce.type IN ({$actionPlaceholders})
                    AND (cle.metadata IS NULL OR cle.metadata NOT LIKE '%\"whatsapp\"%')
+                   AND cle.id > ?
                  ORDER BY cle.id ASC
-                 LIMIT ? OFFSET ?",
-                [...self::ACTION_TYPES, self::BATCH_SIZE, $offset],
+                 LIMIT ?",
+                [...self::ACTION_TYPES, $lastId, self::BATCH_SIZE],
                 [...array_fill(0, count(self::ACTION_TYPES), ParameterType::STRING), ParameterType::INTEGER, ParameterType::INTEGER]
             );
 
@@ -109,10 +113,8 @@ class BackfillCampaignMetadataCommand extends Command
             }
 
             foreach ($rows as $row) {
-                $existing = [];
-                if (!empty($row['metadata'])) {
-                    $existing = json_decode($row['metadata'], true) ?? [];
-                }
+                $lastId   = (int) $row['cle_id'];
+                $existing = CampaignLogMetadata::decode($row['metadata']);
 
                 $waData = array_filter([
                     'template_name' => $row['template_name'],
@@ -134,7 +136,7 @@ class BackfillCampaignMetadataCommand extends Command
                 if (!$dryRun) {
                     $conn->update(
                         $clelTable,
-                        ['metadata' => json_encode($existing)],
+                        ['metadata' => CampaignLogMetadata::encode($existing)],
                         ['id' => (int) $row['cle_id']],
                         ['metadata' => ParameterType::STRING, 'id' => ParameterType::INTEGER]
                     );
@@ -144,7 +146,6 @@ class BackfillCampaignMetadataCommand extends Command
             }
 
             $io->progressAdvance(count($rows));
-            $offset += self::BATCH_SIZE;
         }
 
         $io->progressFinish();

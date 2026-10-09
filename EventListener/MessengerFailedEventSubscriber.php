@@ -53,10 +53,14 @@ class MessengerFailedEventSubscriber implements EventSubscriberInterface
     private function persistDlqLog(SendWhatsAppMessage $message, \Throwable $throwable): void
     {
         try {
-            // Reutiliza log queued criado no dispatch (identificado pelo UUID no wamid)
-            $log = $message->queueLogId !== null
-                ? $this->messageLogRepository->findByWamid($message->queueLogId)
-                : null;
+            // Reutiliza o log queued criado no dispatch. Campanha grava o UUID no wamid; Marketing
+            // Messages e broadcast passam o id numérico do log (mesma regra do handler).
+            $log = null;
+            if (null !== $message->queueLogId) {
+                $log = ctype_digit($message->queueLogId)
+                    ? $this->messageLogRepository->find((int) $message->queueLogId)
+                    : $this->messageLogRepository->findByWamid($message->queueLogId);
+            }
 
             if ($log === null) {
                 $log = new MessageLog();

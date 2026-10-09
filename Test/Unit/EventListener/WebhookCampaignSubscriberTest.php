@@ -51,82 +51,85 @@ class WebhookCampaignSubscriberTest extends TestCase
 
     public function testSkipsWhenNoCampaignEventId(): void
     {
-        $log = $this->makeLog(null, 42);
+        $this->connection->expects($this->never())->method('fetchAssociative');
+        $this->connection->expects($this->never())->method('update');
 
-        $this->connection->expects($this->never())->method('executeStatement');
-
-        $this->subscriber->onMessageFailed(new WebhookMessageFailedEvent($log));
+        $this->subscriber->onMessageFailed(new WebhookMessageFailedEvent($this->makeLog(null, 42)));
     }
 
     public function testSkipsWhenNoLeadId(): void
     {
-        $log = new MessageLog();
-        $log->setCampaignEventId(10);
+        $this->connection->expects($this->never())->method('fetchAssociative');
+        $this->connection->expects($this->never())->method('update');
 
-        $this->connection->expects($this->never())->method('executeStatement');
-
-        $this->subscriber->onMessageFailed(new WebhookMessageFailedEvent($log));
+        $this->subscriber->onMessageFailed(new WebhookMessageFailedEvent($this->makeLog(10, null)));
     }
 
     // =========================================================================
-    // Executa UPDATE quando ambos os IDs estão presentes
+    // Marca failed=1 no log mais recente já disparado
     // =========================================================================
 
-    public function testExecutesUpdateWhenBothIdsPresent(): void
+    public function testLooksUpTheMostRecentTriggeredLogOfTheContact(): void
     {
-        $log = $this->makeLog(10, 42);
-
         $this->connection->expects($this->once())
-            ->method('executeStatement')
-            ->with(
-                $this->stringContains('JSON_SET'),
-                $this->equalTo(['eventId' => 10, 'leadId' => 42])
-            );
-
-        $this->subscriber->onMessageFailed(new WebhookMessageFailedEvent($log));
-    }
-
-    public function testUpdateTargetsCampaignLeadEventLogTable(): void
-    {
-        $log = $this->makeLog(7, 99);
-
-        $this->connection->expects($this->once())
-            ->method('executeStatement')
-            ->with($this->stringContains('campaign_lead_event_log'));
-
-        $this->subscriber->onMessageFailed(new WebhookMessageFailedEvent($log));
-    }
-
-    public function testUpdateOnlyAffectsNonFailedEntries(): void
-    {
-        $log = $this->makeLog(7, 99);
-
-        $this->connection->expects($this->once())
-            ->method('executeStatement')
+            ->method('fetchAssociative')
             ->with(
                 $this->logicalAnd(
-                    $this->stringContains('JSON_VALID'),
-                    $this->stringContains('JSON_EXTRACT'),
-                    $this->stringContains('$.failed')
-                )
-            );
-
-        $this->subscriber->onMessageFailed(new WebhookMessageFailedEvent($log));
-    }
-
-    public function testUpdateOnlyAffectsAlreadyTriggeredEntries(): void
-    {
-        $log = $this->makeLog(7, 99);
-
-        $this->connection->expects($this->once())
-            ->method('executeStatement')
-            ->with(
-                $this->logicalAnd(
+                    $this->stringContains('campaign_lead_event_log'),
                     $this->stringContains('is_scheduled = 0'),
-                    $this->stringContains('date_triggered IS NOT NULL')
-                )
+                    $this->stringContains('date_triggered IS NOT NULL'),
+                    $this->stringContains('ORDER BY id DESC')
+                ),
+                ['eventId' => 10, 'leadId' => 42]
+            )
+            ->willReturn(false);
+        $this->connection->expects($this->never())->method('update');
+
+        $this->subscriber->onMessageFailed(new WebhookMessageFailedEvent($this->makeLog(10, 42)));
+    }
+
+    public function testWritesFailedFlagInMauticSerializedFormatKeepingExistingMetadata(): void
+    {
+        $this->connection->method('fetchAssociative')
+            ->willReturn(['id' => 5, 'metadata' => serialize(['whatsapp' => ['status' => 'sent']])]);
+
+        $this->connection->expects($this->once())
+            ->method('update')
+            ->with(
+                'campaign_lead_event_log',
+                ['metadata' => serialize([
+                    'whatsapp' => ['status' => 'sent'],
+                    'failed'   => 1,
+                    'reason'   => 'dialoghsm.campaign.error.webhook_failed',
+                ])],
+                ['id' => 5]
             );
 
-        $this->subscriber->onMessageFailed(new WebhookMessageFailedEvent($log));
+        $this->subscriber->onMessageFailed(new WebhookMessageFailedEvent($this->makeLog(10, 42)));
+    }
+
+    public function testConvertsLegacyJsonMetadataToSerializedFormat(): void
+    {
+        $this->connection->method('fetchAssociative')
+            ->willReturn(['id' => 5, 'metadata' => json_encode(['whatsapp' => ['status' => 'sent']])]);
+
+        $this->connection->expects($this->once())
+            ->method('update')
+            ->with('campaign_lead_event_log', $this->callback(function (array $data): bool {
+                $this->assertSame(['status' => 'sent'], unserialize($data['metadata'])['whatsapp']);
+
+                return true;
+            }), ['id' => 5]);
+
+        $this->subscriber->onMessageFailed(new WebhookMessageFailedEvent($this->makeLog(10, 42)));
+    }
+
+    public function testDoesNotRewriteLogAlreadyMarkedAsFailed(): void
+    {
+        $this->connection->method('fetchAssociative')
+            ->willReturn(['id' => 5, 'metadata' => serialize(['failed' => 1])]);
+        $this->connection->expects($this->never())->method('update');
+
+        $this->subscriber->onMessageFailed(new WebhookMessageFailedEvent($this->makeLog(10, 42)));
     }
 }

@@ -239,7 +239,7 @@ class WebhookProcessor
 
             $fmtUtc   = static fn (?\DateTimeInterface $dt): ?string => $dt === null ? null :
                 \DateTime::createFromInterface($dt)->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s');
-            $existing = json_decode($row['metadata'] ?? '[]', true) ?? [];
+            $existing = CampaignLogMetadata::decode($row['metadata']);
             $existing['whatsapp'] = array_filter([
                 'template_name' => $log->getTemplateName(),
                 'sender_name'   => $log->getSenderName(),
@@ -249,7 +249,7 @@ class WebhookProcessor
                 'error_message' => $log->getErrorMessage(),
             ], static fn ($v) => $v !== null && $v !== '');
 
-            $conn->update('campaign_lead_event_log', ['metadata' => json_encode($existing)], ['id' => $row['id']]);
+            $conn->update('campaign_lead_event_log', ['metadata' => CampaignLogMetadata::encode($existing)], ['id' => $row['id']]);
         } catch (\Throwable) {
             // falha silenciosa — não interrompe o fluxo do webhook
         }

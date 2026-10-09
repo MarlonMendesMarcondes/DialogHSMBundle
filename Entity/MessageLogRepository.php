@@ -320,12 +320,16 @@ class MessageLogRepository extends CommonRepository
      */
     public function findMostRecentForLead(int $leadId, \DateTimeInterface $since, ?\DateTimeInterface $before = null): ?MessageLog
     {
+        // Só mensagens que podem ter chegado ao contato: 'queued' ainda está na fila (ex.: campanha
+        // pausada) e failed/dlq nunca saíram — a resposta não pode ser atribuída a elas.
         $qb = $this->createQueryBuilder('dhml')
             ->andWhere('dhml.leadId = :leadId')
             ->andWhere('dhml.dateSent >= :since')
             ->andWhere('dhml.dateReplied IS NULL')
+            ->andWhere('dhml.status NOT IN (:notDelivered)')
             ->setParameter('leadId', $leadId)
-            ->setParameter('since', $since);
+            ->setParameter('since', $since)
+            ->setParameter('notDelivered', [MessageLog::STATUS_QUEUED, MessageLog::STATUS_FAILED, MessageLog::STATUS_DLQ]);
 
         if ($before !== null) {
             $qb->andWhere('dhml.dateSent < :before')
