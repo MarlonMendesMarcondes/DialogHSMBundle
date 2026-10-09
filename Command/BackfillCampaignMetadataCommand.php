@@ -44,6 +44,13 @@ class BackfillCampaignMetadataCommand extends Command
             InputOption::VALUE_NONE,
             'Mostra quantos registros seriam atualizados sem efetuar alterações'
         );
+
+        $this->addOption(
+            'convert-json',
+            null,
+            InputOption::VALUE_NONE,
+            'Converte para o formato do Mautic a metadata que versões antigas do plugin gravaram em JSON (o Mautic a lê como vazia)'
+        );
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -63,6 +70,10 @@ class BackfillCampaignMetadataCommand extends Command
         $logTable     = $this->em->getClassMetadata(MessageLog::class)->getTableName();
 
         $actionPlaceholders = implode(', ', array_fill(0, count(self::ACTION_TYPES), '?'));
+
+        if ($input->getOption('convert-json')) {
+            return $this->convertJsonMetadata($io, $clelTable, $actionPlaceholders, $dryRun);
+        }
 
         $total = (int) $conn->fetchOne(
             "SELECT COUNT(DISTINCT cle.id)
@@ -157,6 +168,65 @@ class BackfillCampaignMetadataCommand extends Command
             $updated,
             $label,
             $skipped,
+            $dryRun ? ' (dry-run — sem alterações reais)' : ''
+        ));
+
+        return Command::SUCCESS;
+    }
+
+    /**
+     * Versões antigas gravavam a metadata em JSON numa coluna Doctrine 'array' (serialize):
+     * o Mautic lê [] e a timeline/API não mostram o status do WhatsApp nem a falha da Meta.
+     * O backfill normal não toca nessas linhas porque elas já contêm "whatsapp".
+     */
+    private function convertJsonMetadata(SymfonyStyle $io, string $clelTable, string $actionPlaceholders, bool $dryRun): int
+    {
+        $conn      = $this->em->getConnection();
+        $lastId    = 0;
+        $converted = 0;
+
+        while (true) {
+            $rows = $conn->fetchAllAssociative(
+                "SELECT cle.id, cle.metadata
+                 FROM {$clelTable} cle
+                 INNER JOIN campaign_events ce ON ce.id = cle.event_id
+                 WHERE ce.type IN ({$actionPlaceholders})
+                   AND cle.metadata LIKE '{%'
+                   AND cle.id > ?
+                 ORDER BY cle.id ASC
+                 LIMIT ?",
+                [...self::ACTION_TYPES, $lastId, self::BATCH_SIZE],
+                [...array_fill(0, count(self::ACTION_TYPES), ParameterType::STRING), ParameterType::INTEGER, ParameterType::INTEGER]
+            );
+
+            if (empty($rows)) {
+                break;
+            }
+
+            foreach ($rows as $row) {
+                $lastId   = (int) $row['id'];
+                $metadata = json_decode((string) $row['metadata'], true);
+                if (!is_array($metadata)) {
+                    continue;
+                }
+
+                if (!$dryRun) {
+                    $conn->update(
+                        $clelTable,
+                        ['metadata' => CampaignLogMetadata::encode($metadata)],
+                        ['id' => $lastId],
+                        ['metadata' => ParameterType::STRING, 'id' => ParameterType::INTEGER]
+                    );
+                }
+
+                ++$converted;
+            }
+        }
+
+        $io->success(sprintf(
+            '%d registros em JSON %s para o formato do Mautic.%s',
+            $converted,
+            $dryRun ? 'seriam convertidos' : 'convertidos',
             $dryRun ? ' (dry-run — sem alterações reais)' : ''
         ));
 

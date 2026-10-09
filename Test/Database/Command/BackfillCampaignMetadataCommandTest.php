@@ -40,4 +40,28 @@ class BackfillCampaignMetadataCommandTest extends DatabaseTestCase
         $sample = $this->em->getRepository(LeadEventLog::class)->findOneBy(['event' => $eventId]);
         $this->assertSame('delivered', $sample->getMetadata()['whatsapp']['status'] ?? null, 'Backfill gravava JSON, que o Mautic lê como [].');
     }
+
+    public function testConvertJsonRewritesLegacyRowsSoMauticCanReadThem(): void
+    {
+        $campaignId = $this->createCampaign();
+        $eventId    = $this->createQueueActionEvent($campaignId, $this->createWhatsAppNumber());
+        $leadId     = $this->createLead('+5511900000960');
+
+        $this->connection->insert('campaign_lead_event_log', [
+            'event_id' => $eventId, 'lead_id' => $leadId, 'campaign_id' => $campaignId, 'rotation' => 1,
+            'is_scheduled' => 0, 'system_triggered' => 1, 'date_triggered' => $this->utcNow(),
+            'metadata' => json_encode(['whatsapp' => ['status' => 'read'], 'failed' => 1]),
+        ]);
+        $id = (int) $this->connection->lastInsertId();
+
+        $this->runCommand('dialoghsm:backfill-campaign-metadata', ['--convert-json' => true, '--dry-run' => true]);
+        $this->assertStringStartsWith('{', (string) $this->connection->fetchOne('SELECT metadata FROM campaign_lead_event_log WHERE id = ?', [$id]), 'Dry-run não pode gravar.');
+
+        $this->runCommand('dialoghsm:backfill-campaign-metadata', ['--convert-json' => true]);
+
+        $this->em->clear();
+        $metadata = $this->em->find(LeadEventLog::class, $id)->getMetadata();
+        $this->assertSame('read', $metadata['whatsapp']['status'] ?? null);
+        $this->assertSame(1, $metadata['failed'] ?? null);
+    }
 }
