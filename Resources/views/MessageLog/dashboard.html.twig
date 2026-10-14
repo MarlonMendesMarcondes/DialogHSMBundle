@@ -100,85 +100,45 @@
 
 {# ══ ABA DISPAROS ══ #}
 <div class="tab-pane" id="tab-disparos">
-    <div class="panel panel-default">
+    <div class="btn-group dialoghsm-dispatch-toggle" style="margin-bottom: 12px;">
+        <button type="button" class="btn btn-default btn-sm active" data-dispatch-view="campaign">
+            <i class="ri-stack-line"></i> {{ 'dialoghsm.dashboard.dispatches.view.campaign'|trans }}
+        </button>
+        <button type="button" class="btn btn-default btn-sm" data-dispatch-view="date">
+            <i class="ri-calendar-line"></i> {{ 'dialoghsm.dashboard.dispatches.view.date'|trans }}
+        </button>
+    </div>
+    <div class="panel panel-default" data-dispatch-panel="campaign">
         <div class="panel-body" style="padding: 0;">
-            {% if dispatches is empty %}
-                <p class="text-muted" style="padding: 20px; margin: 0;">{{ 'dialoghsm.dashboard.dispatches.noresults'|trans }}</p>
-            {% else %}
-            <div class="table-responsive">
-                <table class="table dialoghsm-dispatches" style="margin: 0;">
-                    <thead>
-                        <tr>
-                            <th>{{ 'dialoghsm.dashboard.dispatches.template'|trans }}</th>
-                            <th>{{ 'dialoghsm.dashboard.dispatches.campaign'|trans }}</th>
-                            <th class="text-center">{{ 'dialoghsm.dashboard.total'|trans }}</th>
-                            <th class="text-center" title="{{ 'dialoghsm.dashboard.dispatches.funnel_hint'|trans }}">
-                                <i class="ri-checkbox-circle-line" style="color:#5cb85c"></i> {{ 'dialoghsm.dashboard.sent'|trans }}
-                            </th>
-                            <th class="text-center"><i class="ri-error-warning-line" style="color:#f0ad4e"></i> {{ 'dialoghsm.dashboard.dlq'|trans }}</th>
-                            <th class="text-center"><i class="ri-close-circle-line" style="color:#d9534f"></i> {{ 'dialoghsm.dashboard.failed'|trans }}</th>
-                            <th class="text-center" title="{{ 'dialoghsm.dashboard.dispatches.funnel_hint'|trans }}">
-                                <i class="ri-check-double-line" style="color:#17a2b8"></i> {{ 'dialoghsm.dashboard.delivered'|trans }}
-                            </th>
-                            <th class="text-center">
-                                <i class="ri-eye-line" style="color:#0275d8"></i> {{ 'dialoghsm.dashboard.read'|trans }}
-                            </th>
-                            <th class="text-center">
-                                <i class="ri-reply-line" style="color:#7952b3"></i> {{ 'dialoghsm.dashboard.replied'|trans }}
-                            </th>
-                            <th class="text-center">{{ 'dialoghsm.dashboard.dispatches.rate'|trans }}</th>
-                            <th class="text-center">{{ 'dialoghsm.dashboard.dispatches.date'|trans }}</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                    {% for row in dispatches %}
-                        {% set total         = row.total|default(0) %}
-                        {% set sentPlus      = row.sent_plus|default(0) %}
-                        {% set deliveredPlus = row.delivered_plus|default(0) %}
-                        {% set readCount     = row.read_count|default(0) %}
-                        {% set repliedCount  = row.replied_count|default(0) %}
-                        {% set failed        = row.failed|default(0) %}
-                        {% set dlq           = row.dlq|default(0) %}
-                        {% set processed     = sentPlus + failed + dlq %}
-                        {% set rate          = processed > 0 ? (sentPlus / processed * 100)|round(0) : 0 %}
-                        {% set rateColor     = rate >= 90 ? '#5cb85c' : (rate >= 70 ? '#f0ad4e' : '#d9534f') %}
-                        <tr>
-                            <td><span class="dialoghsm-template-badge">{{ row.template_name }}</span></td>
-                            <td>
-                                {% if row.campaign_id %}
-                                    <a class="dialoghsm-campaign-link" href="{{ path('mautic_campaign_action', {'objectAction': 'view', 'objectId': row.campaign_id}) }}" target="_blank">
-                                        <i class="ri-share-box-line"></i> #{{ row.campaign_id }}
-                                    </a>
-                                {% elseif row.whatsapp_message_id %}
-                                    <a class="dialoghsm-campaign-link" href="{{ path('mautic_dialoghsm_message_action', {'objectAction': 'view', 'objectId': row.whatsapp_message_id}) }}" target="_blank">
-                                        <i class="ri-broadcast-line"></i> {{ row.whatsapp_message_name ?: '#' ~ row.whatsapp_message_id }}
-                                    </a>
-                                {% else %}
-                                    <span class="text-muted">—</span>
-                                {% endif %}
-                            </td>
-                            <td class="text-center"><strong style="font-size:14px;">{{ total }}</strong></td>
-                            <td class="text-center">{{ _self.pill(sentPlus,      '#5cb85c') }}</td>
-                            <td class="text-center">{{ _self.pill(dlq,           '#f0ad4e') }}</td>
-                            <td class="text-center">{{ _self.pill(failed,        '#d9534f') }}</td>
-                            <td class="text-center">{{ _self.pill(deliveredPlus, '#17a2b8') }}</td>
-                            <td class="text-center">{{ _self.pill(readCount,     '#0275d8') }}</td>
-                            <td class="text-center">{{ _self.pill(repliedCount,  '#7952b3') }}</td>
-                            <td class="text-center">{{ _self.pill(rate ~ '%', rateColor) }}</td>
-                            <td class="text-center" style="white-space: nowrap; color: var(--text-helper); font-size: 12px;">
-                                <i class="ri-calendar-line"></i> {{ row.date }}
-                            </td>
-                        </tr>
-                    {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% endif %}
+            {{ _self.dispatchTable(dispatches, false) }}
+        </div>
+    </div>
+    <div class="panel panel-default hide" data-dispatch-panel="date">
+        <div class="panel-body" style="padding: 0;">
+            {{ _self.dispatchTable(dispatchesByDate, true) }}
         </div>
     </div>
 </div>{# /tab-disparos #}
 
 </div>{# /tab-content #}
+
+<script>
+(function () {
+    var toggle = document.querySelector('.dialoghsm-dispatch-toggle');
+    if (!toggle) { return; }
+    toggle.addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-dispatch-view]');
+        if (!btn) { return; }
+        var view = btn.getAttribute('data-dispatch-view');
+        toggle.querySelectorAll('[data-dispatch-view]').forEach(function (b) {
+            b.classList.toggle('active', b === btn);
+        });
+        document.querySelectorAll('[data-dispatch-panel]').forEach(function (p) {
+            p.classList.toggle('hide', p.getAttribute('data-dispatch-panel') !== view);
+        });
+    });
+})();
+</script>
 
 <script>
 (function () {
@@ -264,4 +224,84 @@
 {% macro pill(value, color) %}
 {% set v = value|default(0) %}
 <span class="dialoghsm-stat-pill" style="background: {{ color }}22; color: {{ v > 0 ? color : 'var(--text-helper)' }};">{{ v }}</span>
+{% endmacro %}
+
+{% macro dispatchTable(rows, byDate) %}
+{% if rows is empty %}
+<p class="text-muted" style="padding: 20px; margin: 0;">{{ 'dialoghsm.dashboard.dispatches.noresults'|trans }}</p>
+{% else %}
+<div class="table-responsive">
+    <table class="table dialoghsm-dispatches" style="margin: 0;">
+        <thead>
+            <tr>
+                <th>{{ 'dialoghsm.dashboard.dispatches.template'|trans }}</th>
+                <th>{{ 'dialoghsm.dashboard.dispatches.campaign'|trans }}</th>
+                <th class="text-center">{{ 'dialoghsm.dashboard.total'|trans }}</th>
+                <th class="text-center" title="{{ 'dialoghsm.dashboard.dispatches.funnel_hint'|trans }}">
+                    <i class="ri-checkbox-circle-line" style="color:#5cb85c"></i> {{ 'dialoghsm.dashboard.sent'|trans }}
+                </th>
+                <th class="text-center"><i class="ri-error-warning-line" style="color:#f0ad4e"></i> {{ 'dialoghsm.dashboard.dlq'|trans }}</th>
+                <th class="text-center"><i class="ri-close-circle-line" style="color:#d9534f"></i> {{ 'dialoghsm.dashboard.failed'|trans }}</th>
+                <th class="text-center" title="{{ 'dialoghsm.dashboard.dispatches.funnel_hint'|trans }}">
+                    <i class="ri-check-double-line" style="color:#17a2b8"></i> {{ 'dialoghsm.dashboard.delivered'|trans }}
+                </th>
+                <th class="text-center">
+                    <i class="ri-eye-line" style="color:#0275d8"></i> {{ 'dialoghsm.dashboard.read'|trans }}
+                </th>
+                <th class="text-center">
+                    <i class="ri-reply-line" style="color:#7952b3"></i> {{ 'dialoghsm.dashboard.replied'|trans }}
+                </th>
+                <th class="text-center">{{ 'dialoghsm.dashboard.dispatches.rate'|trans }}</th>
+                <th class="text-center">{{ (byDate ? 'dialoghsm.dashboard.dispatches.date' : 'dialoghsm.dashboard.dispatches.period')|trans }}</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for row in rows %}
+            {% set total         = row.total|default(0) %}
+            {% set sentPlus      = row.sent_plus|default(0) %}
+            {% set deliveredPlus = row.delivered_plus|default(0) %}
+            {% set readCount     = row.read_count|default(0) %}
+            {% set repliedCount  = row.replied_count|default(0) %}
+            {% set failed        = row.failed|default(0) %}
+            {% set dlq           = row.dlq|default(0) %}
+            {% set processed     = sentPlus + failed + dlq %}
+            {% set rate          = processed > 0 ? (sentPlus / processed * 100)|round(0) : 0 %}
+            {% set rateColor     = rate >= 90 ? '#5cb85c' : (rate >= 70 ? '#f0ad4e' : '#d9534f') %}
+            <tr>
+                <td><span class="dialoghsm-template-badge">{{ row.template_name }}</span></td>
+                <td>
+                    {% if row.campaign_id %}
+                        <a class="dialoghsm-campaign-link" href="{{ path('mautic_campaign_action', {'objectAction': 'view', 'objectId': row.campaign_id}) }}" target="_blank">
+                            <i class="ri-share-box-line"></i> #{{ row.campaign_id }}
+                        </a>
+                    {% elseif row.whatsapp_message_id %}
+                        <a class="dialoghsm-campaign-link" href="{{ path('mautic_dialoghsm_message_action', {'objectAction': 'view', 'objectId': row.whatsapp_message_id}) }}" target="_blank">
+                            <i class="ri-broadcast-line"></i> {{ row.whatsapp_message_name ?: '#' ~ row.whatsapp_message_id }}
+                        </a>
+                    {% else %}
+                        <span class="text-muted">—</span>
+                    {% endif %}
+                </td>
+                <td class="text-center"><strong style="font-size:14px;">{{ total }}</strong></td>
+                <td class="text-center">{{ _self.pill(sentPlus,      '#5cb85c') }}</td>
+                <td class="text-center">{{ _self.pill(dlq,           '#f0ad4e') }}</td>
+                <td class="text-center">{{ _self.pill(failed,        '#d9534f') }}</td>
+                <td class="text-center">{{ _self.pill(deliveredPlus, '#17a2b8') }}</td>
+                <td class="text-center">{{ _self.pill(readCount,     '#0275d8') }}</td>
+                <td class="text-center">{{ _self.pill(repliedCount,  '#7952b3') }}</td>
+                <td class="text-center">{{ _self.pill(rate ~ '%', rateColor) }}</td>
+                <td class="text-center" style="white-space: nowrap; color: var(--text-helper); font-size: 12px;">
+                    <i class="ri-calendar-line"></i>
+                    {% if byDate or row.first_date == row.date %}
+                        {{ row.date }}
+                    {% else %}
+                        {{ row.first_date }} → {{ row.date }}
+                    {% endif %}
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
 {% endmacro %}

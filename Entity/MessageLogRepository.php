@@ -650,7 +650,9 @@ class MessageLogRepository extends CommonRepository
     }
 
     /**
-     * Retorna os últimos N disparos agrupados por (template, campaign_id, data).
+     * Retorna os últimos N disparos agrupados por (template, origem) — e também por data
+     * quando $byDate = true. Agrupado só por origem, first_date/date trazem o primeiro e
+     * o último dia de disparo.
      *
      * As colunas são cumulativas (visão de funil):
      *   sent_plus      = status IN ('sent', 'delivered', 'read')  — chegou ao menos em "sent"
@@ -658,13 +660,14 @@ class MessageLogRepository extends CommonRepository
      *   read_count     = status = 'read'
      *   replied_count  = date_replied IS NOT NULL (exato via context.id ou aproximado por telefone+tempo)
      *
-     * @return array<int, array{template_name: string, campaign_id: int|null, date: string, total: int, sent_plus: int, delivered_plus: int, read_count: int, replied_count: int, failed: int, dlq: int}>
+     * @return array<int, array{template_name: string, campaign_id: int|null, first_date: string, date: string, total: int, sent_plus: int, delivered_plus: int, read_count: int, replied_count: int, failed: int, dlq: int}>
      */
-    public function getGroupedDispatches(int $limit = 50): array
+    public function getGroupedDispatches(int $limit = 50, bool $byDate = true): array
     {
         $conn      = $this->getEntityManager()->getConnection();
         $tableName = $this->getEntityManager()->getClassMetadata(MessageLog::class)->getTableName();
         $msgTable  = $this->getEntityManager()->getClassMetadata(WhatsAppMessage::class)->getTableName();
+        $dateGroup = $byDate ? ', DATE(ml.date_sent)' : '';
 
         return $conn->fetchAllAssociative(
             "SELECT
@@ -672,7 +675,8 @@ class MessageLogRepository extends CommonRepository
                 ml.campaign_id,
                 ml.whatsapp_message_id,
                 wm.name                                  AS whatsapp_message_name,
-                DATE(ml.date_sent)                       AS date,
+                MIN(DATE(ml.date_sent))                  AS first_date,
+                MAX(DATE(ml.date_sent))                  AS date,
                 COUNT(*)                                 AS total,
                 SUM(ml.status IN ('sent', 'delivered', 'read'))  AS sent_plus,
                 SUM(ml.status IN ('delivered', 'read'))           AS delivered_plus,
@@ -682,7 +686,7 @@ class MessageLogRepository extends CommonRepository
                 SUM(ml.status = 'dlq')                           AS dlq
              FROM `{$tableName}` ml
              LEFT JOIN `{$msgTable}` wm ON wm.id = ml.whatsapp_message_id
-             GROUP BY ml.template_name, ml.campaign_id, ml.whatsapp_message_id, DATE(ml.date_sent)
+             GROUP BY ml.template_name, ml.campaign_id, ml.whatsapp_message_id{$dateGroup}
              ORDER BY MAX(ml.date_sent) DESC
              LIMIT {$limit}"
         );

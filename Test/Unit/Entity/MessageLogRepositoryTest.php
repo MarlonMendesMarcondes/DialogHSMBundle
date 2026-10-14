@@ -1038,6 +1038,32 @@ class MessageLogRepositoryTest extends TestCase
         $this->assertSame([], $result);
     }
 
+    public function testGetGroupedDispatchesGroupsByDateByDefault(): void
+    {
+        $this->mockConnection
+            ->expects($this->once())
+            ->method('fetchAllAssociative')
+            ->with($this->stringContains('ml.whatsapp_message_id, DATE(ml.date_sent)'))
+            ->willReturn([]);
+
+        $this->repository->getGroupedDispatches();
+    }
+
+    public function testGetGroupedDispatchesWithoutDateAggregatesAllDays(): void
+    {
+        $this->mockConnection
+            ->expects($this->once())
+            ->method('fetchAllAssociative')
+            ->with($this->logicalAnd(
+                $this->stringContains('GROUP BY ml.template_name, ml.campaign_id, ml.whatsapp_message_id'),
+                $this->logicalNot($this->stringContains('ml.whatsapp_message_id, DATE(ml.date_sent)')),
+                $this->stringContains('MIN(DATE(ml.date_sent))'),
+            ))
+            ->willReturn([]);
+
+        $this->repository->getGroupedDispatches(byDate: false);
+    }
+
     public function testGetGroupedDispatchesReturnsRowsFromConnection(): void
     {
         $rows = [

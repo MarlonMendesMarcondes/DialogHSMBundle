@@ -256,12 +256,18 @@ class MessageLogControllerTest extends TestCase
         $controller = $this->makeController([], withParams: true);
 
         $dispatches = [
-            ['template_name' => 'foo', 'campaign_id' => 1, 'date' => '2026-05-13', 'total' => 10, 'sent' => 9, 'delivered' => 8, 'read' => 7, 'failed' => 1, 'dlq' => 0],
+            ['template_name' => 'foo', 'campaign_id' => 1, 'first_date' => '2026-05-11', 'date' => '2026-05-13', 'total' => 10, 'sent' => 9, 'delivered' => 8, 'read' => 7, 'failed' => 1, 'dlq' => 0],
+        ];
+        $dispatchesByDate = [
+            ['template_name' => 'foo', 'campaign_id' => 1, 'first_date' => '2026-05-13', 'date' => '2026-05-13', 'total' => 4, 'sent' => 4, 'delivered' => 4, 'read' => 3, 'failed' => 0, 'dlq' => 0],
         ];
 
         $this->repo->method('getStatsByPeriod')->willReturn(['total' => 0, 'queued' => 0, 'sent' => 0, 'delivered' => 0, 'read' => 0, 'failed' => 0, 'dlq' => 0]);
         $this->repo->method('getChartData')->willReturn([]);
-        $this->repo->method('getGroupedDispatches')->willReturn($dispatches);
+        $this->repo->method('getGroupedDispatches')->willReturnMap([
+            [50, false, $dispatches],
+            [50, true, $dispatchesByDate],
+        ]);
 
         $capturedArgs = null;
         $controller->method('delegateView')
@@ -274,6 +280,7 @@ class MessageLogControllerTest extends TestCase
         $controller->dashboardAction(Request::create('/dashboard'), $this->repo);
 
         $this->assertSame($dispatches, $capturedArgs['viewParameters']['dispatches']);
+        $this->assertSame($dispatchesByDate, $capturedArgs['viewParameters']['dispatchesByDate']);
     }
 
     public function testDashboardActionCallsGetGroupedDispatches(): void
@@ -283,7 +290,7 @@ class MessageLogControllerTest extends TestCase
         $this->repo->method('getStatsByPeriod')->willReturn(['total' => 0, 'queued' => 0, 'sent' => 0, 'delivered' => 0, 'read' => 0, 'failed' => 0, 'dlq' => 0]);
         $this->repo->method('getChartData')->willReturn([]);
         $this->repo
-            ->expects($this->once())
+            ->expects($this->exactly(2))
             ->method('getGroupedDispatches')
             ->willReturn([]);
 
@@ -404,7 +411,7 @@ class MessageLogControllerTest extends TestCase
             ['total' => 0, 'queued' => 0, 'sent' => 0, 'delivered' => 0, 'read' => 0, 'failed' => 0, 'dlq' => 0]
         );
         $this->repo->expects($this->once())->method('getChartData')->willReturn([]);
-        $this->repo->expects($this->once())->method('getGroupedDispatches')->willReturn([]);
+        $this->repo->expects($this->exactly(2))->method('getGroupedDispatches')->willReturn([]);
 
         $controller->method('delegateView')->willReturn(new Response());
         $controller->method('generateUrl')->willReturn('/');

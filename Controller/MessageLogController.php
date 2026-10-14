@@ -85,7 +85,8 @@ class MessageLogController extends FormController
                     'stats24h'    => $messageLogRepository->getStatsByPeriod($from24h),
                     'stats7d'     => $messageLogRepository->getStatsByPeriod($from7d),
                     'chartRaw'    => $messageLogRepository->getChartData($chartDays, $timezone),
-                    'dispatches'  => $messageLogRepository->getGroupedDispatches(),
+                    'dispatches'  => $messageLogRepository->getGroupedDispatches(byDate: false),
+                    'dispatchesByDate' => $messageLogRepository->getGroupedDispatches(byDate: true),
                     'replied24h'  => $messageLogRepository->countReplied($from24h),
                     'replied7d'   => $messageLogRepository->countReplied($from7d),
                 ];
@@ -96,6 +97,8 @@ class MessageLogController extends FormController
         $stats7d    = $dashboardData['stats7d'];
         $chartRaw   = $dashboardData['chartRaw'];
         $dispatches = $dashboardData['dispatches'];
+        // Entrada de cache gravada antes desta chave existir não a tem (expira em DASHBOARD_CACHE_TTL).
+        $dispatchesByDate = $dashboardData['dispatchesByDate'] ?? [];
         $replied24h = $dashboardData['replied24h'];
         $replied7d  = $dashboardData['replied7d'];
 
@@ -132,6 +135,7 @@ class MessageLogController extends FormController
                 'chartDays'   => $chartDays,
                 'timezone'    => $this->coreParametersHelper->get('default_timezone', 'UTC'),
                 'dispatches'  => $dispatches,
+                'dispatchesByDate' => $dispatchesByDate,
                 'tmpl'        => 'index',
             ],
             'contentTemplate' => '@DialogHSM/MessageLog/dashboard.html.twig',
