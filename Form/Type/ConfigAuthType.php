@@ -182,7 +182,11 @@ class ConfigAuthType extends AbstractType
                     'class'   => 'form-control',
                     'tooltip' => 'dialoghsm.config.balance_alert_recipients.tooltip',
                 ],
-                'data' => $data['balance_alert_recipients'] ?? [],
+                // UserListType é multiple: qualquer valor não-array derruba o form
+                // inteiro com TransformationFailedException. O EncryptionService do
+                // IntegrationsBundle devolve false quando não consegue decriptar uma
+                // chave (ex: secret_key diferente), então normaliza aqui.
+                'data' => is_array($data['balance_alert_recipients'] ?? null) ? $data['balance_alert_recipients'] : [],
                 'help' => 'dialoghsm.config.balance_alert_recipients.help',
             ]
         );

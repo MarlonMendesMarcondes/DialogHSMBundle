@@ -149,6 +149,28 @@ class ConfigAuthTypeTest extends TestCase
         $this->assertSame([5, 9], $fields['balance_alert_recipients']['data']);
     }
 
+    /**
+     * @dataProvider nonArrayRecipientsProvider
+     */
+    public function testBalanceAlertRecipientsFallsBackToEmptyArrayWhenStoredValueIsNotArray(mixed $stored): void
+    {
+        $fields = $this->buildFormAndCaptureFields(['balance_alert_recipients' => $stored]);
+
+        $this->assertSame([], $fields['balance_alert_recipients']['data']);
+    }
+
+    /**
+     * @return array<string, array{mixed}>
+     */
+    public static function nonArrayRecipientsProvider(): array
+    {
+        return [
+            'falha de decrypt (false)' => [false],
+            'string vazia'             => [''],
+            'id único como string'     => ['5'],
+        ];
+    }
+
     public function testBalanceAlertSendEmailDefaultsToFalse(): void
     {
         $fields = $this->buildFormAndCaptureFields([]);
