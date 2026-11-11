@@ -21,6 +21,10 @@ class DialogHSMApi
     private const URL_BLOCKED     = 'blocked';
     private const URL_DNS_FAILURE = 'dns_failure';
 
+    // A Meta aceita de 2 a 10 cards num carrossel.
+    private const CAROUSEL_MIN_CARDS = 2;
+    private const CAROUSEL_MAX_CARDS = 10;
+
     /** @var callable(string): string */
     private $hostnameResolver;
 
@@ -241,6 +245,14 @@ class DialogHSMApi
         $urlArquivo  = $data['url_arquivo'] ?? '';
         $buttons     = $data['buttons'] ?? '';
         $buttonsVars = $data['buttons_vars'] ?? '';
+        // Só uma lista vale: as ações de campanha montam o payload com pares rótulo => texto, e um rótulo "cards"
+        // (texto) nunca foi lido; continua ignorado.
+        $cards       = is_array($data['cards'] ?? null) ? $data['cards'] : [];
+
+        // Template de carrossel não tem header próprio: os dois juntos seria um payload que a Meta recusa.
+        if ([] !== $cards && '' !== $urlArquivo) {
+            throw new \InvalidArgumentException('cards e url_arquivo não podem ser usados juntos.');
+        }
 
         // Montar components
         $components = [];
@@ -272,6 +284,11 @@ class DialogHSMApi
                 'type'       => 'body',
                 'parameters' => $bodyParameters,
             ];
+        }
+
+        // Carousel component (se tem cards): vem depois do body, que fica fora do carrossel.
+        if ([] !== $cards) {
+            $components[] = $this->buildCarouselComponent($cards);
         }
 
         // Limited time offer component (se tem limited_time_offer)
@@ -338,6 +355,73 @@ class DialogHSMApi
                 'language'   => ['code' => $data['language'] ?? 'pt_BR'],
                 'components' => $components,
             ],
+        ];
+    }
+
+    /**
+     * Monta o componente carousel a partir de cards de imagem: [{card_index?, header_image_link}, ...].
+     * A Meta exige de 2 a 10 cards, e o envio tem de ter o mesmo número de cards do template aprovado (isso só a Meta sabe).
+     *
+     * @param array<mixed> $cards
+     *
+     * @return array{type: string, cards: list<array<string, mixed>>}
+     *
+     * @throws \InvalidArgumentException dado inválido é erro permanente: retry não resolve
+     */
+    private function buildCarouselComponent(array $cards): array
+    {
+        if (count($cards) < self::CAROUSEL_MIN_CARDS || count($cards) > self::CAROUSEL_MAX_CARDS) {
+            throw new \InvalidArgumentException(sprintf(
+                'o carrossel exige de %d a %d cards.',
+                self::CAROUSEL_MIN_CARDS,
+                self::CAROUSEL_MAX_CARDS
+            ));
+        }
+
+        $built = [];
+        foreach (array_values($cards) as $position => $card) {
+            $built[] = $this->buildCarouselCard($position, is_array($card) ? $card : []);
+        }
+
+        return ['type' => 'carousel', 'cards' => $built];
+    }
+
+    /**
+     * Um card: o header de imagem.
+     * O link só precisa ser https (sem exigir extensão): uma CDN pode servir a imagem sem ela, e o que o formulário
+     * de templates aceita tem de chegar à API.
+     *
+     * @param array<string, mixed> $card
+     *
+     * @return array<string, mixed>
+     *
+     * @throws \InvalidArgumentException
+     */
+    private function buildCarouselCard(int $position, array $card): array
+    {
+        // card_index segue a posição, de 0 em diante e sem pular: a Meta lê o índice como a ordem dos cards.
+        $index = $card['card_index'] ?? $position;
+        if (filter_var($index, FILTER_VALIDATE_INT) !== $position) {
+            throw new \InvalidArgumentException(sprintf(
+                'card_index inválido na posição %d: esperado %d, recebido %s. Os índices começam em 0 e seguem em ordem.',
+                $position,
+                $position,
+                is_scalar($index) ? (string) $index : gettype($index)
+            ));
+        }
+
+        $link   = trim((string) ($card['header_image_link'] ?? ''));
+        $parsed = parse_url($link);
+        if ('https' !== strtolower($parsed['scheme'] ?? '') || empty($parsed['host'])) {
+            throw new \InvalidArgumentException(sprintf('o card %d precisa de um link de imagem https.', $position));
+        }
+
+        return [
+            'card_index' => $position,
+            'components' => [[
+                'type'       => 'header',
+                'parameters' => [['type' => 'image', 'image' => ['link' => $link]]],
+            ]],
         ];
     }
 
