@@ -937,4 +937,188 @@ class DialogHsmApiTest extends TestCase
         $this->assertEquals('image', $components[0]['parameters'][0]['type']);
     }
 
+    // =========================================================================
+    // Componente carousel — cards de imagem
+    // =========================================================================
+
+    /**
+     * Envia pela API com os dados padrão do template.
+     *
+     * @param array<string, mixed> $data
+     *
+     * @return array<string, mixed> o resultado de sendMessage
+     */
+    private function send(array $data): array
+    {
+        return $this->api->sendMessage('API_KEY', 'https://api.360dialog.com/v1/messages', '11999999999', $data + [
+            'content'  => 'nome_template',
+            'language' => 'pt_BR',
+        ]);
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     *
+     * @return array<string, mixed> o payload enviado à API
+     */
+    private function sendAndCapture(array $data): array
+    {
+        $captured = null;
+
+        $this->mockClient->method('request')
+            ->willReturnCallback(function (string $m, string $u, array $options) use (&$captured) {
+                $captured = $options['json'];
+
+                return new Response(200, [], json_encode(['messages' => [['id' => 'abc']]]));
+            });
+
+        $this->send($data);
+
+        return $captured;
+    }
+
+    /**
+     * @param array<string, mixed> $result o resultado de sendMessage
+     */
+    private function assertRefused(array $result, string $needle): void
+    {
+        $this->assertFalse($result['success']);
+        $this->assertFalse($result['retryable']);
+        $this->assertStringContainsString($needle, $result['error']);
+    }
+
+    /**
+     * @return list<array{card_index: int, header_image_link: string}>
+     */
+    private static function cards(int $count): array
+    {
+        $cards = [];
+        for ($i = 0; $i < $count; ++$i) {
+            $cards[] = ['card_index' => $i, 'header_image_link' => "https://example.com/card{$i}.png"];
+        }
+
+        return $cards;
+    }
+
+    public function testCarouselComponentIsBuiltFromCards(): void
+    {
+        $payload  = $this->sendAndCapture(['vars' => 'nome', 'nome' => 'Ana', 'cards' => self::cards(3)]);
+        $carousel = $payload['template']['components'][1];
+
+        $this->assertSame(['body', 'carousel'], array_column($payload['template']['components'], 'type'));
+        $this->assertCount(3, $carousel['cards']);
+        foreach ($carousel['cards'] as $i => $card) {
+            $this->assertSame([
+                'card_index' => $i,
+                'components' => [[
+                    'type'       => 'header',
+                    'parameters' => [['type' => 'image', 'image' => ['link' => "https://example.com/card{$i}.png"]]],
+                ]],
+            ], $card);
+        }
+    }
+
+    public function testCarouselWithoutBodyVariablesHasNoBodyComponent(): void
+    {
+        $payload = $this->sendAndCapture(['cards' => self::cards(2)]);
+
+        $this->assertSame(['carousel'], array_column($payload['template']['components'], 'type'));
+    }
+
+    public function testNoCardsMeansNoCarouselComponent(): void
+    {
+        $payload = $this->sendAndCapture(['vars' => 'nome', 'nome' => 'Ana']);
+
+        $this->assertNotContains('carousel', array_column($payload['template']['components'], 'type'));
+    }
+
+    public function testATextCardsLabelFromACampaignPayloadIsNotACarousel(): void
+    {
+        // As ações de campanha montam o payload com pares rótulo => texto: um rótulo "cards" já era uma variável comum
+        // do corpo e continua sendo. Só uma lista vira carrossel.
+        $payload = $this->sendAndCapture(['vars' => 'nome,cards', 'nome' => 'Ana', 'cards' => 'qualquer coisa']);
+
+        $this->assertSame(['body'], array_column($payload['template']['components'], 'type'));
+        $this->assertSame('qualquer coisa', $payload['template']['components'][0]['parameters'][1]['text']);
+    }
+
+    public function testCardIndexDefaultsToThePositionOfTheCard(): void
+    {
+        $payload = $this->sendAndCapture(['cards' => [
+            ['header_image_link' => 'https://example.com/a.png'],
+            ['header_image_link' => 'https://example.com/b.png'],
+        ]]);
+
+        $this->assertSame([0, 1], array_column($payload['template']['components'][0]['cards'], 'card_index'));
+    }
+
+    public function testCardLinkWithoutImageExtensionIsAccepted(): void
+    {
+        // O que o formulário de templates aceita (https) tem de chegar à API: uma CDN pode servir a imagem sem extensão.
+        $payload = $this->sendAndCapture(['cards' => [
+            ['header_image_link' => 'https://cdn.example.com/media/123'],
+            ['header_image_link' => 'https://cdn.example.com/media/456'],
+        ]]);
+
+        $this->assertSame(
+            'https://cdn.example.com/media/123',
+            $payload['template']['components'][0]['cards'][0]['components'][0]['parameters'][0]['image']['link']
+        );
+    }
+
+    public function testTenCardsAreAccepted(): void
+    {
+        $payload = $this->sendAndCapture(['cards' => self::cards(10)]);
+
+        $this->assertCount(10, $payload['template']['components'][0]['cards']);
+    }
+
+    /**
+     * Dado inválido é erro permanente e a API nem é chamada.
+     *
+     * @return array<string, array{0: array<string, mixed>, 1: string}> [dados do payload, trecho do erro]
+     */
+    public static function invalidCardsProvider(): array
+    {
+        $outOfOrder                         = self::cards(3);
+        $outOfOrder[2]['card_index']        = 3;
+        $nonNumeric                         = self::cards(2);
+        $nonNumeric[0]['card_index']        = 'abc'; // (int) 'abc' é 0: sem a checagem de número passaria na posição 0
+        $decimal                            = self::cards(2);
+        $decimal[1]['card_index']           = 1.9;   // (int) 1.9 é 1: sem a checagem de inteiro passaria na posição 1
+        $scientific                         = self::cards(2);
+        $scientific[1]['card_index']        = '1e0'; // is_numeric aceita notação científica
+        $http                               = self::cards(2);
+        $http[1]['header_image_link']       = 'http://example.com/card1.png';
+        $noHost                             = self::cards(2);
+        $noHost[0]['header_image_link']     = 'https:/arquivo.png'; // esquema https, nenhum servidor
+        $noLink                             = self::cards(2);
+        unset($noLink[0]['header_image_link']);
+
+        return [
+            'um card só'            => [['cards' => self::cards(1)], 'o carrossel exige de 2 a 10 cards'],
+            'onze cards'            => [['cards' => self::cards(11)], 'o carrossel exige de 2 a 10 cards'],
+            'card_index fora de ordem' => [['cards' => $outOfOrder], 'card_index inválido na posição 2'],
+            'card_index não numérico' => [['cards' => $nonNumeric], 'card_index inválido na posição 0'],
+            'card_index decimal'    => [['cards' => $decimal], 'card_index inválido na posição 1'],
+            'card_index em notação científica' => [['cards' => $scientific], 'card_index inválido na posição 1'],
+            'link http'             => [['cards' => $http], 'o card 1 precisa de um link de imagem https'],
+            'link sem host'         => [['cards' => $noHost], 'o card 0 precisa de um link de imagem https'],
+            'card sem link'         => [['cards' => $noLink], 'o card 0 precisa de um link de imagem https'],
+            // Template de carrossel não tem header próprio: os dois juntos formam um payload que a Meta recusa.
+            'cards com url_arquivo' => [['cards' => self::cards(2), 'url_arquivo' => 'https://example.com/image.jpg'], 'cards e url_arquivo não podem ser usados juntos'],
+        ];
+    }
+
+    /**
+     * @dataProvider invalidCardsProvider
+     *
+     * @param array<string, mixed> $data
+     */
+    public function testInvalidCardsAreRefusedWithoutARequest(array $data, string $needle): void
+    {
+        $this->mockClient->expects($this->never())->method('request');
+
+        $this->assertRefused($this->send($data), $needle);
+    }
 }

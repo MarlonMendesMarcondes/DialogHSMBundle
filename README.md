@@ -104,6 +104,22 @@ nome     = {contactfield=firstname}
 
 `content` é o nome do template. Os demais itens são as variáveis, na ordem em que aparecem.
 
+**Template de carrossel** (de 2 a 10 cards de imagem): quem chama a `DialogHSMApi::sendMessage` por código, como uma integração, passa `cards` no payload. As ações de campanha acima montam o payload só com pares rótulo → texto e não preenchem `cards`.
+
+```php
+'cards' => [
+    ['card_index' => 0, 'header_image_link' => 'https://cdn.exemplo.com/a.png'],
+    ['card_index' => 1, 'header_image_link' => 'https://cdn.exemplo.com/b.png'],
+],
+```
+
+- O payload leva o `body` (se houver variáveis) e depois o componente `carousel`. Cada card leva o header de imagem. Botão por card com variável (URL dinâmica) não é suportado.
+- `card_index` é opcional e, quando vem, tem de seguir a posição: de 0 em diante e sem pular.
+- O link do card só precisa ser `https`. Não exige extensão de arquivo.
+- O envio tem de ter o mesmo número de cards do template aprovado na Meta. Só a Meta sabe esse número: a API do plugin só confere o intervalo de 2 a 10.
+- `cards` e `url_arquivo` não valem juntos: o template de carrossel não tem header próprio. Dado inválido é erro permanente (sem retry).
+- Um rótulo chamado `cards` com texto, vindo de uma ação de campanha, não é um carrossel: continua valendo só como variável do corpo, como antes.
+
 ### Decisões
 
 | Decisão | Dispara quando |
