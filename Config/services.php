@@ -43,8 +43,12 @@ return function (ContainerConfigurator $configurator): void {
         ->arg('$directTransportDsn', '%env(MAUTIC_MESSENGER_DSN_WHATSAPP_DIRECT)%');
 
     // Substitui o serviço buggy do core (ver CampaignAuditServiceFix::addWarningForUnpublishedEmails).
-    $services->set(\Mautic\CampaignBundle\Service\CampaignAuditService::class, \MauticPlugin\DialogHSMBundle\Service\CampaignAuditServiceFix::class)
-        ->autowire();
+    // Só no Mautic 5 (construtor com 4 argumentos): o Mautic 7 usa outra query (JOIN, sem "IN ()") e outro construtor,
+    // e o override quebraria com TypeError ao salvar qualquer campanha.
+    if (4 === (new \ReflectionClass(\Mautic\CampaignBundle\Service\CampaignAuditService::class))->getConstructor()?->getNumberOfParameters()) {
+        $services->set(\Mautic\CampaignBundle\Service\CampaignAuditService::class, \MauticPlugin\DialogHSMBundle\Service\CampaignAuditServiceFix::class)
+            ->autowire();
+    }
 
     $services->set(\MauticPlugin\DialogHSMBundle\EventListener\ApiKeyEncryptionSubscriber::class)
         ->autowire()
