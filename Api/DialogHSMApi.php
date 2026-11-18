@@ -6,6 +6,7 @@ namespace MauticPlugin\DialogHSMBundle\Api;
 
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\RequestException;
+use MauticPlugin\DialogHSMBundle\Service\TemplateCategoryResolver;
 use Psr\Log\LoggerInterface;
 
 class DialogHSMApi
@@ -27,6 +28,7 @@ class DialogHSMApi
 
     private const MARKETING_MESSAGES_PATH = 'marketing_messages';
     private const ERROR_MARKETING_ONLY    = 131055;
+    private const CATEGORY_MARKETING      = 'MARKETING';
 
     /** @var callable(string): string */
     private $hostnameResolver;
@@ -47,6 +49,7 @@ class DialogHSMApi
         private Client $httpClient,
         private LoggerInterface $logger,
         ?callable $hostnameResolver = null,
+        private ?TemplateCategoryResolver $categoryResolver = null,
     ) {
         $this->hostnameResolver = $hostnameResolver ?? static fn (string $h): string => gethostbyname($h);
     }
@@ -67,9 +70,19 @@ class DialogHSMApi
             return $this->send($apiKey, $url, $mobile, $payloadData);
         }
 
-        $memoKey = $url."\n".($payloadData['content'] ?? '');
+        $templateName = (string) ($payloadData['content'] ?? '');
+        $memoKey      = $url."\n".$templateName;
 
         if (isset($this->rejectedByMarketingEndpoint[$memoKey])) {
+            return $this->send($apiKey, $fallbackUrl, $mobile, $payloadData);
+        }
+
+        // O endpoint de Marketing Messages só aceita template de categoria MARKETING. Com a
+        // categoria conhecida, utilidade e autenticação já saem pelo /messages; desconhecida,
+        // tenta o MM e o tratamento do 131055 abaixo corrige a rota.
+        $category = $this->categoryResolver?->getCategory($apiKey, $url, $templateName);
+
+        if (null !== $category && self::CATEGORY_MARKETING !== $category) {
             return $this->send($apiKey, $fallbackUrl, $mobile, $payloadData);
         }
 
@@ -79,14 +92,14 @@ class DialogHSMApi
             return $result;
         }
 
-        // O endpoint de Marketing Messages só aceita template de categoria MARKETING (utilidade e
-        // autenticação voltam com 131055) e também recusa número sem os termos do MM aceitos. Em
-        // ambos os casos o /messages do mesmo host envia normalmente. A resposta vale para o
-        // template: os próximos envios dele neste worker já vão direto para o /messages.
+        // 131055 vem de template que não é de marketing com a categoria desconhecida ou
+        // desatualizada (a Meta reclassifica templates) e também de número sem os termos do MM
+        // aceitos. Em todos os casos o /messages do mesmo host envia normalmente. A resposta vale
+        // para o template: os próximos envios dele neste worker já vão direto para o /messages.
         $this->rejectedByMarketingEndpoint[$memoKey] = true;
 
         $this->logger->info('DialogHSM: template recusado pelo endpoint de Marketing Messages — reenviando por /messages', [
-            'template' => $payloadData['content'] ?? '',
+            'template' => $templateName,
             'error'    => $result['error'],
         ]);
 

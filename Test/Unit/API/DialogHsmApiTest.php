@@ -733,6 +733,97 @@ class DialogHsmApiTest extends TestCase
         $this->assertTrue($result['retryable']);
     }
 
+    // =========================================================================
+    // Roteamento pela categoria do template
+    // =========================================================================
+
+    /**
+     * @param array<int, string> $urls recebe as URLs chamadas, na ordem
+     */
+    private function apiWithCategory(?string $category, array &$urls): DialogHSMApi
+    {
+        $resolver = $this->createMock(\MauticPlugin\DialogHSMBundle\Service\TemplateCategoryResolver::class);
+        $resolver->method('getCategory')->willReturn($category);
+
+        $this->mockClient->method('request')
+            ->willReturnCallback(function (string $m, string $url) use (&$urls) {
+                $urls[] = $url;
+
+                return new Response(200, [], json_encode(['messages' => [['id' => 'wamid.cat']]]));
+            });
+
+        return new DialogHSMApi($this->mockClient, $this->mockLogger, self::createDnsResolver(), $resolver);
+    }
+
+    public function testUtilityTemplateGoesStraightToMessages(): void
+    {
+        $urls   = [];
+        $result = $this->apiWithCategory('UTILITY', $urls)
+            ->sendMessage('API_KEY', self::MM_URL, '11999999999', ['content' => 'cs_ativacao_disc1', 'language' => 'pt_BR']);
+
+        $this->assertTrue($result['success']);
+        $this->assertSame([self::MESSAGES_URL], $urls);
+    }
+
+    public function testAuthenticationTemplateGoesStraightToMessages(): void
+    {
+        $urls = [];
+        $this->apiWithCategory('AUTHENTICATION', $urls)
+            ->sendMessage('API_KEY', self::MM_URL, '11999999999', ['content' => 'otp', 'language' => 'pt_BR']);
+
+        $this->assertSame([self::MESSAGES_URL], $urls);
+    }
+
+    public function testMarketingCategoryKeepsMarketingEndpoint(): void
+    {
+        $urls = [];
+        $this->apiWithCategory('MARKETING', $urls)
+            ->sendMessage('API_KEY', self::MM_URL, '11999999999', ['content' => 'promo', 'language' => 'pt_BR']);
+
+        $this->assertSame([self::MM_URL], $urls);
+    }
+
+    public function testUnknownCategoryKeepsMarketingEndpoint(): void
+    {
+        $urls = [];
+        $this->apiWithCategory(null, $urls)
+            ->sendMessage('API_KEY', self::MM_URL, '11999999999', ['content' => 'novo', 'language' => 'pt_BR']);
+
+        $this->assertSame([self::MM_URL], $urls);
+    }
+
+    public function testCategoryIsNotConsultedForMessagesEndpoint(): void
+    {
+        $resolver = $this->createMock(\MauticPlugin\DialogHSMBundle\Service\TemplateCategoryResolver::class);
+        $resolver->expects($this->never())->method('getCategory');
+        $this->mockClient->method('request')->willReturn(new Response(200, [], json_encode(['messages' => [['id' => 'w']]])));
+
+        (new DialogHSMApi($this->mockClient, $this->mockLogger, self::createDnsResolver(), $resolver))
+            ->sendMessage('API_KEY', self::MESSAGES_URL, '11999999999', ['content' => 'promo', 'language' => 'pt_BR']);
+    }
+
+    public function testStaleMarketingCategoryStillFallsBackOn131055(): void
+    {
+        $resolver = $this->createMock(\MauticPlugin\DialogHSMBundle\Service\TemplateCategoryResolver::class);
+        $resolver->method('getCategory')->willReturn('MARKETING');
+
+        $urls = [];
+        $this->mockClient->expects($this->exactly(2))->method('request')
+            ->willReturnCallback(function (string $m, string $url) use (&$urls) {
+                $urls[] = $url;
+
+                return 1 === count($urls)
+                    ? self::marketingOnlyRejection()
+                    : new Response(200, [], json_encode(['messages' => [['id' => 'wamid.x']]]));
+            });
+
+        $result = (new DialogHSMApi($this->mockClient, $this->mockLogger, self::createDnsResolver(), $resolver))
+            ->sendMessage('API_KEY', self::MM_URL, '11999999999', ['content' => 'reclassificado', 'language' => 'pt_BR']);
+
+        $this->assertTrue($result['success']);
+        $this->assertSame([self::MM_URL, self::MESSAGES_URL], $urls);
+    }
+
     public function testMetaCloudPayloadFormatIsIdenticalTo360dialog(): void
     {
         $payloadDialog = null;
