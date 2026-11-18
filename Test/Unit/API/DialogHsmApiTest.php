@@ -597,6 +597,142 @@ class DialogHsmApiTest extends TestCase
         $this->assertStringContainsString('Invalid OAuth access token', $result['error']);
     }
 
+    // =========================================================================
+    // Endpoint de Marketing Messages — fallback para /messages
+    // =========================================================================
+
+    private const MM_URL       = 'https://waba-v2.360dialog.io/marketing_messages';
+    private const MESSAGES_URL = 'https://waba-v2.360dialog.io/messages';
+
+    private static function marketingOnlyRejection(): Response
+    {
+        return new Response(400, [], json_encode(['error' => [
+            'message'    => '(#131055) Method not allowed',
+            'type'       => 'OAuthException',
+            'code'       => 131055,
+            'error_data' => ['messaging_product' => 'whatsapp', 'details' => 'Only marketing template messages are supported'],
+        ]]));
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function sendTo(string $url, string $template = 'cs_ativacao_disc1'): array
+    {
+        return $this->api->sendMessage('API_KEY', $url, '11999999999', ['content' => $template, 'language' => 'pt_BR']);
+    }
+
+    public function testUtilityTemplateRejectedByMarketingEndpointIsResentToMessages(): void
+    {
+        $urls = [];
+        $this->mockClient->expects($this->exactly(2))->method('request')
+            ->willReturnCallback(function (string $m, string $url) use (&$urls) {
+                $urls[] = $url;
+
+                return 1 === count($urls)
+                    ? self::marketingOnlyRejection()
+                    : new Response(200, [], json_encode(['messages' => [['id' => 'wamid.utility']]]));
+            });
+
+        $result = $this->sendTo(self::MM_URL);
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('wamid.utility', $result['wamid']);
+        $this->assertSame([self::MM_URL, self::MESSAGES_URL], $urls);
+    }
+
+    public function testRejectedTemplateGoesStraightToMessagesOnNextSend(): void
+    {
+        $urls = [];
+        $this->mockClient->expects($this->exactly(3))->method('request')
+            ->willReturnCallback(function (string $m, string $url) use (&$urls) {
+                $urls[] = $url;
+
+                return 1 === count($urls)
+                    ? self::marketingOnlyRejection()
+                    : new Response(200, [], json_encode(['messages' => [['id' => 'wamid.x']]]));
+            });
+
+        $this->sendTo(self::MM_URL);
+        $this->sendTo(self::MM_URL);
+
+        $this->assertSame([self::MM_URL, self::MESSAGES_URL, self::MESSAGES_URL], $urls);
+    }
+
+    public function testRejectionOfOneTemplateDoesNotRerouteOthers(): void
+    {
+        $urls = [];
+        $this->mockClient->expects($this->exactly(3))->method('request')
+            ->willReturnCallback(function (string $m, string $url) use (&$urls) {
+                $urls[] = $url;
+
+                return 1 === count($urls)
+                    ? self::marketingOnlyRejection()
+                    : new Response(200, [], json_encode(['messages' => [['id' => 'wamid.x']]]));
+            });
+
+        $this->sendTo(self::MM_URL, 'cs_ativacao_disc1');
+        $this->sendTo(self::MM_URL, 'promo_black_friday');
+
+        $this->assertSame([self::MM_URL, self::MESSAGES_URL, self::MM_URL], $urls);
+    }
+
+    public function testMarketingTemplateStaysOnMarketingEndpoint(): void
+    {
+        $urls = [];
+        $this->mockClient->expects($this->once())->method('request')
+            ->willReturnCallback(function (string $m, string $url) use (&$urls) {
+                $urls[] = $url;
+
+                return new Response(200, [], json_encode(['messages' => [['id' => 'wamid.mkt']]]));
+            });
+
+        $result = $this->sendTo(self::MM_URL.'/');
+
+        $this->assertTrue($result['success']);
+        $this->assertSame([self::MM_URL], $urls);
+    }
+
+    public function testOtherMarketingEndpointErrorIsNotRetriedOnMessages(): void
+    {
+        $this->mockClient->expects($this->once())->method('request')
+            ->willReturn(new Response(400, [], json_encode(['error' => ['message' => '(#132001) Template name does not exist', 'code' => 132001]])));
+
+        $result = $this->sendTo(self::MM_URL);
+
+        $this->assertFalse($result['success']);
+        $this->assertSame(400, $result['http_status']);
+    }
+
+    public function testMessagesEndpointErrorWithSameCodeIsNotRetried(): void
+    {
+        $this->mockClient->expects($this->once())->method('request')
+            ->willReturn(self::marketingOnlyRejection());
+
+        $result = $this->sendTo(self::MESSAGES_URL);
+
+        $this->assertFalse($result['success']);
+    }
+
+    public function testFallbackFailureIsReturnedAsTheResult(): void
+    {
+        $urls = [];
+        $this->mockClient->expects($this->exactly(2))->method('request')
+            ->willReturnCallback(function (string $m, string $url) use (&$urls) {
+                $urls[] = $url;
+
+                return 1 === count($urls)
+                    ? self::marketingOnlyRejection()
+                    : new Response(503, [], json_encode(['error' => ['message' => 'Service unavailable']]));
+            });
+
+        $result = $this->sendTo(self::MM_URL);
+
+        $this->assertFalse($result['success']);
+        $this->assertSame(503, $result['http_status']);
+        $this->assertTrue($result['retryable']);
+    }
+
     public function testMetaCloudPayloadFormatIsIdenticalTo360dialog(): void
     {
         $payloadDialog = null;

@@ -25,8 +25,19 @@ class DialogHSMApi
     private const CAROUSEL_MIN_CARDS = 2;
     private const CAROUSEL_MAX_CARDS = 10;
 
+    private const MARKETING_MESSAGES_PATH = 'marketing_messages';
+    private const ERROR_MARKETING_ONLY    = 131055;
+
     /** @var callable(string): string */
     private $hostnameResolver;
+
+    /**
+     * URL de marketing + template já recusados com 131055. O serviço vive o processo inteiro do
+     * worker, então só o primeiro envio de cada template paga a tentativa recusada.
+     *
+     * @var array<string, true>
+     */
+    private array $rejectedByMarketingEndpoint = [];
 
     /**
      * @param callable(string): string|null $hostnameResolver Injetável para testes (evita DNS real).
@@ -49,7 +60,58 @@ class DialogHSMApi
      */
     public function sendMessage(string $apiKey, string $baseUrl, string $mobile, array $payloadData): array
     {
-        $url = rtrim($baseUrl, '/');
+        $url         = rtrim($baseUrl, '/');
+        $fallbackUrl = $this->messagesUrlFor($url);
+
+        if (null === $fallbackUrl) {
+            return $this->send($apiKey, $url, $mobile, $payloadData);
+        }
+
+        $memoKey = $url."\n".($payloadData['content'] ?? '');
+
+        if (isset($this->rejectedByMarketingEndpoint[$memoKey])) {
+            return $this->send($apiKey, $fallbackUrl, $mobile, $payloadData);
+        }
+
+        $result = $this->send($apiKey, $url, $mobile, $payloadData);
+
+        if (self::ERROR_MARKETING_ONLY !== ($result['response']['error']['code'] ?? null)) {
+            return $result;
+        }
+
+        // O endpoint de Marketing Messages só aceita template de categoria MARKETING (utilidade e
+        // autenticação voltam com 131055) e também recusa número sem os termos do MM aceitos. Em
+        // ambos os casos o /messages do mesmo host envia normalmente. A resposta vale para o
+        // template: os próximos envios dele neste worker já vão direto para o /messages.
+        $this->rejectedByMarketingEndpoint[$memoKey] = true;
+
+        $this->logger->info('DialogHSM: template recusado pelo endpoint de Marketing Messages — reenviando por /messages', [
+            'template' => $payloadData['content'] ?? '',
+            'error'    => $result['error'],
+        ]);
+
+        return $this->send($apiKey, $fallbackUrl, $mobile, $payloadData);
+    }
+
+    /**
+     * URL de /messages equivalente a uma URL de /marketing_messages; null para qualquer outra.
+     */
+    private function messagesUrlFor(string $url): ?string
+    {
+        if (!str_ends_with($url, '/'.self::MARKETING_MESSAGES_PATH)) {
+            return null;
+        }
+
+        return substr($url, 0, -strlen(self::MARKETING_MESSAGES_PATH)).'messages';
+    }
+
+    /**
+     * @param array<string, mixed> $payloadData
+     *
+     * @return array{success: bool, response: array|null, error: string|null, http_status: int|null, wamid: string|null, retryable: bool}
+     */
+    private function send(string $apiKey, string $url, string $mobile, array $payloadData): array
+    {
 
         // DIALOGHSM_DISABLE_SSRF_CHECK=1 desativa a validação SSRF.
         // Usar APENAS em desenvolvimento local com fake API.
