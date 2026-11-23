@@ -1911,6 +1911,100 @@ class CampaignSubscriberActionTest extends TestCase
     }
 
     /**
+     * @return array<string, mixed>
+     */
+    private function captureInlinePayload(array $config, ?Lead $contact = null): array
+    {
+        $this->enableIntegration();
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
+
+        $captured = null;
+        $this->mockDirectBatchHandler->method('__invoke')
+            ->willReturnCallback(function (SendWhatsAppDirectBatchMessage $batch) use (&$captured): array {
+                $captured = $batch->items[0];
+
+                return [['success' => true]];
+            });
+
+        $event = $this->buildPendingEvent(CampaignSubscriber::ACTION_SEND, [1 => $contact ?? $this->buildContact()], $config);
+        $event->expects($this->once())->method('pass');
+
+        $this->subscriber->onCampaignTriggerAction($event);
+
+        $this->assertNotNull($captured, 'A mensagem deveria ter sido montada.');
+
+        return $captured->payloadData;
+    }
+
+    /**
+     * Formulário guiado (ações novas): template, idioma, variáveis, mídia e botões viram os
+     * mesmos pares que o Payload Data manual produzia — o envio não muda.
+     */
+    public function testGuidedTemplateFieldsBecomeTheUsualPayload(): void
+    {
+        $contact = $this->createMock(Lead::class);
+        $contact->method('getLeadPhoneNumber')->willReturn('+5511999999999');
+        $contact->method('getId')->willReturn(1);
+        $contact->method('getProfileFields')->willReturn(['firstname' => 'Maria']);
+
+        $payload = $this->captureInlinePayload([
+            'payload_data' => [],
+            'hsm_template' => 'boas_vindas',
+            'hsm_language' => 'pt_BR',
+            'hsm_params'   => json_encode([
+                'header'  => 'https://cdn.example.com/banner.jpg',
+                'body'    => ['{contactfield=firstname}', 'Direito'],
+                'buttons' => ['1' => ['type' => 'url', 'value' => 'abc123']],
+            ]),
+        ], $contact);
+
+        $this->assertSame('boas_vindas', $payload['content']);
+        $this->assertSame('pt_BR', $payload['language']);
+        $this->assertSame('{{1}},{{2}}', $payload['vars']);
+        $this->assertSame('Maria', $payload['{{1}}']);
+        $this->assertSame('Direito', $payload['{{2}}']);
+        $this->assertSame('https://cdn.example.com/banner.jpg', $payload['url_arquivo']);
+        $this->assertSame(',url', $payload['buttons'], 'Botão 0 sem variável fica com posição vazia.');
+        $this->assertSame(',abc123', $payload['buttons_vars']);
+        $this->assertSame(['{{1}}' => '{contactfield=firstname}'], $payload['_tokens']);
+    }
+
+    public function testGuidedFieldsWithoutLanguageDefaultToPtBrAndKeepAdvancedPairs(): void
+    {
+        $payload = $this->captureInlinePayload([
+            'hsm_template' => 'promo',
+            'hsm_language' => '',
+            'hsm_params'   => '',
+            'payload_data' => ['list' => [
+                ['label' => 'limited_time_offer', 'value' => '2026-12-31 23:59:00'],
+                ['label' => 'content', 'value' => 'outro_template'],
+            ]],
+        ]);
+
+        $this->assertSame('promo', $payload['content'], 'Campo guiado tem prioridade sobre rótulo repetido no avançado.');
+        $this->assertSame('pt_BR', $payload['language']);
+        $this->assertSame('2026-12-31 23:59:00', $payload['limited_time_offer']);
+        $this->assertArrayNotHasKey('vars', $payload);
+    }
+
+    public function testGuidedActionWithoutTemplateIsABuildErrorNotASend(): void
+    {
+        $this->enableIntegration();
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
+        $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
+
+        $event = $this->buildPendingEvent(CampaignSubscriber::ACTION_SEND, [1 => $this->buildContact()], [
+            'payload_data' => [],
+            'hsm_template' => '',
+            'hsm_params'   => '{"body":["x"]}',
+        ]);
+        $event->expects($this->never())->method('pass');
+        $event->expects($this->once())->method('fail');
+
+        $this->subscriber->onCampaignTriggerAction($event);
+    }
+
+    /**
      * Re-execução: log com status 'pending_webhook' dentro do timeout → pass() sem reenvio.
      * Deixar o contato sem decisão faria o core lançar LogNotProcessedException e abortar
      * o lote inteiro.

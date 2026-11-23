@@ -125,4 +125,24 @@ class DialogHsmApiPreflightTest extends TestCase
         $this->assertTrue($this->api->sendMessage('KEY', self::URL, '+5511999990000', self::payloadData())['success']);
     }
 
+    public function testEmptyButtonPositionKeepsTheTemplateIndexOfTheNextButton(): void
+    {
+        $this->validator->method('getMode')->willReturn(PartnerConfigProvider::PREFLIGHT_OFF);
+
+        $this->api->sendMessage('KEY', self::URL, '+5511999990000', [
+            'content'      => 'promo',
+            'buttons'      => ',url',
+            'buttons_vars' => ',abc123',
+        ]);
+
+        $buttons = array_values(array_filter(
+            $this->posted[0]['template']['components'],
+            static fn (array $c): bool => 'button' === $c['type']
+        ));
+
+        $this->assertCount(1, $buttons, 'Sem componente para o botão 0, que não tem variável.');
+        $this->assertSame(1, $buttons[0]['index']);
+        $this->assertSame('url', $buttons[0]['sub_type']);
+        $this->assertSame('abc123', $buttons[0]['parameters'][0]['text']);
+    }
 }

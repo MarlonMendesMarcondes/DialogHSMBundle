@@ -482,6 +482,12 @@ class DialogHSMApi
             $buttonVars  = '' !== $buttonsVars ? array_map('trim', explode(',', $buttonsVars)) : [];
 
             foreach ($buttonNodes as $idx => $buttonType) {
+                // Posição vazia ("," antes do tipo) = botão sem variável naquele índice. O índice
+                // enviado é a posição do botão no template, então os seguintes não podem andar.
+                if ('' === $buttonType) {
+                    continue;
+                }
+
                 $components[] = [
                     'type'       => 'button',
                     'sub_type'   => $buttonType,

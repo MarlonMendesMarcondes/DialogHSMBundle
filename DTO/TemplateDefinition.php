@@ -25,8 +25,10 @@ final class TemplateDefinition
     public const STATUS_APPROVED = 'APPROVED';
 
     /**
-     * @param list<array{type: string, vars: int|null}>                                                                      $buttons
+     * @param list<array{type: string, vars: int|null, text?: string}>                                                       $buttons
      * @param list<array{headerFormat: string|null, bodyVars: int|null, buttons: list<array{type: string, vars: int|null}>}>|null $carouselCards null = não é carrossel
+     * @param string|null                                                                                                     $headerText    texto do header TEXT, para a prévia no formulário
+     * @param string|null                                                                                                     $bodyText      texto do body com as {{n}}, para a prévia no formulário
      */
     public function __construct(
         public readonly string $name,
@@ -38,6 +40,9 @@ final class TemplateDefinition
         public readonly ?int $bodyVars,
         public readonly array $buttons,
         public readonly ?array $carouselCards,
+        public readonly ?string $headerText = null,
+        public readonly ?string $bodyText = null,
+        public readonly ?string $footerText = null,
     ) {
     }
 
@@ -62,6 +67,9 @@ final class TemplateDefinition
         $bodyVars      = 0;
         $buttons       = [];
         $carouselCards = null;
+        $headerText    = null;
+        $bodyText      = null;
+        $footerText    = null;
 
         foreach (is_array($template['components'] ?? null) ? $template['components'] : [] as $component) {
             if (!is_array($component)) {
@@ -74,9 +82,14 @@ final class TemplateDefinition
                     $headerVars   = self::HEADER_TEXT === $headerFormat
                         ? self::countVars($component['text'] ?? '', $named)
                         : 0;
+                    $headerText   = is_string($component['text'] ?? null) ? $component['text'] : null;
                     break;
                 case 'BODY':
                     $bodyVars = self::countVars($component['text'] ?? '', $named);
+                    $bodyText = is_string($component['text'] ?? null) ? $component['text'] : null;
+                    break;
+                case 'FOOTER':
+                    $footerText = is_string($component['text'] ?? null) ? $component['text'] : null;
                     break;
                 case 'BUTTONS':
                     $buttons = self::parseButtons($component['buttons'] ?? [], $named);
@@ -97,6 +110,9 @@ final class TemplateDefinition
             $bodyVars,
             $buttons,
             $carouselCards,
+            $headerText,
+            $bodyText,
+            $footerText,
         );
     }
 
@@ -115,6 +131,9 @@ final class TemplateDefinition
             'bodyVars'      => $this->bodyVars,
             'buttons'       => $this->buttons,
             'carouselCards' => $this->carouselCards,
+            'headerText'    => $this->headerText,
+            'bodyText'      => $this->bodyText,
+            'footerText'    => $this->footerText,
         ];
     }
 
@@ -133,6 +152,9 @@ final class TemplateDefinition
             $data['bodyVars'] ?? null,
             is_array($data['buttons'] ?? null) ? $data['buttons'] : [],
             is_array($data['carouselCards'] ?? null) ? $data['carouselCards'] : null,
+            $data['headerText'] ?? null,
+            $data['bodyText'] ?? null,
+            $data['footerText'] ?? null,
         );
     }
 
@@ -180,7 +202,7 @@ final class TemplateDefinition
                 default                       => null,
             };
 
-            $parsed[] = ['type' => $type, 'vars' => $vars];
+            $parsed[] = ['type' => $type, 'vars' => $vars, 'text' => (string) (is_array($button) ? ($button['text'] ?? '') : '')];
         }
 
         return $parsed;

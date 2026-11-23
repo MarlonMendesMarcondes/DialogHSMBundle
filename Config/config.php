@@ -27,6 +27,12 @@ return [
                 'controller' => 'MauticPlugin\DialogHSMBundle\Controller\WhatsAppNumberController::webhookRegisterAction',
                 'methods'    => ['POST'],
             ],
+            'mautic_dialoghsm_number_templates' => [
+                'path'       => '/dialoghsm/number-templates/{objectId}',
+                'controller' => 'MauticPlugin\DialogHSMBundle\Controller\WhatsAppNumberController::templatesAction',
+                'methods'    => ['GET'],
+                'requirements' => ['objectId' => '\d+'],
+            ],
             'mautic_dialoghsm_number_balance_check' => [
                 'path'       => '/dialoghsm/numbers/{objectId}/balance/check',
                 'controller' => 'MauticPlugin\DialogHSMBundle\Controller\WhatsAppNumberController::balanceCheckAction',

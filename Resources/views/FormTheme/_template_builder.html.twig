@@ -1,0 +1,464 @@
+{#
+  Construtor guiado de template: número, template (lista do número ou digitado), idioma, um campo
+  por variável e prévia no formato do WhatsApp. Usado pelo tema das ações de campanha novas.
+
+  Variáveis: builderId, numberField, nameField, languageField, paramsField (FormViews).
+
+  Os valores vão para paramsField em JSON; quem guarda e converte no payload é o servidor
+  (ver Service\TemplatePayload). O script roda inline: no construtor de campanha o formulário
+  chega por AJAX no modal e o jQuery executa scripts do conteúdo inserido.
+#}
+        {% set config = {
+        url: path('mautic_dialoghsm_number_templates', {objectId: 0}),
+        ids: {
+            number: numberField.vars.id,
+            name: nameField.vars.id,
+            language: languageField.vars.id,
+            params: paramsField.vars.id,
+        },
+        i18n: {
+            chooseNumber: 'dialoghsm.campaign.template.js.choose_number'|trans,
+            loading: 'dialoghsm.campaign.template.js.loading'|trans,
+            unavailable: 'dialoghsm.campaign.template.js.unavailable'|trans,
+            loaded: 'dialoghsm.campaign.template.js.loaded'|trans,
+            placeholder: 'dialoghsm.campaign.template.js.placeholder'|trans,
+            notInList: 'dialoghsm.campaign.template.js.not_in_list'|trans,
+            notApproved: 'dialoghsm.campaign.template.js.not_approved'|trans,
+            headerMedia: 'dialoghsm.campaign.template.js.header_media'|trans,
+            headerMediaHelp: 'dialoghsm.campaign.template.js.header_media_help'|trans,
+            headerTextVars: 'dialoghsm.campaign.template.js.header_text_vars'|trans,
+            headerLocation: 'dialoghsm.campaign.template.js.header_location'|trans,
+            variable: 'dialoghsm.campaign.template.js.variable'|trans,
+            variableHelp: 'dialoghsm.campaign.template.js.variable_help'|trans,
+            namedVars: 'dialoghsm.campaign.template.js.named_vars'|trans,
+            button: 'dialoghsm.campaign.template.js.button'|trans,
+            buttonUrlHelp: 'dialoghsm.campaign.template.js.button_url_help'|trans,
+            buttonUnknown: 'dialoghsm.campaign.template.js.button_unknown'|trans,
+            carousel: 'dialoghsm.campaign.template.js.carousel'|trans,
+            noVariables: 'dialoghsm.campaign.template.js.no_variables'|trans,
+            addVariable: 'dialoghsm.campaign.template.js.add_variable'|trans,
+            remove: 'dialoghsm.campaign.template.js.remove'|trans,
+            preview: 'dialoghsm.campaign.template.js.preview'|trans,
+            refresh: 'dialoghsm.campaign.template.js.refresh'|trans,
+        },
+    } %}
+
+    <div id="{{ builderId }}" class="dialoghsm-template-builder" data-config="{{ config|json_encode|e('html_attr') }}">
+        {{ form_row(numberField) }}
+
+        <div class="form-group" data-role="select-row" style="display:none;">
+            <label class="control-label" for="{{ builderId }}_select">{{ 'dialoghsm.campaign.template.name'|trans }}</label>
+            <div class="input-group">
+                <select id="{{ builderId }}_select" class="form-control" data-role="template-select"></select>
+                <span class="input-group-btn">
+                    <button type="button" class="btn btn-ghost" data-role="refresh" title="{{ 'dialoghsm.campaign.template.js.refresh'|trans }}">
+                        <i class="ri-refresh-line"></i>
+                    </button>
+                </span>
+            </div>
+        </div>
+
+        <div class="row" data-role="manual-row">
+            <div class="col-sm-8">{{ form_row(nameField) }}</div>
+            <div class="col-sm-4">{{ form_row(languageField) }}</div>
+        </div>
+
+        <p class="help-block" data-role="status"></p>
+
+        <div data-role="fields"></div>
+
+        {# Prévia no formato do WhatsApp: balão com cabeçalho, corpo formatado, rodapé e botões. #}
+        <style>
+            .dialoghsm-wa-preview { background: #efeae2; border-radius: 8px; padding: 16px; margin-bottom: 15px; }
+            .dialoghsm-wa-preview__title { font-size: 12px; color: #667781; margin-bottom: 8px; }
+            .dialoghsm-wa-bubble { background: #fff; color: #111b21; border-radius: 8px; max-width: 420px; box-shadow: 0 1px 0.5px rgba(11, 20, 26, .13); overflow: hidden; }
+            .dialoghsm-wa-bubble__media { background: #d1d7db; color: #54656f; height: 140px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 12px; gap: 4px; }
+            .dialoghsm-wa-bubble__media i { font-size: 32px; }
+            .dialoghsm-wa-bubble__media img { width: 100%; height: 100%; object-fit: cover; }
+            .dialoghsm-wa-bubble__header { font-weight: 600; padding: 8px 10px 0; }
+            .dialoghsm-wa-bubble__body { padding: 8px 10px; white-space: pre-wrap; word-wrap: break-word; font-size: 14px; line-height: 1.4; }
+            .dialoghsm-wa-bubble__footer { padding: 0 10px 8px; color: #667781; font-size: 12px; }
+            .dialoghsm-wa-bubble__button { border-top: 1px solid #e9edef; color: #027eb5; text-align: center; padding: 9px 10px; font-size: 14px; }
+            .dialoghsm-wa-var { background: #e7f3ff; color: #0b5394; border-radius: 4px; padding: 0 3px; }
+            .dialoghsm-wa-var--empty { background: #fff3cd; color: #856404; }
+            .dialoghsm-wa-var--token { background: #e8e1f5; color: #5b3e96; }
+            .dialoghsm-wa-bubble code { font-family: monospace; background: none; color: inherit; padding: 0; }
+        </style>
+        <div class="dialoghsm-wa-preview" data-role="preview-panel" style="display:none;">
+            <div class="dialoghsm-wa-preview__title">{{ 'dialoghsm.campaign.template.js.preview'|trans }}</div>
+            <div class="dialoghsm-wa-bubble" data-role="preview"></div>
+        </div>
+
+        {{ form_widget(paramsField) }}
+
+    </div>
+
+    <script>
+    (function () {
+        var root = document.getElementById({{ builderId|json_encode|raw }});
+        if (!root || root.getAttribute('data-ready')) {
+            return;
+        }
+        root.setAttribute('data-ready', '1');
+
+        var cfg      = JSON.parse(root.getAttribute('data-config'));
+        var t        = cfg.i18n;
+        var numberEl = document.getElementById(cfg.ids.number);
+        var nameEl   = document.getElementById(cfg.ids.name);
+        var langEl   = document.getElementById(cfg.ids.language);
+        var paramsEl = document.getElementById(cfg.ids.params);
+        var select   = root.querySelector('[data-role="template-select"]');
+        var selRow   = root.querySelector('[data-role="select-row"]');
+        var manRow   = root.querySelector('[data-role="manual-row"]');
+        var statusEl = root.querySelector('[data-role="status"]');
+        var fields   = root.querySelector('[data-role="fields"]');
+        var prevPane = root.querySelector('[data-role="preview-panel"]');
+        var preview  = root.querySelector('[data-role="preview"]');
+
+        // Tipo do botão no template → sub_type do envio; só estes têm parâmetro conhecido.
+        var BUTTON_SUBTYPES = {URL: 'url', COPY_CODE: 'copy_code'};
+        var MEDIA = {IMAGE: '.jpg, .jpeg, .png', VIDEO: '.mp4', DOCUMENT: '.pdf'};
+
+        var templates = [];
+        var params    = readParams();
+
+        function readParams() {
+            try {
+                var p = JSON.parse(paramsEl.value || '{}');
+                return {
+                    body: Array.isArray(p.body) ? p.body : [],
+                    header: typeof p.header === 'string' ? p.header : '',
+                    buttons: p.buttons && typeof p.buttons === 'object' ? p.buttons : {}
+                };
+            } catch (e) {
+                return {body: [], header: '', buttons: {}};
+            }
+        }
+
+        function sync() {
+            paramsEl.value = JSON.stringify(params);
+            renderPreview();
+        }
+
+        // O Mautic aplica o "chosen" a todo select do modal assim que ele abre — antes de a lista
+        // chegar. Sem avisar o chosen, as opções novas não aparecem (o dropdown fica vazio).
+        function refreshChosen() {
+            if (window.mQuery && mQuery(select).data('chosen')) {
+                mQuery(select).trigger('chosen:updated');
+            }
+        }
+
+        function setStatus(text, warn) {
+            statusEl.textContent = text || '';
+            statusEl.className = 'help-block' + (warn ? ' text-warning' : '');
+        }
+
+        function el(tag, attrs, text) {
+            var node = document.createElement(tag);
+            Object.keys(attrs || {}).forEach(function (k) { node.setAttribute(k, attrs[k]); });
+            if (text !== undefined && text !== null) { node.textContent = text; }
+            return node;
+        }
+
+        function input(label, value, help, onInput, placeholder) {
+            var group = el('div', {'class': 'form-group'});
+            group.appendChild(el('label', {'class': 'control-label'}, label));
+            var field = el('input', {type: 'text', 'class': 'form-control', placeholder: placeholder || ''});
+            field.value = value || '';
+            field.addEventListener('input', function () { onInput(field.value); sync(); });
+            group.appendChild(field);
+            if (help) { group.appendChild(el('span', {'class': 'help-block'}, help)); }
+            return group;
+        }
+
+        function warning(text) {
+            return el('div', {'class': 'alert alert-warning', style: 'padding:8px 12px;'}, text);
+        }
+
+        function fmt(text, values) {
+            return text.replace(/%(\w+)%/g, function (m, k) { return values[k] !== undefined ? values[k] : m; });
+        }
+
+        function current() {
+            var key = nameEl.value + '|' + (langEl.value || 'pt_BR');
+            for (var i = 0; i < templates.length; i++) {
+                if (templates[i].name + '|' + templates[i].language === key) { return templates[i]; }
+            }
+            return null;
+        }
+
+        // ── modo lista ──────────────────────────────────────────────────────
+        function fillSelect() {
+            select.innerHTML = '';
+            select.appendChild(el('option', {value: ''}, t.placeholder));
+
+            var selected = current();
+            templates.forEach(function (tpl) {
+                var label = tpl.name + ' (' + tpl.language + ')' + (tpl.category ? ' · ' + tpl.category : '');
+                if (!tpl.approved) { label += ' — ' + fmt(t.notApproved, {status: tpl.status}); }
+                var opt = el('option', {value: tpl.name + '|' + tpl.language}, label);
+                if (!tpl.approved) { opt.disabled = true; }
+                if (selected === tpl) { opt.selected = true; }
+                select.appendChild(opt);
+            });
+
+            // Template salvo na ação que não está na lista (apagado, renomeado, outro número):
+            // fica visível e selecionado, com aviso — não some sem o usuário perceber.
+            if (!selected && nameEl.value) {
+                var missing = el('option', {value: nameEl.value + '|' + (langEl.value || 'pt_BR')}, nameEl.value + ' (' + (langEl.value || 'pt_BR') + ') — ' + t.notInList);
+                missing.selected = true;
+                select.appendChild(missing);
+                setStatus(t.notInList, true);
+            } else if (manRow.querySelector('.has-error')) {
+                // Formulário devolvido pelo servidor sem template: o erro está no campo oculto.
+                setStatus(t.placeholder, true);
+            } else {
+                setStatus(fmt(t.loaded, {count: templates.length}));
+            }
+
+            selRow.style.display = '';
+            manRow.style.display = 'none';
+            refreshChosen();
+            renderTemplate(selected);
+        }
+
+        function onTemplateChange() {
+            var parts = select.value.split('|');
+            nameEl.value = parts[0] || '';
+            langEl.value = parts[1] || '';
+            var tpl = current();
+            // Troca de template: valores que não fazem mais sentido não podem ir junto.
+            params.header  = tpl && MEDIA[tpl.header.format] ? params.header : '';
+            params.buttons = {};
+            renderTemplate(tpl);
+            setStatus(tpl ? '' : t.notInList, !tpl && !!nameEl.value);
+        }
+
+        // O chosen dispara a troca como evento jQuery, que um listener nativo não recebe.
+        if (window.mQuery) {
+            mQuery(select).on('change', onTemplateChange);
+        } else {
+            select.addEventListener('change', onTemplateChange);
+        }
+
+        function renderTemplate(tpl) {
+            fields.innerHTML = '';
+            if (!tpl) {
+                prevPane.style.display = 'none';
+                sync();
+                return;
+            }
+
+            var fmtHeader = tpl.header.format;
+            if (MEDIA[fmtHeader]) {
+                fields.appendChild(input(
+                    fmt(t.headerMedia, {format: fmtHeader}),
+                    params.header,
+                    fmt(t.headerMediaHelp, {ext: MEDIA[fmtHeader]}),
+                    function (v) { params.header = v; },
+                    'https://'
+                ));
+            } else {
+                params.header = '';
+                if (fmtHeader === 'TEXT' && tpl.header.vars) { fields.appendChild(warning(t.headerTextVars)); }
+                if (fmtHeader === 'LOCATION') { fields.appendChild(warning(t.headerLocation)); }
+            }
+
+            if (tpl.body.vars === null) {
+                fields.appendChild(warning(t.namedVars));
+            } else {
+                params.body = params.body.slice(0, tpl.body.vars);
+                for (var i = 0; i < tpl.body.vars; i++) {
+                    (function (idx) {
+                        fields.appendChild(input(
+                            fmt(t.variable, {n: idx + 1}),
+                            params.body[idx],
+                            idx === 0 ? t.variableHelp : '',
+                            function (v) { params.body[idx] = v; },
+                            '{contactfield=firstname}'
+                        ));
+                    })(i);
+                }
+                if (tpl.body.vars === 0 && !MEDIA[fmtHeader]) { fields.appendChild(el('p', {'class': 'text-muted'}, t.noVariables)); }
+            }
+
+            var keep = {};
+            tpl.buttons.forEach(function (b) {
+                if (b.vars === null) {
+                    fields.appendChild(warning(fmt(t.buttonUnknown, {n: b.index + 1, type: b.type})));
+                    return;
+                }
+                if (!b.vars || !BUTTON_SUBTYPES[b.type]) { return; }
+                var prev = params.buttons[b.index] || {};
+                keep[b.index] = {type: BUTTON_SUBTYPES[b.type], value: prev.value || ''};
+                (function (idx) {
+                    fields.appendChild(input(
+                        fmt(t.button, {n: idx + 1, type: b.type, text: b.text}),
+                        keep[idx].value,
+                        b.type === 'URL' ? t.buttonUrlHelp : '',
+                        function (v) { params.buttons[idx].value = v; }
+                    ));
+                })(b.index);
+            });
+            params.buttons = keep;
+
+            if (tpl.carousel) { fields.appendChild(warning(fmt(t.carousel, {count: tpl.carousel}))); }
+
+            sync();
+        }
+
+        // ── prévia ──────────────────────────────────────────────────────────
+        function escapeHtml(text) {
+            return String(text).replace(/[&<>"']/g, function (c) {
+                return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c];
+            });
+        }
+
+        // Alguns templates chegam da API com a quebra de linha escapada ("\\n" literal).
+        function unescapeBreaks(text) {
+            return String(text || '').replace(/\\r\\n|\\n/g, '\n');
+        }
+
+        // Valor da variável como aparece na prévia: token do contato vira um selo com o campo
+        // (o valor real só existe no envio); vazio vira o marcador da variável em amarelo
+        // (montado com chaves soltas porque "{" + "{" seguidos seriam lidos pelo Twig).
+        function variableHtml(n, value) {
+            if (!value) {
+                return '<span class="dialoghsm-wa-var dialoghsm-wa-var--empty">{' + '{' + n + '}' + '}</span>';
+            }
+            var html = escapeHtml(value).replace(/\{contactfield=([^}]+)\}/g, function (m, field) {
+                return '<span class="dialoghsm-wa-var dialoghsm-wa-var--token">' + field + '</span>';
+            });
+            return '<span class="dialoghsm-wa-var">' + html + '</span>';
+        }
+
+        // Texto do template → HTML: escapa tudo antes, troca as variáveis e aplica a formatação do
+        // WhatsApp (*negrito*, _itálico_, ~tachado~, ```monoespaçado```). Nada da API ou do
+        // usuário entra no HTML sem passar por escapeHtml.
+        function formatWhatsApp(text, values) {
+            var html = escapeHtml(unescapeBreaks(text)).replace(/\{\{\s*(\d+)\s*\}\}/g, function (m, n) {
+                return variableHtml(n, values[parseInt(n, 10) - 1]);
+            });
+
+            return html
+                .replace(/```([\s\S]+?)```/g, '<code>$1</code>')
+                .replace(/(^|[\s>])\*(?!\s)([^*\n]+?)\*(?=$|[\s<.,!?;:])/g, '$1<strong>$2</strong>')
+                .replace(/(^|[\s>])_(?!\s)([^_\n]+?)_(?=$|[\s<.,!?;:])/g, '$1<em>$2</em>')
+                .replace(/(^|[\s>])~(?!\s)([^~\n]+?)~(?=$|[\s<.,!?;:])/g, '$1<s>$2</s>');
+        }
+
+        var MEDIA_ICONS = {IMAGE: 'ri-image-line', VIDEO: 'ri-video-line', DOCUMENT: 'ri-file-text-line', LOCATION: 'ri-map-pin-line'};
+
+        function renderPreview() {
+            var tpl = current();
+            if (!tpl || (!tpl.body.text && !tpl.header.format)) {
+                prevPane.style.display = 'none';
+                return;
+            }
+
+            var html = '';
+            var fmtHeader = tpl.header.format;
+
+            if (MEDIA_ICONS[fmtHeader]) {
+                // Imagem com link https fixo (sem token) aparece de verdade; o resto, um ícone.
+                var link = params.header || '';
+                var showImage = fmtHeader === 'IMAGE' && /^https:\/\/[^\s{}]+$/i.test(link);
+                html += '<div class="dialoghsm-wa-bubble__media">'
+                    + (showImage
+                        ? '<img src="' + escapeHtml(link) + '" alt="">'
+                        : '<i class="' + MEDIA_ICONS[fmtHeader] + '"></i><span>' + escapeHtml(fmtHeader) + '</span>')
+                    + '</div>';
+            } else if (fmtHeader === 'TEXT' && tpl.header.text) {
+                html += '<div class="dialoghsm-wa-bubble__header">' + formatWhatsApp(tpl.header.text, []) + '</div>';
+            }
+
+            if (tpl.body.text) {
+                html += '<div class="dialoghsm-wa-bubble__body">' + formatWhatsApp(tpl.body.text, params.body) + '</div>';
+            }
+
+            if (tpl.footer) {
+                html += '<div class="dialoghsm-wa-bubble__footer">' + escapeHtml(unescapeBreaks(tpl.footer)) + '</div>';
+            }
+
+            tpl.buttons.forEach(function (b) {
+                var icon = b.type === 'URL' ? 'ri-external-link-line' : (b.type === 'PHONE_NUMBER' ? 'ri-phone-line' : (b.type === 'COPY_CODE' ? 'ri-file-copy-line' : 'ri-reply-line'));
+                html += '<div class="dialoghsm-wa-bubble__button"><i class="' + icon + '"></i> ' + escapeHtml(b.text || b.type) + '</div>';
+            });
+
+            preview.innerHTML = html;
+            prevPane.style.display = '';
+        }
+
+        // ── modo manual (lista indisponível) ────────────────────────────────
+        function manualMode(message) {
+            templates = [];
+            selRow.style.display = 'none';
+            manRow.style.display = '';
+            setStatus(message, true);
+            prevPane.style.display = 'none';
+            renderManual();
+        }
+
+        function renderManual() {
+            fields.innerHTML = '';
+            fields.appendChild(input(fmt(t.headerMedia, {format: ''}).trim(), params.header, fmt(t.headerMediaHelp, {ext: '.jpg, .png, .mp4, .pdf'}), function (v) { params.header = v; }, 'https://'));
+
+            params.body.forEach(function (value, idx) {
+                var group = input(fmt(t.variable, {n: idx + 1}), value, '', function (v) { params.body[idx] = v; }, '{contactfield=firstname}');
+                var remove = el('button', {type: 'button', 'class': 'btn btn-ghost btn-xs'}, t.remove);
+                remove.addEventListener('click', function () { params.body.splice(idx, 1); renderManual(); sync(); });
+                group.appendChild(remove);
+                fields.appendChild(group);
+            });
+
+            var add = el('button', {type: 'button', 'class': 'btn btn-ghost btn-sm'}, t.addVariable);
+            add.addEventListener('click', function () { params.body.push(''); renderManual(); sync(); });
+            fields.appendChild(add);
+            sync();
+        }
+
+        // ── carga ───────────────────────────────────────────────────────────
+        function load(refresh) {
+            var id = numberEl ? numberEl.value : '';
+            if (!id) {
+                selRow.style.display = 'none';
+                manRow.style.display = 'none';
+                fields.innerHTML = '';
+                setStatus(t.chooseNumber);
+                return;
+            }
+
+            // Carregando: o próprio campo mostra o estado, em vez de um dropdown vazio.
+            setStatus(t.loading);
+            select.innerHTML = '';
+            select.appendChild(el('option', {value: ''}, t.loading));
+            selRow.style.display = '';
+            manRow.style.display = 'none';
+            fields.innerHTML = '';
+            refreshChosen();
+            // objectId=0 é o padrão da rota, então o path() sai sem ele: o id entra aqui no fim.
+            var url = cfg.url.replace(/\/0$/, '') + '/' + encodeURIComponent(id) + (refresh ? '?refresh=1' : '');
+            fetch(url, {credentials: 'same-origin', headers: {'X-Requested-With': 'XMLHttpRequest', Accept: 'application/json'}})
+                .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+                .then(function (data) {
+                    if (!data.available) { manualMode(t.unavailable); return; }
+                    templates = data.templates || [];
+                    fillSelect();
+                })
+                .catch(function () { manualMode(t.unavailable); });
+        }
+
+        root.querySelector('[data-role="refresh"]').addEventListener('click', function () { load(true); });
+
+        // O seletor de número é um chosen (jQuery): a troca chega como evento jQuery.
+        if (numberEl) {
+            if (window.mQuery) {
+                mQuery(numberEl).on('change', function () { load(false); });
+            } else {
+                numberEl.addEventListener('change', function () { load(false); });
+            }
+        }
+
+        load(false);
+    })();
+    </script>

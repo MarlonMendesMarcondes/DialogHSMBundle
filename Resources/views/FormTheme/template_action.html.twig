@@ -1,0 +1,29 @@
+{#
+  Tema do formulário das ações "Enviar WhatsApp (360dialog)" e "... com RabbitMQ" (versões novas):
+  o construtor guiado de template (_template_builder) seguido dos campos de envio de cada ação.
+#}
+{% block dialoghsm_send_whatsapp_template_queue_widget %}
+    {{ block('dialoghsm_send_whatsapp_template_widget') }}
+{% endblock %}
+
+{% block dialoghsm_send_whatsapp_template_widget %}
+    {% include '@DialogHSM/FormTheme/_template_builder.html.twig' with {
+        builderId: form.vars.id ~ '_hsm_builder',
+        numberField: form.whatsapp_number,
+        nameField: form.hsm_template,
+        languageField: form.hsm_language,
+        paramsField: form.hsm_params,
+    } %}
+
+    {% if form.queue_override is defined %}{{ form_row(form.queue_override) }}{% endif %}
+    {% if form.send_delay is defined %}{{ form_row(form.send_delay) }}{% endif %}
+    {% if form.batch_limit is defined %}{{ form_row(form.batch_limit) }}{% endif %}
+
+    <details class="mt-md">
+        <summary style="cursor:pointer;">{{ 'dialoghsm.campaign.template.advanced'|trans }}</summary>
+        <p class="help-block">{{ 'dialoghsm.campaign.template.advanced.help'|trans }}</p>
+        {{ form_row(form.payload_data) }}
+    </details>
+
+    {{ form_rest(form) }}
+{% endblock %}

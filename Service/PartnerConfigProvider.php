@@ -65,6 +65,17 @@ class PartnerConfigProvider
         return (bool) ($this->getApiKeys()['balance_alert_send_email'] ?? false);
     }
 
+    public const DEFAULT_BASE_URL = 'https://waba-v2.360dialog.io/messages';
+
+    /**
+     * URL da API da integração, usada quando o número não tem a própria (mesma regra do
+     * CampaignSubscriber::resolveBaseUrl).
+     */
+    public function getDefaultBaseUrl(): string
+    {
+        return rtrim($this->readFromPlugin('base_url') ?? self::DEFAULT_BASE_URL, '/');
+    }
+
     public const PREFLIGHT_OFF     = 'off';
     public const PREFLIGHT_LOG     = 'log';
     public const PREFLIGHT_ENFORCE = 'enforce';

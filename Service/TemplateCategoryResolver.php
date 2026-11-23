@@ -121,6 +121,32 @@ class TemplateCategoryResolver
     }
 
     /**
+     * Todos os templates do número, para o formulário da ação de campanha escolher o template.
+     *
+     * @param bool $refresh recarrega a lista antes do TTL (mesmo piso de MIN_REFRESH_AGE)
+     *
+     * @return list<TemplateDefinition>|null null quando a lista não está disponível
+     */
+    public function listTemplates(string $apiKey, string $baseUrl, bool $refresh = false): ?array
+    {
+        $data = $this->loadTemplates($apiKey, $baseUrl, $refresh);
+        if (null === $data) {
+            return null;
+        }
+
+        $definitions = [];
+        foreach ($data['templates'] as $byLanguage) {
+            foreach ($byLanguage as $definition) {
+                $definitions[] = TemplateDefinition::fromArray($definition);
+            }
+        }
+
+        usort($definitions, static fn (TemplateDefinition $a, TemplateDefinition $b): int => [$a->name, $a->language] <=> [$b->name, $b->language]);
+
+        return $definitions;
+    }
+
+    /**
      * @return array{fetched_at: int, complete: bool, categories: array<string, string|null>, templates: array<string, array<string, array<string, mixed>>>, unparsed: array<string, true>}|null
      */
     private function loadTemplates(string $apiKey, string $baseUrl, bool $refresh = false): ?array

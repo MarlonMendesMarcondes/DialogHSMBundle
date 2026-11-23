@@ -148,4 +148,31 @@ class TemplateCategoryResolverTest extends TestCase
         $this->assertNull($this->resolver->getCategory('KEY', self::MM_URL, 'a'));
     }
 
+    public function testListsTheDefinitionsWithPreviewTextsFromTheSameRequest(): void
+    {
+        $this->client->expects($this->once())->method('request')->willReturn(self::page([
+            ['name' => 'b_promo', 'language' => 'pt_BR', 'status' => 'APPROVED', 'category' => 'MARKETING', 'components' => [
+                ['type' => 'HEADER', 'format' => 'IMAGE'],
+                ['type' => 'BODY', 'text' => 'Olá {{1}}'],
+                ['type' => 'FOOTER', 'text' => 'Equipe Vestibular'],
+                ['type' => 'BUTTONS', 'buttons' => [['type' => 'URL', 'text' => 'Ver', 'url' => 'https://x.com/{{1}}']]],
+            ]],
+            ['name' => 'a_aviso', 'language' => 'en_US', 'status' => 'PAUSED', 'category' => 'UTILITY', 'components' => [['type' => 'BODY', 'text' => 'Hi']]],
+        ]));
+
+        $list = $this->resolver->listTemplates('KEY', self::MM_URL);
+
+        $this->assertSame(['a_aviso', 'b_promo'], array_map(static fn ($t) => $t->name, $list));
+        $this->assertSame('Olá {{1}}', $list[1]->bodyText);
+        $this->assertSame('Ver', $list[1]->buttons[0]['text']);
+        $this->assertSame('Equipe Vestibular', $list[1]->footerText);
+        $this->assertSame('MARKETING', $this->resolver->getCategory('KEY', self::MM_URL, 'b_promo'), 'Mesma lista em cache.');
+    }
+
+    public function testListIsUnavailableForOtherHosts(): void
+    {
+        $this->client->expects($this->never())->method('request');
+
+        $this->assertNull($this->resolver->listTemplates('TOKEN', 'https://graph.facebook.com/v21.0/1/messages'));
+    }
 }

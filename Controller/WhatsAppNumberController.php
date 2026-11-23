@@ -12,7 +12,9 @@ use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumberBalanceHistoryRepository;
 use MauticPlugin\DialogHSMBundle\Service\BalanceAlertService;
 use MauticPlugin\DialogHSMBundle\Service\BalanceHistoryRecorder;
 use MauticPlugin\DialogHSMBundle\Service\MultiWebhookService;
+use MauticPlugin\DialogHSMBundle\DTO\TemplateDefinition;
 use MauticPlugin\DialogHSMBundle\Service\PartnerConfigProvider;
+use MauticPlugin\DialogHSMBundle\Service\TemplateCategoryResolver;
 use Symfony\Contracts\Service\Attribute\Required;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -27,6 +29,13 @@ class WhatsAppNumberController extends FormController
     private BalanceAlertService $balanceAlertService;
     private BalanceHistoryRecorder $balanceHistoryRecorder;
     private WhatsAppNumberBalanceHistoryRepository $balanceHistoryRepository;
+    private TemplateCategoryResolver $templateResolver;
+
+    #[Required]
+    public function setTemplateResolver(TemplateCategoryResolver $templateResolver): void
+    {
+        $this->templateResolver = $templateResolver;
+    }
 
     #[Required]
     public function setMultiWebhookService(MultiWebhookService $service): void
@@ -325,6 +334,75 @@ class WhatsAppNumberController extends FormController
         }
 
         return $this->postActionRedirect(array_merge($postActionVars, ['flashes' => $flashes]));
+    }
+
+    /**
+     * Templates do número, para o formulário guiado das ações de campanha novas. Vem do mesmo
+     * cache da pré-validação: abrir o formulário não gera chamada à 360dialog enquanto a lista
+     * estiver em cache; refresh=1 recarrega (no máximo uma vez a cada 5 min por número).
+     *
+     * available=false quando a lista não pode ser consultada (provider Meta direto, 360dialog fora
+     * do ar) — o formulário cai para o nome do template digitado.
+     */
+    public function templatesAction(Request $request, int $objectId): JsonResponse
+    {
+        if (!$this->canListTemplates()) {
+            return new JsonResponse(['error' => 'Access denied'], 403);
+        }
+
+        $model = $this->getModel('dialoghsm.whatsappnumber');
+        \assert($model instanceof WhatsAppNumberModel);
+        $entity = $model->getEntity($objectId);
+
+        if (null === $entity || null === $entity->getId()) {
+            return new JsonResponse(['error' => 'Number not found'], 404);
+        }
+
+        $baseUrl   = $entity->getBaseUrl() ?: $this->partnerConfigProvider->getDefaultBaseUrl();
+        $templates = $this->templateResolver->listTemplates(
+            (string) $entity->getApiKey(),
+            $baseUrl,
+            '1' === (string) $request->query->get('refresh', '')
+        );
+
+        if (null === $templates) {
+            return new JsonResponse(['available' => false, 'templates' => []]);
+        }
+
+        return new JsonResponse([
+            'available' => true,
+            'templates' => array_map(static fn (TemplateDefinition $t): array => [
+                'name'     => $t->name,
+                'language' => $t->language,
+                'status'   => $t->status,
+                'category' => $t->category,
+                'approved' => null === $t->status || TemplateDefinition::STATUS_APPROVED === $t->status,
+                'header'   => ['format' => $t->headerFormat, 'vars' => $t->headerVars, 'text' => $t->headerText],
+                'body'     => ['vars' => $t->bodyVars, 'text' => $t->bodyText],
+                'footer'   => $t->footerText,
+                'buttons'  => array_map(
+                    static fn (array $b, int $i): array => ['index' => $i, 'type' => $b['type'], 'vars' => $b['vars'], 'text' => $b['text'] ?? ''],
+                    $t->buttons,
+                    array_keys($t->buttons)
+                ),
+                'carousel' => null === $t->carouselCards ? null : count($t->carouselCards),
+            ], $templates),
+        ]);
+    }
+
+    /**
+     * Quem monta campanha precisa da lista; o número em si não é exposto (sem apiKey).
+     */
+    protected function canListTemplates(): bool
+    {
+        return (bool) $this->security?->isGranted([
+            'campaign:campaigns:create',
+            'campaign:campaigns:editown',
+            'campaign:campaigns:editother',
+            'dialoghsm:whatsappmessages:create',
+            'dialoghsm:whatsappmessages:editown',
+            'dialoghsm:whatsappmessages:editother',
+        ], 'MATCH_ONE');
     }
 
     public function webhookCheckAction(int $objectId): JsonResponse

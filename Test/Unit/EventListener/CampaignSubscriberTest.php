@@ -96,10 +96,10 @@ class CampaignSubscriberTest extends TestCase
     }
 
     /**
-     * As chaves antigas continuam registradas (campanhas existentes) com o rótulo "(legado)";
-     * as novas herdam o rótulo de antes e o mesmo formulário/evento de disparo.
+     * As chaves antigas continuam registradas (campanhas existentes) com o rótulo "(legado)" e o
+     * formulário de antes; as novas herdam o rótulo e usam o formulário guiado de template.
      */
-    public function testLegacyAndNewVersionsShareFormAndTriggerEventWithDifferentLabels(): void
+    public function testLegacyAndNewVersionsShareTriggerEventWithTheirOwnForms(): void
     {
         $options = [];
         $builderEvent = $this->createMock(CampaignBuilderEvent::class);
@@ -110,10 +110,15 @@ class CampaignSubscriberTest extends TestCase
         $this->makeSubscriber()->onCampaignBuild($builderEvent);
 
         foreach (['dialoghsm.send_whatsapp' => 'dialoghsm.send_whatsapp_v2', 'dialoghsm.send_whatsapp_queue' => 'dialoghsm.send_whatsapp_queue_v2'] as $legacy => $new) {
-            $this->assertSame($options[$legacy]['formType'], $options[$new]['formType']);
             $this->assertSame($options[$legacy]['batchEventName'], $options[$new]['batchEventName']);
             $this->assertStringEndsWith('_legacy', $options[$legacy]['label']);
+            $this->assertArrayNotHasKey('formTheme', $options[$legacy], 'A legada mantém o formulário de antes.');
+            $this->assertSame('@DialogHSM/FormTheme/template_action.html.twig', $options[$new]['formTheme']);
+            $this->assertTrue(is_subclass_of($options[$new]['formType'], $options[$legacy]['formType']), 'O formulário novo estende o legado.');
         }
+
+        $this->assertSame(\MauticPlugin\DialogHSMBundle\Form\Type\SendWhatsAppTemplateType::class, $options['dialoghsm.send_whatsapp_v2']['formType']);
+        $this->assertSame(\MauticPlugin\DialogHSMBundle\Form\Type\SendWhatsAppTemplateQueueType::class, $options['dialoghsm.send_whatsapp_queue_v2']['formType']);
 
         $this->assertSame('dialoghsm.campaign.send_whatsapp', $options['dialoghsm.send_whatsapp_v2']['label']);
         $this->assertSame('dialoghsm.campaign.send_whatsapp_queue', $options['dialoghsm.send_whatsapp_queue_v2']['label']);
