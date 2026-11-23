@@ -80,7 +80,7 @@ class CampaignSubscriberTest extends TestCase
 
         $builderEvent = $this->createMock(CampaignBuilderEvent::class);
         $builderEvent
-            ->expects($this->exactly(3))
+            ->expects($this->exactly(5))
             ->method('addAction')
             ->willReturnCallback(function (string $key) use (&$registeredActions): void {
                 $registeredActions[] = $key;
@@ -91,6 +91,32 @@ class CampaignSubscriberTest extends TestCase
         $this->assertContains('dialoghsm.send_whatsapp', $registeredActions);
         $this->assertContains('dialoghsm.send_whatsapp_queue', $registeredActions);
         $this->assertContains('dialoghsm.send_whatsapp_message', $registeredActions);
+        $this->assertContains('dialoghsm.send_whatsapp_v2', $registeredActions);
+        $this->assertContains('dialoghsm.send_whatsapp_queue_v2', $registeredActions);
+    }
+
+    /**
+     * As chaves antigas continuam registradas (campanhas existentes) com o rótulo "(legado)";
+     * as novas herdam o rótulo de antes e o mesmo formulário/evento de disparo.
+     */
+    public function testLegacyAndNewVersionsShareFormAndTriggerEventWithDifferentLabels(): void
+    {
+        $options = [];
+        $builderEvent = $this->createMock(CampaignBuilderEvent::class);
+        $builderEvent->method('addAction')->willReturnCallback(function (string $key, array $o) use (&$options): void {
+            $options[$key] = $o;
+        });
+
+        $this->makeSubscriber()->onCampaignBuild($builderEvent);
+
+        foreach (['dialoghsm.send_whatsapp' => 'dialoghsm.send_whatsapp_v2', 'dialoghsm.send_whatsapp_queue' => 'dialoghsm.send_whatsapp_queue_v2'] as $legacy => $new) {
+            $this->assertSame($options[$legacy]['formType'], $options[$new]['formType']);
+            $this->assertSame($options[$legacy]['batchEventName'], $options[$new]['batchEventName']);
+            $this->assertStringEndsWith('_legacy', $options[$legacy]['label']);
+        }
+
+        $this->assertSame('dialoghsm.campaign.send_whatsapp', $options['dialoghsm.send_whatsapp_v2']['label']);
+        $this->assertSame('dialoghsm.campaign.send_whatsapp_queue', $options['dialoghsm.send_whatsapp_queue_v2']['label']);
     }
 
     public function testOnCampaignBuildPassesCorrectMetadataForDirectAction(): void
@@ -140,7 +166,7 @@ class CampaignSubscriberTest extends TestCase
             );
             $this->assertSame('whatsapp', $options['channel']);
             $this->assertSame(
-                ['dialoghsm.send_whatsapp', 'dialoghsm.send_whatsapp_queue', 'dialoghsm.send_whatsapp_message'],
+                ['dialoghsm.send_whatsapp', 'dialoghsm.send_whatsapp_queue', 'dialoghsm.send_whatsapp_message', 'dialoghsm.send_whatsapp_v2', 'dialoghsm.send_whatsapp_queue_v2'],
                 $options['connectionRestrictions']['source']['action']
             );
         }

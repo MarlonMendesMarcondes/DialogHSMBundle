@@ -73,9 +73,11 @@ class DialogHSMApi
      *
      * invalid=true: a pré-validação (modo enforce) reprovou o envio e a API não foi chamada.
      *
+     * @param bool $preflight false pula a pré-validação (ações de campanha legadas)
+     *
      * @return array{success: bool, response: array|null, error: string|null, http_status: int|null, wamid: string|null, retryable: bool, invalid?: bool}
      */
-    public function sendMessage(string $apiKey, string $baseUrl, string $mobile, array $payloadData): array
+    public function sendMessage(string $apiKey, string $baseUrl, string $mobile, array $payloadData, bool $preflight = true): array
     {
         $url = rtrim($baseUrl, '/');
 
@@ -98,19 +100,19 @@ class DialogHSMApi
             ];
         }
 
-        $preflight = $this->preflight($apiKey, $url, $payload, $payloadData);
-        if (is_string($preflight)) {
+        $checked = $preflight ? $this->preflight($apiKey, $url, $payload, $payloadData) : $payload;
+        if (is_string($checked)) {
             return [
                 'success'     => false,
                 'response'    => null,
-                'error'       => $preflight,
+                'error'       => $checked,
                 'http_status' => null,
                 'wamid'       => null,
                 'retryable'   => false,
                 'invalid'     => true,
             ];
         }
-        $payload = $preflight;
+        $payload = $checked;
 
         $fallbackUrl = $this->messagesUrlFor($url);
 

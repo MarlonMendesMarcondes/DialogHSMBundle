@@ -121,7 +121,7 @@ class PaymentBlockAndPreflightHandlerTest extends TestCase
         );
     }
 
-    private function message(int $leadId = 1): SendWhatsAppMessage
+    private function message(int $leadId = 1, bool $legacy = false): SendWhatsAppMessage
     {
         return new SendWhatsAppMessage(
             leadId:             $leadId,
@@ -131,6 +131,7 @@ class PaymentBlockAndPreflightHandlerTest extends TestCase
             payloadData:        ['content' => 'promo', 'language' => 'pt_BR'],
             templateName:       'promo',
             whatsAppNumberName: 'Vestibular',
+            legacy:             $legacy,
         );
     }
 
@@ -253,6 +254,57 @@ class PaymentBlockAndPreflightHandlerTest extends TestCase
         $this->assertSame([], $this->dispatched, 'Envio inline não tem fila: nada é republicado.');
         $this->assertCount(2, $this->persisted);
         $this->assertSame(SendWhatsAppMessageHandler::PAYMENT_BLOCK_MESSAGE, substr((string) $this->persisted[0]->getErrorMessage(), strlen('[API 360dialog] ')));
+    }
+
+    // ── ações "(legado)": comportamento anterior ─────────────────────────────
+
+    public function testLegacyMessageSkipsPreflightAndIsNotHeldByThePause(): void
+    {
+        $this->pause->pause('API_KEY', null, 'blocked');
+
+        $this->api->expects($this->once())->method('sendMessage')
+            ->with('API_KEY', $this->anything(), $this->anything(), $this->anything(), false)
+            ->willReturn(self::SENT);
+
+        $result = ($this->handler)($this->message(1, legacy: true));
+
+        $this->assertTrue($result['success']);
+        $this->assertTrue($this->pause->isPaused('API_KEY'), 'Envio legado não libera nem mexe na pausa.');
+    }
+
+    public function testLegacyMessageWithPaymentBlockFailsAsBefore(): void
+    {
+        $this->queueContext->setCurrentQueueName('wpp_vestibular');
+        $this->api->method('sendMessage')->willReturn(self::PAYMENT_BLOCKED);
+        $this->alerts->expects($this->never())->method('notifyPaymentBlock');
+
+        ($this->handler)($this->message(1, legacy: true));
+
+        $this->assertSame([], $this->dispatched);
+        $this->assertSame(MessageLog::STATUS_FAILED, $this->persisted[0]->getStatus());
+        $this->assertFalse($this->pause->isPaused('API_KEY'));
+    }
+
+    public function testNewMessageAsksForPreflight(): void
+    {
+        $this->api->expects($this->once())->method('sendMessage')
+            ->with('API_KEY', $this->anything(), $this->anything(), $this->anything(), true)
+            ->willReturn(self::SENT);
+
+        ($this->handler)($this->message());
+    }
+
+    public function testMessageQueuedBeforeTheDeployIsTreatedAsLegacy(): void
+    {
+        // Serializada sem a propriedade legacy (formato anterior).
+        $old = $this->message();
+        $data = (fn () => get_object_vars($this))->call($old);
+        unset($data['legacy']);
+
+        $restored = (new \ReflectionClass(SendWhatsAppMessage::class))->newInstanceWithoutConstructor();
+        $restored->__unserialize($data);
+
+        $this->assertTrue($restored->legacy);
     }
 
     // ── pré-validação: status invalid ────────────────────────────────────────

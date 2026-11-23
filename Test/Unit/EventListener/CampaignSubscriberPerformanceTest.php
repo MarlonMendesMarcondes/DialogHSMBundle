@@ -419,7 +419,7 @@ class CampaignSubscriberPerformanceTest extends TestCase
         $mockPending->method('get')->willReturn($mockLog);
 
         $mockPendingEvent = $this->createMock(PendingEvent::class);
-        $mockPendingEvent->method('checkContext')->with($context)->willReturn(true);
+        $mockPendingEvent->method('checkContext')->willReturnCallback(static fn (string $type): bool => $type === $context);
         $mockPendingEvent->method('getEvent')->willReturn($mockCampaignEvent);
         $mockPendingEvent->method('getContacts')->willReturn($contacts);
         $mockPendingEvent->method('getPending')->willReturn($mockPending);

@@ -28,6 +28,8 @@ class BackfillCampaignMetadataCommand extends Command
         'dialoghsm.send_whatsapp',
         'dialoghsm.send_whatsapp_queue',
         'dialoghsm.send_whatsapp_message',
+        'dialoghsm.send_whatsapp_v2',
+        'dialoghsm.send_whatsapp_queue_v2',
     ];
 
     public function __construct(

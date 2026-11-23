@@ -199,7 +199,10 @@ class SendWhatsAppMessageHandler
 
         // Número pausado por falta de pagamento: não chama a API (seria mais um 403) e a
         // mensagem não vira falha — volta para a fila até o próximo envio de teste.
-        if (null !== $this->paymentPause && $this->paymentPause->isPaused($message->apiKey)) {
+        // Ações legadas seguem o comportamento anterior: sem pausa e sem pré-validação.
+        $safeguards = !$message->legacy;
+
+        if ($safeguards && null !== $this->paymentPause && $this->paymentPause->isPaused($message->apiKey)) {
             return $this->holdForPaymentBlock($message, $skipRetry);
         }
 
@@ -222,17 +225,18 @@ class SendWhatsAppMessageHandler
             $message->apiKey,
             $message->baseUrl,
             $message->phone,
-            $payloadData
+            $payloadData,
+            $safeguards
         );
 
-        if (null !== $this->paymentPause && !$result['success'] && $this->paymentPause->isEnabled()
+        if ($safeguards && null !== $this->paymentPause && !$result['success'] && $this->paymentPause->isEnabled()
             && PaymentBlockPauseService::isPaymentBlock($result)) {
             $this->paymentPause->pause($message->apiKey, $number, (string) ($result['error'] ?? ''));
 
             return $this->holdForPaymentBlock($message, $skipRetry);
         }
 
-        if ($result['success']) {
+        if ($safeguards && $result['success']) {
             $this->paymentPause?->noteSuccess($message->apiKey, $number);
         }
 

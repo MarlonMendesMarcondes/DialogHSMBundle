@@ -4,6 +4,11 @@ declare(strict_types=1);
 
 namespace MauticPlugin\DialogHSMBundle\Message;
 
+/**
+ * legacy=true: veio das ações de campanha "(legado)" — envio como antes, sem a pré-validação do
+ * template e sem a pausa por bloqueio de pagamento. As ações novas, Marketing Messages e
+ * broadcast criam a mensagem com legacy=false.
+ */
 class SendWhatsAppMessage
 {
     public function __construct(
@@ -18,6 +23,7 @@ class SendWhatsAppMessage
         public readonly ?int $campaignEventId = null,
         public readonly ?string $queueLogId = null,
         public readonly bool $isBatch = false,
+        public readonly bool $legacy = false,
     ) {
     }
 
@@ -41,6 +47,9 @@ class SendWhatsAppMessage
         $this->campaignEventId    = $data['campaignEventId']    ?? null;
         $this->queueLogId         = $data['queueLogId']         ?? null;
         $this->isBatch            = $data['isBatch']            ?? false;
+        // Mensagem serializada antes de existir a versão nova das ações veio do comportamento
+        // anterior: continua sem pré-validação e sem pausa até sair da fila.
+        $this->legacy             = $data['legacy']             ?? true;
     }
 
     /**
@@ -60,6 +69,7 @@ class SendWhatsAppMessage
             campaignEventId:    $this->campaignEventId,
             queueLogId:         $queueLogId,
             isBatch:            $this->isBatch,
+            legacy:             $this->legacy,
         );
     }
 
@@ -80,6 +90,7 @@ class SendWhatsAppMessage
             campaignEventId:    $this->campaignEventId,
             queueLogId:         $this->queueLogId,
             isBatch:            $isBatch,
+            legacy:             $this->legacy,
         );
     }
 }

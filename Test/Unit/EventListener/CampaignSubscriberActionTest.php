@@ -162,7 +162,7 @@ class CampaignSubscriberActionTest extends TestCase
         $mockPending->method('get')->willReturn($mockLog);
 
         $mockPendingEvent = $this->createMock(PendingEvent::class);
-        $mockPendingEvent->method('checkContext')->with($context)->willReturn(true);
+        $mockPendingEvent->method('checkContext')->willReturnCallback(static fn (string $type): bool => $type === $context);
         $mockPendingEvent->method('getEvent')->willReturn($mockCampaignEvent);
         $mockPendingEvent->method('getContacts')->willReturn($contacts);
         $mockPendingEvent->method('getPending')->willReturn($mockPending);
@@ -1819,7 +1819,7 @@ class CampaignSubscriberActionTest extends TestCase
         $subscriber = $this->makeSubscriber('null://null', $pause);
 
         $contact = $this->buildContact('+5511999999999', 1);
-        $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
+        $event   = $this->buildPendingEvent(CampaignSubscriber::ACTION_SEND, [1 => $contact]);
 
         $event->expects($this->never())->method('pass');
         $event->expects($this->never())->method('passWithError');
@@ -1829,6 +1829,85 @@ class CampaignSubscriberActionTest extends TestCase
         $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
 
         $subscriber->onCampaignTriggerAction($event);
+    }
+
+    /**
+     * Ação "(legado)" mantém o comportamento anterior: o número pausado não segura o envio
+     * inline, e a mensagem sai marcada como legada (sem pré-validação nem pausa no handler).
+     */
+    public function testLegacyInlineSendIgnoresThePaymentPauseAndMarksTheMessageAsLegacy(): void
+    {
+        $this->enableIntegration();
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
+
+        $config = $this->createMock(PartnerConfigProvider::class);
+        $config->method('isPaymentPauseEnabled')->willReturn(true);
+        $config->method('getPaymentPauseMinutes')->willReturn(30);
+        $pause = new PaymentBlockPauseService(new ArrayAdapter(), $config, $this->createMock(BalanceAlertService::class), new NullLogger());
+        $pause->pause('VALID_API_KEY_12345', null, 'blocked');
+
+        $captured = null;
+        $this->mockDirectBatchHandler->expects($this->once())->method('__invoke')
+            ->willReturnCallback(function (SendWhatsAppDirectBatchMessage $batch) use (&$captured): array {
+                $captured = $batch->items[0];
+
+                return [['success' => true]];
+            });
+
+        $event = $this->buildPendingEvent(CampaignSubscriber::ACTION_SEND_LEGACY, [1 => $this->buildContact('+5511999999999', 1)]);
+        $event->expects($this->never())->method('fail');
+        $event->expects($this->once())->method('pass');
+
+        $this->makeSubscriber('null://null', $pause)->onCampaignTriggerAction($event);
+
+        $this->assertTrue($captured->legacy);
+    }
+
+    /**
+     * @return array<string, array{string, string, bool}>
+     */
+    public static function actionVersionProvider(): array
+    {
+        return [
+            'direto legado'   => [CampaignSubscriber::ACTION_SEND_LEGACY, 'onCampaignTriggerAction', true],
+            'direto novo'     => [CampaignSubscriber::ACTION_SEND, 'onCampaignTriggerAction', false],
+            'rabbitmq legado' => [CampaignSubscriber::ACTION_SEND_QUEUE_LEGACY, 'onCampaignTriggerActionQueue', true],
+            'rabbitmq novo'   => [CampaignSubscriber::ACTION_SEND_QUEUE, 'onCampaignTriggerActionQueue', false],
+        ];
+    }
+
+    /**
+     * As duas versões de cada ação usam o mesmo fluxo; só a marca legacy da mensagem muda.
+     *
+     * @dataProvider actionVersionProvider
+     */
+    public function testEachActionVersionSendsWithItsLegacyFlag(string $actionKey, string $method, bool $expectedLegacy): void
+    {
+        $this->enableIntegration();
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
+
+        $captured = [];
+        $this->mockDirectBatchHandler->method('__invoke')
+            ->willReturnCallback(function (SendWhatsAppDirectBatchMessage $batch) use (&$captured): array {
+                array_push($captured, ...$batch->items);
+
+                return [['success' => true]];
+            });
+        $this->mockBus->method('dispatch')->willReturnCallback(function (object $message) use (&$captured): Envelope {
+            if ($message instanceof SendWhatsAppMessage) {
+                $captured[] = $message;
+            }
+
+            return new Envelope($message);
+        });
+
+        $event = $this->buildPendingEvent($actionKey, [1 => $this->buildContact('+5511999999999', 1)]);
+        $event->expects($this->once())->method('pass');
+
+        $this->subscriber->{$method}($event);
+
+        $this->assertCount(1, $captured);
+        $this->assertSame($expectedLegacy, $captured[0]->legacy);
     }
 
     /**

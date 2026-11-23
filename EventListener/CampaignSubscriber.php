@@ -48,6 +48,18 @@ class CampaignSubscriber implements EventSubscriberInterface
     private const BUILD_ERROR_RETRY_INTERVAL = 'PT15M';
 
     /**
+     * Ações de envio. As chaves originais viraram as versões "(legado)": as campanhas já
+     * criadas guardam a chave no evento e continuam com o comportamento anterior, sem
+     * pré-validação do template e sem pausa por bloqueio de pagamento. As versões novas (_v2)
+     * herdam os nomes de antes e trazem as duas proteções.
+     */
+    public const ACTION_SEND_LEGACY       = 'dialoghsm.send_whatsapp';
+    public const ACTION_SEND_QUEUE_LEGACY = 'dialoghsm.send_whatsapp_queue';
+    public const ACTION_SEND              = 'dialoghsm.send_whatsapp_v2';
+    public const ACTION_SEND_QUEUE        = 'dialoghsm.send_whatsapp_queue_v2';
+    public const ACTION_SEND_MESSAGE      = 'dialoghsm.send_whatsapp_message';
+
+    /**
      * Política de falhas deste subscriber — dois tipos, tratamentos opostos:
      *
      * 1. Erro de montagem da ação (integração, número, API key, fila, payload ou qualquer
@@ -111,32 +123,31 @@ class CampaignSubscriber implements EventSubscriberInterface
 
     public function onCampaignBuild(CampaignBuilderEvent $event): void
     {
-        $event->addAction(
-            'dialoghsm.send_whatsapp',
-            [
-                'label'            => 'dialoghsm.campaign.send_whatsapp',
-                'description'      => 'dialoghsm.campaign.send_whatsapp.tooltip',
-                'batchEventName'   => DialogHSMEvents::ON_CAMPAIGN_TRIGGER_ACTION,
-                'formType'         => SendWhatsAppType::class,
-                'channel'          => 'whatsapp',
-                'timelineTemplate' => '@DialogHSM/Timeline/campaign_action.html.twig',
-            ]
-        );
+        // Mesmo formulário e mesmo evento de disparo nas duas versões: o subscriber distingue
+        // pela chave da ação (checkContext).
+        $sendActions = [
+            self::ACTION_SEND              => ['dialoghsm.campaign.send_whatsapp', DialogHSMEvents::ON_CAMPAIGN_TRIGGER_ACTION, SendWhatsAppType::class],
+            self::ACTION_SEND_QUEUE        => ['dialoghsm.campaign.send_whatsapp_queue', DialogHSMEvents::ON_CAMPAIGN_TRIGGER_ACTION_QUEUE, SendWhatsAppQueueType::class],
+            self::ACTION_SEND_LEGACY       => ['dialoghsm.campaign.send_whatsapp_legacy', DialogHSMEvents::ON_CAMPAIGN_TRIGGER_ACTION, SendWhatsAppType::class],
+            self::ACTION_SEND_QUEUE_LEGACY => ['dialoghsm.campaign.send_whatsapp_queue_legacy', DialogHSMEvents::ON_CAMPAIGN_TRIGGER_ACTION_QUEUE, SendWhatsAppQueueType::class],
+        ];
+
+        foreach ($sendActions as $key => [$label, $batchEventName, $formType]) {
+            $event->addAction(
+                $key,
+                [
+                    'label'            => $label,
+                    'description'      => $label.'.tooltip',
+                    'batchEventName'   => $batchEventName,
+                    'formType'         => $formType,
+                    'channel'          => 'whatsapp',
+                    'timelineTemplate' => '@DialogHSM/Timeline/campaign_action.html.twig',
+                ]
+            );
+        }
 
         $event->addAction(
-            'dialoghsm.send_whatsapp_queue',
-            [
-                'label'            => 'dialoghsm.campaign.send_whatsapp_queue',
-                'description'      => 'dialoghsm.campaign.send_whatsapp_queue.tooltip',
-                'batchEventName'   => DialogHSMEvents::ON_CAMPAIGN_TRIGGER_ACTION_QUEUE,
-                'formType'         => SendWhatsAppQueueType::class,
-                'channel'          => 'whatsapp',
-                'timelineTemplate' => '@DialogHSM/Timeline/campaign_action.html.twig',
-            ]
-        );
-
-        $event->addAction(
-            'dialoghsm.send_whatsapp_message',
+            self::ACTION_SEND_MESSAGE,
             [
                 'label'            => 'dialoghsm.campaign.send_whatsapp_message',
                 'description'      => 'dialoghsm.campaign.send_whatsapp_message.tooltip',
@@ -149,9 +160,11 @@ class CampaignSubscriber implements EventSubscriberInterface
         );
 
         $sendActionTypes = [
-            'dialoghsm.send_whatsapp',
-            'dialoghsm.send_whatsapp_queue',
-            'dialoghsm.send_whatsapp_message',
+            self::ACTION_SEND_LEGACY,
+            self::ACTION_SEND_QUEUE_LEGACY,
+            self::ACTION_SEND_MESSAGE,
+            self::ACTION_SEND,
+            self::ACTION_SEND_QUEUE,
         ];
 
         $event->addDecision(
@@ -243,7 +256,9 @@ class CampaignSubscriber implements EventSubscriberInterface
 
     public function onCampaignTriggerAction(PendingEvent $event): void
     {
-        if (!$event->checkContext('dialoghsm.send_whatsapp')) {
+        $legacy = $event->checkContext(self::ACTION_SEND_LEGACY);
+
+        if (!$legacy && !$event->checkContext(self::ACTION_SEND)) {
             return;
         }
 
@@ -263,7 +278,8 @@ class CampaignSubscriber implements EventSubscriberInterface
 
                     return true;
                 },
-                applyBatchSleep: false
+                applyBatchSleep: false,
+                legacy: $legacy
             );
 
             if (!empty($items)) {
@@ -295,8 +311,8 @@ class CampaignSubscriber implements EventSubscriberInterface
         // Envio inline não tem fila para segurar a mensagem enquanto o número está pausado por
         // falta de pagamento: o contato fica com nova tentativa em 15 min (erro de montagem),
         // em vez de o envio sair e virar falha. Fila e Redis seguram a mensagem no consumo.
-        $checkNumber = function (WhatsAppNumber $number): void {
-            if (null !== $this->paymentPause && $this->paymentPause->isPaused((string) $number->getApiKey())) {
+        $checkNumber = function (WhatsAppNumber $number) use ($legacy): void {
+            if (!$legacy && null !== $this->paymentPause && $this->paymentPause->isPaused((string) $number->getApiKey())) {
                 throw new CampaignActionBuildException(sprintf(
                     'O número WhatsApp "%s" está pausado: a 360dialog o bloqueou por falta de pagamento. O envio é tentado de novo automaticamente.',
                     $number->getName() ?? ''
@@ -313,7 +329,8 @@ class CampaignSubscriber implements EventSubscriberInterface
                 return true;
             },
             applyBatchSleep: false,
-            checkNumber: $checkNumber
+            checkNumber: $checkNumber,
+            legacy: $legacy
         );
 
         if (!empty($items)) {
@@ -394,7 +411,9 @@ class CampaignSubscriber implements EventSubscriberInterface
 
     public function onCampaignTriggerActionQueue(PendingEvent $event): void
     {
-        if (!$event->checkContext('dialoghsm.send_whatsapp_queue')) {
+        $legacy = $event->checkContext(self::ACTION_SEND_QUEUE_LEGACY);
+
+        if (!$legacy && !$event->checkContext(self::ACTION_SEND_QUEUE)) {
             return;
         }
 
@@ -447,7 +466,7 @@ class CampaignSubscriber implements EventSubscriberInterface
             }
 
             return true;
-        }, applyBatchSleep: false, checkNumber: $checkNumber);
+        }, applyBatchSleep: false, checkNumber: $checkNumber, legacy: $legacy);
     }
 
     private function resolveQueueName(WhatsAppNumber $number, string $mode): ?string
@@ -466,13 +485,13 @@ class CampaignSubscriber implements EventSubscriberInterface
      * @param (\Closure(WhatsAppNumber): void)|null $checkNumber validação extra do número
      *                                                          (lança CampaignActionBuildException)
      */
-    private function processContacts(PendingEvent $event, callable $sender, bool $applyBatchSleep = true, ?\Closure $checkNumber = null): void
+    private function processContacts(PendingEvent $event, callable $sender, bool $applyBatchSleep = true, ?\Closure $checkNumber = null, bool $legacy = false): void
     {
         // logIds já decididos neste lote (pass/passWithError) — não podem receber fail()
         $decided = [];
 
         try {
-            $this->executeContacts($event, $sender, $applyBatchSleep, $checkNumber, $decided);
+            $this->executeContacts($event, $sender, $applyBatchSleep, $checkNumber, $decided, $legacy);
         } catch (CampaignActionBuildException $e) {
             $this->failForBuildError($event, $decided, $e->getMessage());
         } catch (\Throwable $e) {
@@ -489,7 +508,7 @@ class CampaignSubscriber implements EventSubscriberInterface
      *
      * @param array<int|string, true> $decided
      */
-    private function executeContacts(PendingEvent $event, callable $sender, bool $applyBatchSleep, ?\Closure $checkNumber, array &$decided): void
+    private function executeContacts(PendingEvent $event, callable $sender, bool $applyBatchSleep, ?\Closure $checkNumber, array &$decided, bool $legacy = false): void
     {
         $campaignEvent   = $event->getEvent();
         $campaignId      = $campaignEvent->getCampaign()?->getId();
@@ -581,6 +600,7 @@ class CampaignSubscriber implements EventSubscriberInterface
                 whatsAppNumberName: $whatsAppNumber->getName() ?? '',
                 campaignId:         $campaignId,
                 campaignEventId:    $campaignEventId,
+                legacy:             $legacy,
             );
         }
 

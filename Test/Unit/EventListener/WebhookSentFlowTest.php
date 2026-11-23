@@ -97,7 +97,7 @@ class WebhookSentFlowTest extends TestCase
         $mockPending->method('get')->willReturn($mockLog);
 
         $event = $this->createMock(PendingEvent::class);
-        $event->method('checkContext')->with($context)->willReturn(true);
+        $event->method('checkContext')->willReturnCallback(static fn (string $type): bool => $type === $context);
         $event->method('getEvent')->willReturn($mockCampaignEvent);
         $event->method('getContacts')->willReturn($contacts);
         $event->method('getPending')->willReturn($mockPending);
