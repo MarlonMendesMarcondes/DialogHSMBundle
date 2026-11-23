@@ -68,31 +68,14 @@
 
         <div data-role="fields"></div>
 
-        {# Prévia no formato do WhatsApp: balão com cabeçalho, corpo formatado, rodapé e botões. #}
-        <style>
-            .dialoghsm-wa-preview { background: #efeae2; border-radius: 8px; padding: 16px; margin-bottom: 15px; }
-            .dialoghsm-wa-preview__title { font-size: 12px; color: #667781; margin-bottom: 8px; }
-            .dialoghsm-wa-bubble { background: #fff; color: #111b21; border-radius: 8px; max-width: 420px; box-shadow: 0 1px 0.5px rgba(11, 20, 26, .13); overflow: hidden; }
-            .dialoghsm-wa-bubble__media { background: #d1d7db; color: #54656f; height: 140px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 12px; gap: 4px; }
-            .dialoghsm-wa-bubble__media i { font-size: 32px; }
-            .dialoghsm-wa-bubble__media img { width: 100%; height: 100%; object-fit: cover; }
-            .dialoghsm-wa-bubble__header { font-weight: 600; padding: 8px 10px 0; }
-            .dialoghsm-wa-bubble__body { padding: 8px 10px; white-space: pre-wrap; word-wrap: break-word; font-size: 14px; line-height: 1.4; }
-            .dialoghsm-wa-bubble__footer { padding: 0 10px 8px; color: #667781; font-size: 12px; }
-            .dialoghsm-wa-bubble__button { border-top: 1px solid #e9edef; color: #027eb5; text-align: center; padding: 9px 10px; font-size: 14px; }
-            .dialoghsm-wa-var { background: #e7f3ff; color: #0b5394; border-radius: 4px; padding: 0 3px; }
-            .dialoghsm-wa-var--empty { background: #fff3cd; color: #856404; }
-            .dialoghsm-wa-var--token { background: #e8e1f5; color: #5b3e96; }
-            .dialoghsm-wa-bubble code { font-family: monospace; background: none; color: inherit; padding: 0; }
-        </style>
-        <div class="dialoghsm-wa-preview" data-role="preview-panel" style="display:none;">
-            <div class="dialoghsm-wa-preview__title">{{ 'dialoghsm.campaign.template.js.preview'|trans }}</div>
-            <div class="dialoghsm-wa-bubble" data-role="preview"></div>
-        </div>
+        {# Prévia no formato do WhatsApp (componente _wa_preview, incluído acima do script). #}
+        <div data-role="preview-panel"></div>
 
         {{ form_widget(paramsField) }}
 
     </div>
+
+    {% include '@DialogHSM/FormTheme/_wa_preview.html.twig' %}
 
     <script>
     (function () {
@@ -114,7 +97,6 @@
         var statusEl = root.querySelector('[data-role="status"]');
         var fields   = root.querySelector('[data-role="fields"]');
         var prevPane = root.querySelector('[data-role="preview-panel"]');
-        var preview  = root.querySelector('[data-role="preview"]');
 
         // Tipo do botão no template → sub_type do envio; só estes têm parâmetro conhecido.
         var BUTTON_SUBTYPES = {URL: 'url', COPY_CODE: 'copy_code'};
@@ -245,7 +227,7 @@
         function renderTemplate(tpl) {
             fields.innerHTML = '';
             if (!tpl) {
-                prevPane.style.display = 'none';
+                prevPane.innerHTML = '';
                 sync();
                 return;
             }
@@ -308,86 +290,11 @@
             sync();
         }
 
-        // ── prévia ──────────────────────────────────────────────────────────
-        function escapeHtml(text) {
-            return String(text).replace(/[&<>"']/g, function (c) {
-                return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c];
-            });
-        }
-
-        // Alguns templates chegam da API com a quebra de linha escapada ("\\n" literal).
-        function unescapeBreaks(text) {
-            return String(text || '').replace(/\\r\\n|\\n/g, '\n');
-        }
-
-        // Valor da variável como aparece na prévia: token do contato vira um selo com o campo
-        // (o valor real só existe no envio); vazio vira o marcador da variável em amarelo
-        // (montado com chaves soltas porque "{" + "{" seguidos seriam lidos pelo Twig).
-        function variableHtml(n, value) {
-            if (!value) {
-                return '<span class="dialoghsm-wa-var dialoghsm-wa-var--empty">{' + '{' + n + '}' + '}</span>';
-            }
-            var html = escapeHtml(value).replace(/\{contactfield=([^}]+)\}/g, function (m, field) {
-                return '<span class="dialoghsm-wa-var dialoghsm-wa-var--token">' + field + '</span>';
-            });
-            return '<span class="dialoghsm-wa-var">' + html + '</span>';
-        }
-
-        // Texto do template → HTML: escapa tudo antes, troca as variáveis e aplica a formatação do
-        // WhatsApp (*negrito*, _itálico_, ~tachado~, ```monoespaçado```). Nada da API ou do
-        // usuário entra no HTML sem passar por escapeHtml.
-        function formatWhatsApp(text, values) {
-            var html = escapeHtml(unescapeBreaks(text)).replace(/\{\{\s*(\d+)\s*\}\}/g, function (m, n) {
-                return variableHtml(n, values[parseInt(n, 10) - 1]);
-            });
-
-            return html
-                .replace(/```([\s\S]+?)```/g, '<code>$1</code>')
-                .replace(/(^|[\s>])\*(?!\s)([^*\n]+?)\*(?=$|[\s<.,!?;:])/g, '$1<strong>$2</strong>')
-                .replace(/(^|[\s>])_(?!\s)([^_\n]+?)_(?=$|[\s<.,!?;:])/g, '$1<em>$2</em>')
-                .replace(/(^|[\s>])~(?!\s)([^~\n]+?)~(?=$|[\s<.,!?;:])/g, '$1<s>$2</s>');
-        }
-
-        var MEDIA_ICONS = {IMAGE: 'ri-image-line', VIDEO: 'ri-video-line', DOCUMENT: 'ri-file-text-line', LOCATION: 'ri-map-pin-line'};
-
+        // ── prévia (componente DialogHsmPreview, de _wa_preview) ────────────
         function renderPreview() {
-            var tpl = current();
-            if (!tpl || (!tpl.body.text && !tpl.header.format)) {
-                prevPane.style.display = 'none';
-                return;
+            if (window.DialogHsmPreview) {
+                window.DialogHsmPreview.render(prevPane, current(), params, {title: t.preview});
             }
-
-            var html = '';
-            var fmtHeader = tpl.header.format;
-
-            if (MEDIA_ICONS[fmtHeader]) {
-                // Imagem com link https fixo (sem token) aparece de verdade; o resto, um ícone.
-                var link = params.header || '';
-                var showImage = fmtHeader === 'IMAGE' && /^https:\/\/[^\s{}]+$/i.test(link);
-                html += '<div class="dialoghsm-wa-bubble__media">'
-                    + (showImage
-                        ? '<img src="' + escapeHtml(link) + '" alt="">'
-                        : '<i class="' + MEDIA_ICONS[fmtHeader] + '"></i><span>' + escapeHtml(fmtHeader) + '</span>')
-                    + '</div>';
-            } else if (fmtHeader === 'TEXT' && tpl.header.text) {
-                html += '<div class="dialoghsm-wa-bubble__header">' + formatWhatsApp(tpl.header.text, []) + '</div>';
-            }
-
-            if (tpl.body.text) {
-                html += '<div class="dialoghsm-wa-bubble__body">' + formatWhatsApp(tpl.body.text, params.body) + '</div>';
-            }
-
-            if (tpl.footer) {
-                html += '<div class="dialoghsm-wa-bubble__footer">' + escapeHtml(unescapeBreaks(tpl.footer)) + '</div>';
-            }
-
-            tpl.buttons.forEach(function (b) {
-                var icon = b.type === 'URL' ? 'ri-external-link-line' : (b.type === 'PHONE_NUMBER' ? 'ri-phone-line' : (b.type === 'COPY_CODE' ? 'ri-file-copy-line' : 'ri-reply-line'));
-                html += '<div class="dialoghsm-wa-bubble__button"><i class="' + icon + '"></i> ' + escapeHtml(b.text || b.type) + '</div>';
-            });
-
-            preview.innerHTML = html;
-            prevPane.style.display = '';
         }
 
         // ── modo manual (lista indisponível) ────────────────────────────────
@@ -396,7 +303,7 @@
             selRow.style.display = 'none';
             manRow.style.display = '';
             setStatus(message, true);
-            prevPane.style.display = 'none';
+            prevPane.innerHTML = '';
             renderManual();
         }
 

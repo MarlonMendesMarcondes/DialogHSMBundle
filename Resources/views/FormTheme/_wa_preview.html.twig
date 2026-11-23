@@ -1,0 +1,162 @@
+{#
+  Componente de prévia no formato do WhatsApp: balão com cabeçalho (mídia ou texto), corpo com a
+  formatação do WhatsApp, rodapé e botões; variáveis destacadas.
+
+  Uso, de qualquer tela do Mautic (inclusive de outro plugin):
+
+    {% include '@DialogHSM/FormTheme/_wa_preview.html.twig' ignore missing %}
+
+    <div id="minha-previa"></div>
+    <script>
+      if (window.DialogHsmPreview) {
+        DialogHsmPreview.render(document.getElementById('minha-previa'), template, values);
+      }
+    </script>
+
+  - template: o mesmo formato de cada item de GET /s/dialoghsm/number-templates/{numberId}:
+      {header: {format: 'IMAGE'|'VIDEO'|'DOCUMENT'|'LOCATION'|'TEXT'|null, text: '...'},
+       body: {text: 'Olá {{1}}'}, footer: '...', buttons: [{type: 'URL', text: 'Ver'}]}
+  - values: {header: 'https://...', body: ['valor de {{1}}', 'valor de {{2}}']}
+  - options (opcional): {title: 'Prévia'} — sem title, a moldura sai sem título.
+
+  render() devolve false e esvazia o container quando não há o que mostrar (sem body nem header).
+  DialogHsmPreview.format(texto, valores) devolve só o HTML de um texto formatado.
+
+  Incluir mais de uma vez na mesma página é seguro: o script só define o componente na primeira.
+  O "ignore missing" mantém a tela funcionando numa instância sem o DialogHSM — o componente só
+  não existe (por isso o "if (window.DialogHsmPreview)").
+
+  É inline, e não asset do Mautic, para funcionar também em formulário carregado por AJAX no modal
+  do construtor de campanha (o jQuery executa scripts do conteúdo inserido) e sem precisar de
+  mautic:assets:generate no deploy.
+#}
+<style>
+    .dialoghsm-wa-preview { background: #efeae2; border-radius: 8px; padding: 16px; margin-bottom: 15px; }
+    .dialoghsm-wa-preview__title { font-size: 12px; color: #667781; margin-bottom: 8px; }
+    .dialoghsm-wa-bubble { background: #fff; color: #111b21; border-radius: 8px; max-width: 420px; box-shadow: 0 1px 0.5px rgba(11, 20, 26, .13); overflow: hidden; }
+    .dialoghsm-wa-bubble__media { background: #d1d7db; color: #54656f; height: 140px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 12px; gap: 4px; }
+    .dialoghsm-wa-bubble__media i { font-size: 32px; }
+    .dialoghsm-wa-bubble__media img { width: 100%; height: 100%; object-fit: cover; }
+    .dialoghsm-wa-bubble__header { font-weight: 600; padding: 8px 10px 0; }
+    .dialoghsm-wa-bubble__body { padding: 8px 10px; white-space: pre-wrap; word-wrap: break-word; font-size: 14px; line-height: 1.4; }
+    .dialoghsm-wa-bubble__footer { padding: 0 10px 8px; color: #667781; font-size: 12px; }
+    .dialoghsm-wa-bubble__button { border-top: 1px solid #e9edef; color: #027eb5; text-align: center; padding: 9px 10px; font-size: 14px; }
+    .dialoghsm-wa-var { background: #e7f3ff; color: #0b5394; border-radius: 4px; padding: 0 3px; }
+    .dialoghsm-wa-var--empty { background: #fff3cd; color: #856404; }
+    .dialoghsm-wa-var--token { background: #e8e1f5; color: #5b3e96; }
+    .dialoghsm-wa-bubble code { font-family: monospace; background: none; color: inherit; padding: 0; }
+</style>
+<script>
+(function () {
+    if (window.DialogHsmPreview) {
+        return;
+    }
+
+    var MEDIA_ICONS  = {IMAGE: 'ri-image-line', VIDEO: 'ri-video-line', DOCUMENT: 'ri-file-text-line', LOCATION: 'ri-map-pin-line'};
+    var BUTTON_ICONS = {URL: 'ri-external-link-line', PHONE_NUMBER: 'ri-phone-line', COPY_CODE: 'ri-file-copy-line'};
+
+    function escapeHtml(text) {
+        return String(text).replace(/[&<>"']/g, function (c) {
+            return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c];
+        });
+    }
+
+    // Alguns templates chegam da API com a quebra de linha escapada ("\\n" literal).
+    function unescapeBreaks(text) {
+        return String(text || '').replace(/\\r\\n|\\n/g, '\n');
+    }
+
+    // Valor da variável como aparece na prévia: token do contato vira um selo com o campo (o valor
+    // real só existe no envio); vazio vira o marcador da variável em amarelo (montado com chaves
+    // soltas porque duas chaves seguidas seriam lidas pelo Twig).
+    function variableHtml(n, value) {
+        if (!value) {
+            return '<span class="dialoghsm-wa-var dialoghsm-wa-var--empty">{' + '{' + n + '}' + '}</span>';
+        }
+        var html = escapeHtml(value).replace(/\{contactfield=([^}]+)\}/g, function (m, field) {
+            return '<span class="dialoghsm-wa-var dialoghsm-wa-var--token">' + field + '</span>';
+        });
+        return '<span class="dialoghsm-wa-var">' + html + '</span>';
+    }
+
+    // Texto → HTML: escapa tudo antes, troca as variáveis e aplica a formatação do WhatsApp
+    // (*negrito*, _itálico_, ~tachado~, ```monoespaçado```). Nada da API ou do usuário entra no
+    // HTML sem passar por escapeHtml.
+    function format(text, values) {
+        values = values || [];
+        var html = escapeHtml(unescapeBreaks(text)).replace(/\{\{\s*(\d+)\s*\}\}/g, function (m, n) {
+            return variableHtml(n, values[parseInt(n, 10) - 1]);
+        });
+
+        return html
+            .replace(/```([\s\S]+?)```/g, '<code>$1</code>')
+            .replace(/(^|[\s>])\*(?!\s)([^*\n]+?)\*(?=$|[\s<.,!?;:])/g, '$1<strong>$2</strong>')
+            .replace(/(^|[\s>])_(?!\s)([^_\n]+?)_(?=$|[\s<.,!?;:])/g, '$1<em>$2</em>')
+            .replace(/(^|[\s>])~(?!\s)([^~\n]+?)~(?=$|[\s<.,!?;:])/g, '$1<s>$2</s>');
+    }
+
+    function bubbleHtml(template, values) {
+        var header  = template.header || {};
+        var body    = template.body || {};
+        var html    = '';
+
+        if (MEDIA_ICONS[header.format]) {
+            // Imagem com link https fixo (sem token) aparece de verdade; o resto, um ícone.
+            var link      = values.header || '';
+            var showImage = header.format === 'IMAGE' && /^https:\/\/[^\s{}]+$/i.test(link);
+            html += '<div class="dialoghsm-wa-bubble__media">'
+                + (showImage
+                    ? '<img src="' + escapeHtml(link) + '" alt="">'
+                    : '<i class="' + MEDIA_ICONS[header.format] + '"></i><span>' + escapeHtml(header.format) + '</span>')
+                + '</div>';
+        } else if (header.format === 'TEXT' && header.text) {
+            html += '<div class="dialoghsm-wa-bubble__header">' + format(header.text, []) + '</div>';
+        }
+
+        if (body.text) {
+            html += '<div class="dialoghsm-wa-bubble__body">' + format(body.text, values.body) + '</div>';
+        }
+
+        if (template.footer) {
+            html += '<div class="dialoghsm-wa-bubble__footer">' + escapeHtml(unescapeBreaks(template.footer)) + '</div>';
+        }
+
+        (template.buttons || []).forEach(function (b) {
+            html += '<div class="dialoghsm-wa-bubble__button"><i class="' + (BUTTON_ICONS[b.type] || 'ri-reply-line') + '"></i> '
+                + escapeHtml(b.text || b.type || '') + '</div>';
+        });
+
+        return html;
+    }
+
+    window.DialogHsmPreview = {
+        version: 1,
+        format: format,
+
+        /**
+         * @return {boolean} false quando não há o que mostrar (o container fica vazio)
+         */
+        render: function (container, template, values, options) {
+            if (!container) {
+                return false;
+            }
+
+            template = template || {};
+            values   = values || {};
+            options  = options || {};
+
+            if (!(template.body && template.body.text) && !(template.header && template.header.format)) {
+                container.innerHTML = '';
+                return false;
+            }
+
+            container.innerHTML = '<div class="dialoghsm-wa-preview">'
+                + (options.title ? '<div class="dialoghsm-wa-preview__title">' + escapeHtml(options.title) + '</div>' : '')
+                + '<div class="dialoghsm-wa-bubble">' + bubbleHtml(template, values) + '</div>'
+                + '</div>';
+
+            return true;
+        }
+    };
+})();
+</script>
