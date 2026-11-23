@@ -645,6 +645,11 @@ class MarketingMessageSubscriberTest extends TestCase
         $this->assertSame(20, $message->campaignEventId);
     }
 
+    public function testMarketingMessageOptsIntoTheNewSafeguards(): void
+    {
+        $this->assertFalse($this->dispatchFromCampaign()->legacy, 'Mensagem WhatsApp usa pré-validação e pausa por pagamento.');
+    }
+
     public function testBulkQueueUsesBulkRate(): void
     {
         $this->assertFalse($this->dispatchFromCampaign($this->makeNumber())->isBatch);

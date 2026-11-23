@@ -196,6 +196,8 @@ class WhatsAppMessageModel extends FormModel implements AjaxLookupModelInterface
                     whatsAppNumberName: $number->getName() ?? '',
                     queueLogId:         (string) $log->getId(),
                     isBatch:            true,
+                    // Mensagem WhatsApp usa as proteções novas (pré-validação e pausa).
+                    legacy:             false,
                 );
 
                 ++$sent;

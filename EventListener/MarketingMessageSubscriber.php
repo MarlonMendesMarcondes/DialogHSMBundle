@@ -134,6 +134,8 @@ class MarketingMessageSubscriber implements EventSubscriberInterface
                     // aplica a proteção contra envio duplicado.
                     campaignId:         $campaignId,
                     campaignEventId:    $campaignEventId,
+                    // Mensagem WhatsApp usa as proteções novas (pré-validação e pausa).
+                    legacy:             false,
                 ), $stamps);
                 $this->eventLogWriter->write($msgLog, LeadEventLogWriter::ACTION_DISPATCHED, new \DateTime());
                 $pendingEvent->pass($log);
@@ -228,6 +230,8 @@ class MarketingMessageSubscriber implements EventSubscriberInterface
                     whatsAppNumberName: $number->getName() ?? '',
                     queueLogId:         (string) $msgLog->getId(),
                     isBatch:            $isBatch,
+                    // Mensagem WhatsApp usa as proteções novas (pré-validação e pausa).
+                    legacy:             false,
                 ), $stamps);
                 $this->eventLogWriter->write($msgLog, LeadEventLogWriter::ACTION_DISPATCHED, new \DateTime());
                 $queuedMessage->setProcessed();

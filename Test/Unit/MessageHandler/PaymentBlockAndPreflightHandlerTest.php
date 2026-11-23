@@ -294,6 +294,37 @@ class PaymentBlockAndPreflightHandlerTest extends TestCase
         ($this->handler)($this->message());
     }
 
+    /**
+     * Outros plugins montam a mensagem sem a marca e passam pelo handler — o N8nDispatchBundle
+     * (DialogHsmGateway) com skipRetry=true. Eles mantêm o comportamento anterior: 403 de
+     * pagamento vira log "failed", sem pausa nem pré-validação.
+     */
+    public function testMessageBuiltWithoutTheFlagKeepsThePreviousBehaviour(): void
+    {
+        $message = new SendWhatsAppMessage(
+            leadId:             1,
+            phone:              '+5511999990000',
+            apiKey:             'API_KEY',
+            baseUrl:            'https://waba-v2.360dialog.io/messages',
+            payloadData:        ['content' => 'promo', 'language' => 'pt_BR', 'vars' => '1', '1' => 'Ana'],
+            templateName:       'promo',
+            whatsAppNumberName: 'Vestibular',
+        );
+        $this->assertTrue($message->legacy);
+
+        $this->pause->pause('API_KEY', null, 'blocked');
+        $this->api->expects($this->once())->method('sendMessage')
+            ->with('API_KEY', $this->anything(), $this->anything(), $this->anything(), false)
+            ->willReturn(self::PAYMENT_BLOCKED);
+
+        $result = ($this->handler)($message, false, false, true);
+
+        $this->assertFalse($result['success']);
+        $this->assertArrayNotHasKey('payment_blocked', $result);
+        $this->assertSame(MessageLog::STATUS_FAILED, $this->persisted[0]->getStatus());
+        $this->assertSame([], $this->dispatched);
+    }
+
     public function testMessageQueuedBeforeTheDeployIsTreatedAsLegacy(): void
     {
         // Serializada sem a propriedade legacy (formato anterior).

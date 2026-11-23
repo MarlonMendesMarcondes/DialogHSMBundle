@@ -651,5 +651,6 @@ class WhatsAppMessageModelTest extends TestCase
         $this->assertSame('{{1}},{{2}}', $data['vars']);
         $this->assertSame('João', $data['{{1}}']);
         $this->assertSame('Direito', $data['{{2}}']);
+        $this->assertFalse($captured->items[0]->legacy, 'Broadcast da Mensagem WhatsApp usa as proteções novas.');
     }
 }
