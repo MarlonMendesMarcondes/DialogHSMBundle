@@ -31,6 +31,7 @@ use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Model\WhatsAppNumberModel;
 use MauticPlugin\DialogHSMBundle\Service\LeadEventLogWriter;
 use MauticPlugin\DialogHSMBundle\Service\PaymentBlockPauseService;
+use MauticPlugin\DialogHSMBundle\Service\TemplatePayload;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\Messenger\Bridge\Amqp\Transport\AmqpStamp;
@@ -941,24 +942,19 @@ class CampaignSubscriber implements EventSubscriberInterface
     private function buildPayloadFromConfig(array $config, ?array $profileFields): array
     {
         $payloadData = $config['payload_data'] ?? [];
-        $structured  = $this->templateFieldsToList($config);
+        // Formulário guiado (ações novas): campos hsm_* nas propriedades do evento.
+        $structured  = TemplatePayload::toList(
+            (string) ($config['hsm_template'] ?? ''),
+            (string) ($config['hsm_language'] ?? ''),
+            is_scalar($config['hsm_params'] ?? null) ? (string) $config['hsm_params'] : null
+        );
 
         if (empty($payloadData) && [] === $structured) {
             return [];
         }
 
-        // Campos guiados primeiro: um rótulo repetido no Payload Data avançado é ignorado.
         $advanced = is_array($payloadData) ? ($payloadData['list'] ?? $payloadData) : [];
-        $taken    = array_column($structured, 'label');
-        $list     = $structured;
-
-        foreach (is_array($advanced) ? $advanced : [] as $item) {
-            if (is_array($item) && isset($item['label']) && is_scalar($item['label'])
-                && in_array(trim((string) $item['label']), $taken, true)) {
-                continue;
-            }
-            $list[] = $item;
-        }
+        $list     = TemplatePayload::merge($structured, is_array($advanced) ? $advanced : []);
 
         $result = [];
         $tokens = [];
@@ -996,72 +992,6 @@ class CampaignSubscriber implements EventSubscriberInterface
         }
 
         return $result;
-    }
-
-    /**
-     * Converte os campos do formulário guiado (ações novas) nos mesmos pares rótulo/valor do
-     * Payload Data, que buildPayload() da DialogHSMApi já entende:
-     *
-     *   hsm_template / hsm_language → content / language
-     *   hsm_params.body[i]          → rótulo "{{i+1}}", listado em vars na ordem do template
-     *   hsm_params.header           → url_arquivo
-     *   hsm_params.buttons[i]       → buttons / buttons_vars, com posição vazia nos índices sem
-     *                                 variável (o índice enviado é a posição no template)
-     *
-     * @param array<string, mixed> $config
-     *
-     * @return list<array{label: string, value: string}> vazio quando a ação não é do formulário guiado
-     */
-    private function templateFieldsToList(array $config): array
-    {
-        $template = trim((string) ($config['hsm_template'] ?? ''));
-        if ('' === $template) {
-            return [];
-        }
-
-        $language = trim((string) ($config['hsm_language'] ?? ''));
-        $params   = json_decode((string) ($config['hsm_params'] ?? ''), true);
-        $params   = is_array($params) ? $params : [];
-
-        $list = [
-            ['label' => 'content', 'value' => $template],
-            ['label' => 'language', 'value' => '' !== $language ? $language : 'pt_BR'],
-        ];
-
-        $labels = [];
-        foreach (array_values(is_array($params['body'] ?? null) ? $params['body'] : []) as $i => $value) {
-            $label    = '{{'.($i + 1).'}}';
-            $labels[] = $label;
-            $list[]   = ['label' => $label, 'value' => is_scalar($value) ? (string) $value : ''];
-        }
-        if ([] !== $labels) {
-            $list[] = ['label' => 'vars', 'value' => implode(',', $labels)];
-        }
-
-        $header = is_scalar($params['header'] ?? null) ? trim((string) $params['header']) : '';
-        if ('' !== $header) {
-            $list[] = ['label' => 'url_arquivo', 'value' => $header];
-        }
-
-        $buttons = [];
-        foreach (is_array($params['buttons'] ?? null) ? $params['buttons'] : [] as $index => $button) {
-            $type = is_array($button) && is_scalar($button['type'] ?? null) ? strtolower(trim((string) $button['type'])) : '';
-            if (ctype_digit((string) $index) && '' !== $type) {
-                $buttons[(int) $index] = [$type, is_scalar($button['value'] ?? null) ? (string) $button['value'] : ''];
-            }
-        }
-        if ([] !== $buttons) {
-            $types  = [];
-            $values = [];
-            for ($i = 0, $max = max(array_keys($buttons)); $i <= $max; ++$i) {
-                $types[]  = $buttons[$i][0] ?? '';
-                $values[] = $buttons[$i][1] ?? '';
-            }
-            $list[] = ['label' => 'buttons', 'value' => implode(',', $types)];
-            $list[] = ['label' => 'buttons_vars', 'value' => implode(',', $values)];
-        }
-
-        return $list;
     }
 
     /**

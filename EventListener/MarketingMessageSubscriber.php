@@ -14,10 +14,12 @@ use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use MauticPlugin\DialogHSMBundle\Model\WhatsAppMessageModel;
 use MauticPlugin\DialogHSMBundle\Service\LeadEventLogWriter;
+use MauticPlugin\DialogHSMBundle\Service\TemplatePayload;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\Messenger\Bridge\Amqp\Transport\AmqpStamp;
 use Symfony\Component\Messenger\MessageBusInterface;
+
 
 class MarketingMessageSubscriber implements EventSubscriberInterface
 {
@@ -101,7 +103,8 @@ class MarketingMessageSubscriber implements EventSubscriberInterface
             }
 
             $profileFields = $contact->getProfileFields();
-            $payloadData   = $this->resolveTokens($message->getPayloadData(), $profileFields);
+            // Mensagem salva pelo formulário guiado guarda os campos em "hsm": vira a lista de pares.
+            $payloadData   = $this->resolveTokens(TemplatePayload::expandStored($message->getTemplateName(), $message->getPayloadData()), $profileFields);
 
             $msgLog = new MessageLog();
             $msgLog->setLeadId((int) $contact->getId());
@@ -200,7 +203,8 @@ class MarketingMessageSubscriber implements EventSubscriberInterface
             }
 
             $profileFields = $contact->getProfileFields();
-            $payloadData   = $this->resolveTokens($message->getPayloadData(), $profileFields);
+            // Mensagem salva pelo formulário guiado guarda os campos em "hsm": vira a lista de pares.
+            $payloadData   = $this->resolveTokens(TemplatePayload::expandStored($message->getTemplateName(), $message->getPayloadData()), $profileFields);
 
             $msgLog = new MessageLog();
             $msgLog->setLeadId((int) $contact->getId());

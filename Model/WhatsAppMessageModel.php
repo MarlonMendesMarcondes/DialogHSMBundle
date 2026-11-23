@@ -20,6 +20,7 @@ use Symfony\Component\Form\FormInterface;
 use Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppDirectBatchMessage;
 use MauticPlugin\DialogHSMBundle\Service\BulkRateLimiter;
+use MauticPlugin\DialogHSMBundle\Service\TemplatePayload;
 use Symfony\Component\Messenger\MessageBusInterface;
 use Symfony\Contracts\Service\Attribute\Required;
 
@@ -170,7 +171,8 @@ class WhatsAppMessageModel extends FormModel implements AjaxLookupModelInterface
                 }
 
                 $profileFields = $lead->getProfileFields();
-                $payloadData   = $this->resolveTokens($message->getPayloadData(), $profileFields);
+                // Mensagem salva pelo formulário guiado guarda os campos em "hsm": vira a lista de pares.
+                $payloadData   = $this->resolveTokens(TemplatePayload::expandStored($message->getTemplateName(), $message->getPayloadData()), $profileFields);
                 $templateName  = $message->getTemplateName();
 
                 $log = new MessageLog();

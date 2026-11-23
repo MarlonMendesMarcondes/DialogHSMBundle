@@ -12,21 +12,27 @@
     </div>
 </div>
 
+{# Mesmo construtor guiado das ações de campanha novas: número, template da lista do número, um
+   campo por variável e prévia. Idioma e variáveis são gravados na chave "hsm" do payloadData. #}
 <div class="row">
     <div class="col-md-8">
-        {{ form_row(form.whatsAppNumber) }}
-    </div>
-</div>
-
-<div class="row">
-    <div class="col-md-8">
-        {{ form_row(form.templateName) }}
+        {% include '@DialogHSM/FormTheme/_template_builder.html.twig' with {
+            builderId: 'dialoghsm_whatsapp_message_hsm_builder',
+            numberField: form.whatsAppNumber,
+            nameField: form.templateName,
+            languageField: form.hsm_language,
+            paramsField: form.hsm_params,
+        } %}
     </div>
 </div>
 
 <div class="row">
     <div class="col-md-12">
-        {{ form_row(form.payloadData) }}
+        <details>
+            <summary style="cursor:pointer;">{{ 'dialoghsm.campaign.template.advanced'|trans }}</summary>
+            <p class="help-block">{{ 'dialoghsm.campaign.template.advanced.help'|trans }}</p>
+            {{ form_row(form.payloadData) }}
+        </details>
     </div>
 </div>
 

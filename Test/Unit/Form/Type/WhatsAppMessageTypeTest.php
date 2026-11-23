@@ -164,4 +164,81 @@ class WhatsAppMessageTypeTest extends TestCase
             'publishDown must use PublishDownDateType'
         );
     }
+
+    // ── formulário guiado: leitura e gravação da chave "hsm" ────────────────
+
+    /**
+     * @param array<string, mixed> $fieldData
+     *
+     * @return array{0: \Symfony\Component\Form\FormInterface, 1: array<string, mixed>}
+     */
+    private function fakeForm(array $fieldData = []): array
+    {
+        $set      = [];
+        $children = [];
+        foreach (['hsm_language', 'hsm_params', 'payloadData'] as $name) {
+            $child = $this->createMock(\Symfony\Component\Form\FormInterface::class);
+            $child->method('getData')->willReturn($fieldData[$name] ?? null);
+            $child->method('setData')->willReturnCallback(function ($value) use ($name, &$set, $child) {
+                $set[$name] = $value;
+
+                return $child;
+            });
+            $children[$name] = $child;
+        }
+
+        $form = $this->createMock(\Symfony\Component\Form\FormInterface::class);
+        $form->method('get')->willReturnCallback(fn (string $name) => $children[$name]);
+
+        return [$form, &$set];
+    }
+
+    public function testLegacyMessageOpensWithItsPairsConvertedToGuidedFields(): void
+    {
+        $message = (new WhatsAppMessage())->setPayloadData(['list' => [
+            ['label' => 'vars', 'value' => 'nome'],
+            ['label' => 'nome', 'value' => '{contactfield=firstname}'],
+            ['label' => 'limited_time_offer', 'value' => '2026-12-31'],
+        ]]);
+
+        $holder = $this->fakeForm();
+        $form   = $holder[0];
+        $set    = &$holder[1];
+        $this->type->loadGuidedFields(new \Symfony\Component\Form\FormEvent($form, $message));
+
+        $this->assertSame('pt_BR', $set['hsm_language']);
+        $this->assertSame(['header' => '', 'body' => ['{contactfield=firstname}'], 'buttons' => []], json_decode($set['hsm_params'], true));
+        $this->assertSame(['list' => [['label' => 'limited_time_offer', 'value' => '2026-12-31']]], $set['payloadData']);
+    }
+
+    public function testGuidedMessageOpensWithItsStoredFields(): void
+    {
+        $message = (new WhatsAppMessage())->setPayloadData([
+            'list' => [],
+            'hsm'  => ['language' => 'es', 'params' => ['body' => ['Ana']]],
+        ]);
+
+        $holder = $this->fakeForm();
+        $set    = &$holder[1];
+        $this->type->loadGuidedFields(new \Symfony\Component\Form\FormEvent($holder[0], $message));
+
+        $this->assertSame('es', $set['hsm_language']);
+        $this->assertSame(['body' => ['Ana']], json_decode($set['hsm_params'], true));
+    }
+
+    public function testSavingStoresTheGuidedFieldsNextToTheAdvancedPairs(): void
+    {
+        $message = (new WhatsAppMessage())->setPayloadData(['list' => [['label' => 'limited_time_offer', 'value' => '2026-12-31']]]);
+
+        [$form] = $this->fakeForm([
+            'hsm_language' => '',
+            'hsm_params'   => json_encode(['body' => ['{contactfield=firstname}'], 'header' => '', 'buttons' => []]),
+        ]);
+        $this->type->storeGuidedFields(new \Symfony\Component\Form\FormEvent($form, $message));
+
+        $this->assertSame([
+            'list' => [['label' => 'limited_time_offer', 'value' => '2026-12-31']],
+            'hsm'  => ['language' => 'pt_BR', 'params' => ['body' => ['{contactfield=firstname}'], 'header' => '', 'buttons' => []]],
+        ], $message->getPayloadData());
+    }
 }

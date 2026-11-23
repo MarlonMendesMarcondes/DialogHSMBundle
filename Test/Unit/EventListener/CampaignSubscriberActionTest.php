@@ -1984,7 +1984,7 @@ class CampaignSubscriberActionTest extends TestCase
         $this->assertSame('promo', $payload['content'], 'Campo guiado tem prioridade sobre rótulo repetido no avançado.');
         $this->assertSame('pt_BR', $payload['language']);
         $this->assertSame('2026-12-31 23:59:00', $payload['limited_time_offer']);
-        $this->assertArrayNotHasKey('vars', $payload);
+        $this->assertSame('', $payload['vars'], 'vars vazio explícito: rótulo avançado não vira variável do body.');
     }
 
     public function testGuidedActionWithoutTemplateIsABuildErrorNotASend(): void

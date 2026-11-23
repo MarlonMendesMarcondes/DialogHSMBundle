@@ -623,4 +623,33 @@ class WhatsAppMessageModelTest extends TestCase
         // resolveTokens converte lista → key-value; token deve estar resolvido
         $this->assertSame('João', $item->payloadData['body']);
     }
+
+    public function testSendToListsExpandsTheGuidedFieldsOfTheMessage(): void
+    {
+        $payload = ['list' => [], 'hsm' => ['language' => 'pt_BR', 'params' => ['body' => ['{contactfield=firstname}', 'Direito']]]];
+
+        [$em, $repo] = $this->makeEmWithRepo();
+        $repo->method('getPendingContacts')->willReturnOnConsecutiveCalls([['id' => 5, 'phone' => '5511966665555']], []);
+
+        $lead = $this->createMock(Lead::class);
+        $lead->method('getProfileFields')->willReturn(['firstname' => 'João']);
+        $leadModel = $this->createMock(LeadModel::class);
+        $leadModel->method('getEntity')->with(5)->willReturn($lead);
+
+        $captured = null;
+        $bus      = $this->createMock(MessageBusInterface::class);
+        $bus->method('dispatch')->willReturnCallback(function (object $msg) use (&$captured): Envelope {
+            $captured = $msg;
+
+            return new Envelope($msg);
+        });
+
+        $this->makeModel($leadModel, $bus, $em)->sendToLists($this->makeMessageMock($payload), $this->createMock(ChannelBroadcastEvent::class));
+
+        $data = $captured->items[0]->payloadData;
+        $this->assertSame('template_x', $data['content'], 'O nome vem do campo Template da mensagem.');
+        $this->assertSame('{{1}},{{2}}', $data['vars']);
+        $this->assertSame('João', $data['{{1}}']);
+        $this->assertSame('Direito', $data['{{2}}']);
+    }
 }
