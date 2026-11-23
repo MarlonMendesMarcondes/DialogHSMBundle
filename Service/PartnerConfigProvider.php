@@ -69,6 +69,10 @@ class PartnerConfigProvider
     public const PREFLIGHT_LOG     = 'log';
     public const PREFLIGHT_ENFORCE = 'enforce';
 
+    public const PAYMENT_PAUSE_DEFAULT_MINUTES = 30;
+    private const PAYMENT_PAUSE_MIN_MINUTES    = 5;
+    private const PAYMENT_PAUSE_MAX_MINUTES    = 1440;
+
     /**
      * Modo da pré-validação do template antes do envio (feature flag de rollout):
      *   off     — não valida (comportamento anterior);
@@ -83,6 +87,25 @@ class PartnerConfigProvider
         return in_array($mode, [self::PREFLIGHT_OFF, self::PREFLIGHT_LOG, self::PREFLIGHT_ENFORCE], true)
             ? $mode
             : self::PREFLIGHT_LOG;
+    }
+
+    /**
+     * Pausa do número quando a 360dialog o bloqueia por falta de pagamento. Ligada por
+     * padrão: desligada, as mensagens voltam a virar falha (comportamento anterior).
+     */
+    public function isPaymentPauseEnabled(): bool
+    {
+        return (bool) ($this->getApiKeys()['payment_pause_enabled'] ?? true);
+    }
+
+    /**
+     * Intervalo entre as tentativas de envio de um número pausado por falta de pagamento.
+     */
+    public function getPaymentPauseMinutes(): int
+    {
+        $value = (int) ($this->readFromPlugin('payment_pause_minutes') ?? self::PAYMENT_PAUSE_DEFAULT_MINUTES);
+
+        return max(self::PAYMENT_PAUSE_MIN_MINUTES, min(self::PAYMENT_PAUSE_MAX_MINUTES, $value));
     }
 
     private function readFromPlugin(string $field): ?string

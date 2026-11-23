@@ -10,6 +10,7 @@ use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
 use MauticPlugin\DialogHSMBundle\Service\BalanceAlertService;
 use MauticPlugin\DialogHSMBundle\Service\BalanceHistoryRecorder;
 use MauticPlugin\DialogHSMBundle\Service\PartnerConfigProvider;
+use MauticPlugin\DialogHSMBundle\Service\PaymentBlockPauseService;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -41,6 +42,7 @@ class SyncChannelBalanceCommand extends Command
         private readonly BalanceAlertService $balanceAlertService,
         private readonly BalanceHistoryRecorder $balanceHistoryRecorder,
         private readonly LoggerInterface $logger,
+        private readonly ?PaymentBlockPauseService $paymentPause = null,
     ) {
         parent::__construct();
     }
@@ -99,6 +101,14 @@ class SyncChannelBalanceCommand extends Command
                 $this->entityManager->flush();
 
                 $this->balanceAlertService->checkAndNotify($number, $result['balance'], $result['currency']);
+
+                // Saldo positivo com o número pausado por falta de pagamento: encerra a pausa já,
+                // e o próximo envio confirma a liberação (ou renova a pausa, se o bloqueio for
+                // de cobrança e não de saldo).
+                if (null !== $this->paymentPause && ($result['balance'] ?? 0.0) > 0.0
+                    && $this->paymentPause->allowRecheck((string) $number->getApiKey(), 'balance_sync')) {
+                    $io->text(sprintf('  <fg=yellow>PAUSA</> %s — saldo positivo, próximo envio testa a liberação', $number->getName() ?? $number->getId()));
+                }
 
                 $this->balanceHistoryRecorder->recordIfNewRecharge(
                     $number,

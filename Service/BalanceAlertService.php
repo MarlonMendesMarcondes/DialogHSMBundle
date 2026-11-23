@@ -61,6 +61,45 @@ class BalanceAlertService
         $this->entityManager->flush();
     }
 
+    /**
+     * Avisa que a 360dialog bloqueou o número por falta de pagamento (blocked=true) ou que ele
+     * voltou a enviar (blocked=false). Quem chama garante que só a transição é notificada
+     * (PaymentBlockPauseService). Mesmos destinatários e canal (in-app + e-mail opcional) do
+     * alerta de saldo.
+     */
+    public function notifyPaymentBlock(WhatsAppNumber $number, bool $blocked, int $recheckMinutes = 0): void
+    {
+        $transKey  = $blocked ? 'blocked' : 'released';
+        $iconClass = $blocked ? 'text-danger ri-pause-circle-line' : 'text-success ri-play-circle-line';
+
+        $header  = $this->translator->trans("dialoghsm.number.payment_block.{$transKey}.header", ['%name%' => $number->getName()]);
+        $message = $this->translator->trans("dialoghsm.number.payment_block.{$transKey}.message", [
+            '%name%'    => $number->getName(),
+            '%phone%'   => (string) $number->getPhoneNumber(),
+            '%minutes%' => $recheckMinutes,
+        ]);
+
+        $recipients = $this->getRecipients();
+
+        foreach ($recipients as $user) {
+            $this->notificationModel->addNotification(
+                $message,
+                'dialoghsm.payment_block',
+                false,
+                $header,
+                $iconClass,
+                null,
+                $user,
+                "dialoghsm.payment_block.{$transKey}.".$number->getId(),
+                new \DateTime('-5 minutes')
+            );
+        }
+
+        if ($this->partnerConfigProvider->getBalanceAlertSendEmail()) {
+            $this->sendEmail($recipients, $header, $message);
+        }
+    }
+
     private function resolveState(float $balance): string
     {
         if ($balance <= 0.0) {

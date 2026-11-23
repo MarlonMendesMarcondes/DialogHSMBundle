@@ -28,6 +28,7 @@ use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppMessageHandler;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Model\WhatsAppNumberModel;
 use MauticPlugin\DialogHSMBundle\Service\LeadEventLogWriter;
+use MauticPlugin\DialogHSMBundle\Service\PaymentBlockPauseService;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\Messenger\Bridge\Amqp\Transport\AmqpStamp;
@@ -94,6 +95,7 @@ class CampaignSubscriber implements EventSubscriberInterface
         private MessageLogRepository $messageLogRepository,
         private LeadEventLogWriter $leadEventLogWriter,
         private string $directTransportDsn = 'null://null',
+        private ?PaymentBlockPauseService $paymentPause = null,
     ) {
     }
 
@@ -290,6 +292,18 @@ class CampaignSubscriber implements EventSubscriberInterface
             $sendDelay = 0;
         }
 
+        // Envio inline não tem fila para segurar a mensagem enquanto o número está pausado por
+        // falta de pagamento: o contato fica com nova tentativa em 15 min (erro de montagem),
+        // em vez de o envio sair e virar falha. Fila e Redis seguram a mensagem no consumo.
+        $checkNumber = function (WhatsAppNumber $number): void {
+            if (null !== $this->paymentPause && $this->paymentPause->isPaused((string) $number->getApiKey())) {
+                throw new CampaignActionBuildException(sprintf(
+                    'O número WhatsApp "%s" está pausado: a 360dialog o bloqueou por falta de pagamento. O envio é tentado de novo automaticamente.',
+                    $number->getName() ?? ''
+                ));
+            }
+        };
+
         $items = [];
         $this->processContacts(
             $event,
@@ -298,11 +312,12 @@ class CampaignSubscriber implements EventSubscriberInterface
 
                 return true;
             },
-            applyBatchSleep: false
+            applyBatchSleep: false,
+            checkNumber: $checkNumber
         );
 
         if (!empty($items)) {
-            $results = $this->dispatchDirectBatch($items, $batchLimit, $sendDelay, fn (SendWhatsAppDirectBatchMessage $batch) => ($this->directBatchHandler)($batch));
+            $results = $this->dispatchDirectBatch($items, $batchLimit, $sendDelay, fn (SendWhatsAppDirectBatchMessage $batch) => $this->directBatchHandler->__invoke($batch, inline: true));
             $this->markInlineSendFailures($event, $items, $results);
         }
     }

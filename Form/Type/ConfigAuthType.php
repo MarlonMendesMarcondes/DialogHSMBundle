@@ -229,6 +229,33 @@ class ConfigAuthType extends AbstractType
         );
 
         $builder->add(
+            'payment_pause_enabled',
+            YesNoButtonGroupType::class,
+            [
+                'label' => 'dialoghsm.config.payment_pause_enabled',
+                'data'  => (bool) ($data['payment_pause_enabled'] ?? true),
+                'help'  => 'dialoghsm.config.payment_pause_enabled.help',
+            ]
+        );
+
+        $builder->add(
+            'payment_pause_minutes',
+            IntegerType::class,
+            [
+                'label'      => 'dialoghsm.config.payment_pause_minutes',
+                'label_attr' => ['class' => 'control-label'],
+                'required'   => false,
+                'attr'       => [
+                    'class' => 'form-control',
+                    'min'   => 5,
+                    'max'   => 1440,
+                ],
+                'data' => (int) ($data['payment_pause_minutes'] ?? PartnerConfigProvider::PAYMENT_PAUSE_DEFAULT_MINUTES),
+                'help' => 'dialoghsm.config.payment_pause_minutes.help',
+            ]
+        );
+
+        $builder->add(
             'partner_id',
             TextType::class,
             [

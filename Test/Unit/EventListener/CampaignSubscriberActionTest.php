@@ -16,6 +16,11 @@ use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\EventListener\CampaignSubscriber;
 use MauticPlugin\DialogHSMBundle\Service\LeadEventLogWriter;
+use MauticPlugin\DialogHSMBundle\Service\BalanceAlertService;
+use MauticPlugin\DialogHSMBundle\Service\PartnerConfigProvider;
+use MauticPlugin\DialogHSMBundle\Service\PaymentBlockPauseService;
+use Psr\Log\NullLogger;
+use Symfony\Component\Cache\Adapter\ArrayAdapter;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppDirectBatchMessage;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppDirectBatchMessageHandler;
@@ -57,7 +62,7 @@ class CampaignSubscriberActionTest extends TestCase
         $this->subscriber = $this->makeSubscriber();
     }
 
-    private function makeSubscriber(string $directTransportDsn = 'null://null'): CampaignSubscriber
+    private function makeSubscriber(string $directTransportDsn = 'null://null', ?PaymentBlockPauseService $paymentPause = null): CampaignSubscriber
     {
         return new CampaignSubscriber(
             $this->mockIntegrationsHelper,
@@ -70,6 +75,7 @@ class CampaignSubscriberActionTest extends TestCase
             $this->mockMessageLogRepository,
             $this->createMock(LeadEventLogWriter::class),
             $directTransportDsn,
+            $paymentPause,
         );
     }
 
@@ -1790,6 +1796,36 @@ class CampaignSubscriberActionTest extends TestCase
         $event->expects($this->once())
             ->method('passWithError')
             ->with($this->anything(), 'dialoghsm.campaign.error.preflight_invalid');
+        $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
+
+        $subscriber->onCampaignTriggerAction($event);
+    }
+
+    /**
+     * Envio inline com o número pausado por falta de pagamento: nada é enviado e o contato
+     * fica com nova tentativa (fail com intervalo) — não é consumido nem vira falha de envio.
+     */
+    public function testInlineSendWithNumberPausedForPaymentReschedulesWithoutSending(): void
+    {
+        $this->enableIntegration();
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
+
+        $config = $this->createMock(PartnerConfigProvider::class);
+        $config->method('isPaymentPauseEnabled')->willReturn(true);
+        $config->method('getPaymentPauseMinutes')->willReturn(30);
+        $pause = new PaymentBlockPauseService(new ArrayAdapter(), $config, $this->createMock(BalanceAlertService::class), new NullLogger());
+        $pause->pause('VALID_API_KEY_12345', null, 'blocked');
+
+        $subscriber = $this->makeSubscriber('null://null', $pause);
+
+        $contact = $this->buildContact('+5511999999999', 1);
+        $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
+
+        $event->expects($this->never())->method('pass');
+        $event->expects($this->never())->method('passWithError');
+        $event->expects($this->once())
+            ->method('fail')
+            ->with($this->anything(), $this->stringContains('falta de pagamento'), $this->isInstanceOf(\DateInterval::class));
         $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
 
         $subscriber->onCampaignTriggerAction($event);

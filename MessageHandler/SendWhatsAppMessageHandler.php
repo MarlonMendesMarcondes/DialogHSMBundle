@@ -17,6 +17,7 @@ use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use MauticPlugin\DialogHSMBundle\Service\BulkRateLimiter;
 use MauticPlugin\DialogHSMBundle\Service\CampaignActivityChecker;
 use MauticPlugin\DialogHSMBundle\Service\LeadEventLogWriter;
+use MauticPlugin\DialogHSMBundle\Service\PaymentBlockPauseService;
 use MauticPlugin\DialogHSMBundle\Service\RedisContactCache;
 use MauticPlugin\DialogHSMBundle\Service\WorkerQueueContext;
 use Psr\Log\LoggerInterface;
@@ -39,6 +40,8 @@ class SendWhatsAppMessageHandler
      * máximo para o envio recomeçar depois que a campanha é reativada.
      */
     private const INACTIVE_CAMPAIGN_RECHECK_MS = 300000;
+
+    public const PAYMENT_BLOCK_MESSAGE = 'Número bloqueado pela 360dialog por falta de pagamento — envio pausado';
 
     /**
      * Intervalo mínimo entre limpezas da tabela de logs no mesmo processo. O worker da fila
@@ -66,6 +69,7 @@ class SendWhatsAppMessageHandler
         private CampaignActivityChecker $campaignActivityChecker,
         private WorkerQueueContext $queueContext,
         private MessageBusInterface $bus,
+        private ?PaymentBlockPauseService $paymentPause = null,
     ) {
     }
 
@@ -80,7 +84,11 @@ class SendWhatsAppMessageHandler
      *                               erros transitórios — registra como 'failed' e retorna.
      *                               Use em contexto de lote onde o retry individual não é suportado.
      *
-     * @return array{success: bool, response: array|null, error: string|null, http_status: int|null, retryable: bool, paused?: bool}
+     * payment_blocked=true: o número está pausado por falta de pagamento e a mensagem não foi
+     * enviada nem registrada. Consumo da fila: ela já voltou para a fila com atraso. Lote
+     * (skipRetry): quem chamou decide (SendWhatsAppDirectBatchMessageHandler).
+     *
+     * @return array{success: bool, response: array|null, error: string|null, http_status: int|null, retryable: bool, paused?: bool, payment_blocked?: bool, invalid?: bool}
      *
      * @throws TransientApiException quando o erro é transitório (rede, rate limit, 5xx) e $skipRetry=false,
      *                               para que o Symfony Messenger aplique a retry strategy configurada.
@@ -164,6 +172,7 @@ class SendWhatsAppMessageHandler
         // silenciosamente em vez de chamar a API 360dialog e registrar erro. Cobre o caso de
         // workers de fila já em execução (dialog:consume) que não sabem que o número foi
         // desativado depois de iniciados.
+        $number = null;
         if ('' !== $message->whatsAppNumberName) {
             $number = $this->whatsAppNumberRepository->findOneBy(['name' => $message->whatsAppNumberName]);
 
@@ -188,6 +197,12 @@ class SendWhatsAppMessageHandler
             }
         }
 
+        // Número pausado por falta de pagamento: não chama a API (seria mais um 403) e a
+        // mensagem não vira falha — volta para a fila até o próximo envio de teste.
+        if (null !== $this->paymentPause && $this->paymentPause->isPaused($message->apiKey)) {
+            return $this->holdForPaymentBlock($message, $skipRetry);
+        }
+
         if (!$skipRateLimit) {
             if ($message->isBatch) {
                 // Rate controlado por batch_rate_per_minute nas configurações do plugin
@@ -209,6 +224,17 @@ class SendWhatsAppMessageHandler
             $message->phone,
             $payloadData
         );
+
+        if (null !== $this->paymentPause && !$result['success'] && $this->paymentPause->isEnabled()
+            && PaymentBlockPauseService::isPaymentBlock($result)) {
+            $this->paymentPause->pause($message->apiKey, $number, (string) ($result['error'] ?? ''));
+
+            return $this->holdForPaymentBlock($message, $skipRetry);
+        }
+
+        if ($result['success']) {
+            $this->paymentPause?->noteSuccess($message->apiKey, $number);
+        }
 
         if ($result['invalid'] ?? false) {
             $this->logger->warning('DialogHSM: envio barrado na pré-validação do template', [
@@ -256,28 +282,88 @@ class SendWhatsAppMessageHandler
         return $result;
     }
 
+    private function requeueForInactiveCampaign(SendWhatsAppMessage $message): void
+    {
+        $this->requeueWithDelay(
+            $message,
+            self::INACTIVE_CAMPAIGN_RECHECK_MS,
+            sprintf('Campanha #%d desativada — mensagem mantida na fila', (int) $message->campaignId),
+            'DialogHSM: campanha desativada — mensagem devolvida à fila',
+        );
+    }
+
+    /**
+     * Número pausado por falta de pagamento. No consumo da fila, a mensagem volta com atraso
+     * igual ao intervalo da pausa — o log continua "queued". Em lote (skipRetry) não há fila de
+     * onde a mensagem veio: devolve o resultado para o handler do lote decidir.
+     *
+     * @return array{success: bool, response: null, error: string, http_status: null, wamid: null, retryable: bool, paused: bool, payment_blocked: bool}
+     */
+    private function holdForPaymentBlock(SendWhatsAppMessage $message, bool $skipRetry): array
+    {
+        if (!$skipRetry) {
+            $this->requeueWithDelay(
+                $message,
+                ($this->paymentPause?->getRecheckSeconds() ?? 1800) * 1000,
+                'Número bloqueado por falta de pagamento — mensagem mantida na fila',
+                'DialogHSM: número pausado por falta de pagamento — mensagem devolvida à fila',
+            );
+        }
+
+        return [
+            'success'         => false,
+            'response'        => null,
+            'error'           => self::PAYMENT_BLOCK_MESSAGE,
+            'http_status'     => null,
+            'wamid'           => null,
+            'retryable'       => false,
+            'paused'          => true,
+            'payment_blocked' => true,
+        ];
+    }
+
+    /**
+     * Grava o log de uma mensagem do lote que não pôde ser devolvida à fila enquanto o número
+     * está pausado por falta de pagamento (só acontece no envio direto síncrono — ver
+     * SendWhatsAppDirectBatchMessageHandler).
+     */
+    public function logPaymentBlocked(SendWhatsAppMessage $message): void
+    {
+        $result = ['success' => false, 'response' => null, 'error' => self::PAYMENT_BLOCK_MESSAGE, 'http_status' => null, 'wamid' => null, 'retryable' => false];
+
+        try {
+            $this->logMessage($message->leadId, $message->templateName, $message->phone, $message->whatsAppNumberName, $result, $message->campaignId, $message->campaignEventId, $message->queueLogId, true);
+        } catch (\Throwable $e) {
+            $this->logger->warning('DialogHSM: Falha ao registrar log da mensagem', [
+                'lead_id' => $message->leadId,
+                'error'   => $e->getMessage(),
+            ]);
+        }
+    }
+
     /**
      * Publica a mensagem de novo na mesma fila, com atraso, e deixa o Messenger confirmar
      * (ack) a original. Sem a fila de origem, recorre ao retry do Messenger, que preserva o
      * routing key — a mensagem continua no RabbitMQ de qualquer forma.
      */
-    private function requeueForInactiveCampaign(SendWhatsAppMessage $message): void
+    private function requeueWithDelay(SendWhatsAppMessage $message, int $delayMs, string $fallbackReason, string $logMessage): void
     {
         $queueName = $this->queueContext->getCurrentQueueName();
 
         if (null === $queueName || '' === $queueName) {
-            throw new RecoverableMessageHandlingException(sprintf('Campanha #%d desativada — mensagem mantida na fila', $message->campaignId));
+            throw new RecoverableMessageHandlingException($fallbackReason);
         }
 
         $this->bus->dispatch($message, [
             new AmqpStamp($queueName),
-            new DelayStamp(self::INACTIVE_CAMPAIGN_RECHECK_MS),
+            new DelayStamp($delayMs),
         ]);
 
-        $this->logger->info('DialogHSM: campanha desativada — mensagem devolvida à fila', [
+        $this->logger->info($logMessage, [
             'lead_id'     => $message->leadId,
             'campaign_id' => $message->campaignId,
             'queue'       => $queueName,
+            'delay_ms'    => $delayMs,
         ]);
     }
 
