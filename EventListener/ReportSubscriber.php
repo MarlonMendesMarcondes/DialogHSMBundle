@@ -156,6 +156,7 @@ class ReportSubscriber implements EventSubscriberInterface
                     'read'      => 'Read',
                     'failed'    => 'Failed',
                     'dlq'       => 'Discarded',
+                    'invalid'   => 'Invalid (pre-validation)',
                 ],
             ],
             self::ML.'.date_sent' => [

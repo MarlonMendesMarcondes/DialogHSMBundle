@@ -210,6 +210,18 @@ class SendWhatsAppMessageHandler
             $payloadData
         );
 
+        if ($result['invalid'] ?? false) {
+            $this->logger->warning('DialogHSM: envio barrado na pré-validação do template', [
+                'lead_id'           => $message->leadId,
+                'template'          => $payloadData['content'] ?? $message->templateName,
+                'language'          => $payloadData['language'] ?? 'pt_BR',
+                'campaign_id'       => $message->campaignId,
+                'campaign_event_id' => $message->campaignEventId,
+                'whats_app_number'  => $message->whatsAppNumberName,
+                'reason'            => $result['error'],
+            ]);
+        }
+
         // Erro transitório (rede, 429, 5xx): lança exceção para acionar retry do Messenger.
         // O log será gravado pelo MessengerFailedEventSubscriber após esgotar os retries (DLQ),
         // ou naturalmente quando a tentativa de retry obtiver sucesso.
@@ -295,13 +307,28 @@ class SendWhatsAppMessageHandler
             $log->setPhoneNumber($phone);
         }
 
-        $log->setWamid($result['wamid'] ?? null);
+        $invalid = (bool) ($result['invalid'] ?? false);
+
         // pending_webhook = 360dialog aceitou (HTTP 200); a Meta ainda não confirmou.
         // failed aqui = erro de API (HTTP 4xx/5xx); rejeição da Meta vem via webhook.
-        $log->setStatus($result['success'] ? MessageLog::STATUS_PENDING_WEBHOOK : MessageLog::STATUS_FAILED);
+        // invalid = barrada na pré-validação; a API nem foi chamada.
+        $status = match (true) {
+            $result['success'] => MessageLog::STATUS_PENDING_WEBHOOK,
+            $invalid           => MessageLog::STATUS_INVALID,
+            default            => MessageLog::STATUS_FAILED,
+        };
+
+        // O UUID do log "queued" (fila de campanha) fica no wamid: limpa para um wamid falso
+        // não sobrar num envio que nunca saiu.
+        $log->setWamid($result['wamid'] ?? null);
+        $log->setStatus($status);
         $log->setHttpStatusCode($result['http_status'] ?? null);
         $log->setApiResponse(!empty($result['response']) ? json_encode($result['response']) : null);
-        $log->setErrorMessage(!empty($result['error']) ? '[API 360dialog] '.$result['error'] : null);
+        $log->setErrorMessage(match (true) {
+            empty($result['error']) => null,
+            $invalid                => $result['error'],
+            default                 => '[API 360dialog] '.$result['error'],
+        });
         $log->setDateSent(new \DateTime());
 
         $this->entityManager->persist($log);
@@ -310,7 +337,7 @@ class SendWhatsAppMessageHandler
         try {
             $this->leadEventLogWriter->write(
                 $log,
-                $result['success'] ? MessageLog::STATUS_SENT : MessageLog::STATUS_FAILED,
+                $result['success'] ? MessageLog::STATUS_SENT : ($invalid ? MessageLog::STATUS_INVALID : MessageLog::STATUS_FAILED),
                 $log->getDateSent() ?? new \DateTime()
             );
         } catch (\Throwable) {

@@ -65,6 +65,26 @@ class PartnerConfigProvider
         return (bool) ($this->getApiKeys()['balance_alert_send_email'] ?? false);
     }
 
+    public const PREFLIGHT_OFF     = 'off';
+    public const PREFLIGHT_LOG     = 'log';
+    public const PREFLIGHT_ENFORCE = 'enforce';
+
+    /**
+     * Modo da pré-validação do template antes do envio (feature flag de rollout):
+     *   off     — não valida (comportamento anterior);
+     *   log     — valida e só registra no log o que reprovaria, sem mudar o envio (padrão);
+     *   enforce — normaliza os parâmetros e não envia o que reprovar (status invalid).
+     * O padrão é log para o deploy não mudar nenhum envio antes de o resultado ser conferido.
+     */
+    public function getPreflightMode(): string
+    {
+        $mode = $this->readFromPlugin('preflight_mode');
+
+        return in_array($mode, [self::PREFLIGHT_OFF, self::PREFLIGHT_LOG, self::PREFLIGHT_ENFORCE], true)
+            ? $mode
+            : self::PREFLIGHT_LOG;
+    }
+
     private function readFromPlugin(string $field): ?string
     {
         $value = $this->getApiKeys()[$field] ?? null;

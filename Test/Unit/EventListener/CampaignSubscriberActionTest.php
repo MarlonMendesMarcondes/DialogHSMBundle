@@ -1766,6 +1766,36 @@ class CampaignSubscriberActionTest extends TestCase
     }
 
     /**
+     * Re-execução: log barrado na pré-validação ('invalid') → passWithError com o motivo
+     * próprio. A mensagem nunca saiu: pass() faria a campanha seguir como se o contato tivesse
+     * recebido, e nenhum envio é refeito.
+     */
+    public function testReExecutionWithInvalidStatusCallsPassWithErrorAndNeverPass(): void
+    {
+        $this->enableIntegration();
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
+
+        $log = new MessageLog();
+        $log->setStatus(MessageLog::STATUS_INVALID);
+        $log->setErrorMessage('Pré-validação: template "x" não existe neste número');
+        $log->setDateSent(new \DateTime());
+
+        $subscriber = $this->makeReExecutionSubscriber($log);
+
+        $contact = $this->buildContact('+5511999999999', 1);
+        $event   = $this->buildPendingEvent('dialoghsm.send_whatsapp', [1 => $contact]);
+
+        $event->expects($this->never())->method('pass');
+        $event->expects($this->never())->method('fail');
+        $event->expects($this->once())
+            ->method('passWithError')
+            ->with($this->anything(), 'dialoghsm.campaign.error.preflight_invalid');
+        $this->mockDirectBatchHandler->expects($this->never())->method('__invoke');
+
+        $subscriber->onCampaignTriggerAction($event);
+    }
+
+    /**
      * Re-execução: log com status 'pending_webhook' dentro do timeout → pass() sem reenvio.
      * Deixar o contato sem decisão faria o core lançar LogNotProcessedException e abortar
      * o lote inteiro.

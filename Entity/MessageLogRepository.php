@@ -145,7 +145,7 @@ class MessageLogRepository extends CommonRepository
             [$whatsappMessageId]
         );
 
-        $stats = ['total' => 0, 'queued' => 0, 'pending_webhook' => 0, 'sent' => 0, 'delivered' => 0, 'read' => 0, 'failed' => 0, 'dlq' => 0];
+        $stats = ['total' => 0, 'queued' => 0, 'pending_webhook' => 0, 'sent' => 0, 'delivered' => 0, 'read' => 0, 'failed' => 0, 'dlq' => 0, 'invalid' => 0];
         foreach ($rows as $row) {
             $status        = (string) $row['status'];
             $count         = (int) $row['cnt'];
@@ -177,7 +177,7 @@ class MessageLogRepository extends CommonRepository
             [$from->format('Y-m-d H:i:s')]
         );
 
-        $stats = ['total' => 0, 'queued' => 0, 'pending_webhook' => 0, 'sent' => 0, 'delivered' => 0, 'read' => 0, 'failed' => 0, 'dlq' => 0];
+        $stats = ['total' => 0, 'queued' => 0, 'pending_webhook' => 0, 'sent' => 0, 'delivered' => 0, 'read' => 0, 'failed' => 0, 'dlq' => 0, 'invalid' => 0];
         foreach ($rows as $row) {
             $status       = (string) $row['status'];
             $count        = (int) $row['cnt'];
@@ -237,7 +237,7 @@ class MessageLogRepository extends CommonRepository
 
         // pending_webhook (aceita pela 360dialog, aguardando a Meta) era descartado: o gráfico
         // não mostrava essas mensagens em lugar nenhum. Série própria, como nos cards.
-        $empty = ['queued' => 0, 'pending_webhook' => 0, 'sent' => 0, 'delivered' => 0, 'read' => 0, 'replied' => 0, 'failed' => 0, 'dlq' => 0];
+        $empty = ['queued' => 0, 'pending_webhook' => 0, 'sent' => 0, 'delivered' => 0, 'read' => 0, 'replied' => 0, 'failed' => 0, 'dlq' => 0, 'invalid' => 0];
         $data  = [];
 
         // Preenche todos os dias do período com zeros para o gráfico ficar contínuo
@@ -378,7 +378,8 @@ class MessageLogRepository extends CommonRepository
     public function findMostRecentForLead(int $leadId, \DateTimeInterface $since, ?\DateTimeInterface $before = null): ?MessageLog
     {
         // Só mensagens que podem ter chegado ao contato: 'queued' ainda está na fila (ex.: campanha
-        // pausada) e failed/dlq nunca saíram — a resposta não pode ser atribuída a elas.
+        // pausada) e failed/dlq/invalid nunca saíram — a resposta não pode ser atribuída a elas
+        // (nem disparar a decisão "respondeu" da campanha).
         $qb = $this->createQueryBuilder('dhml')
             ->andWhere('dhml.leadId = :leadId')
             ->andWhere('dhml.dateSent >= :since')
@@ -386,7 +387,7 @@ class MessageLogRepository extends CommonRepository
             ->andWhere('dhml.status NOT IN (:notDelivered)')
             ->setParameter('leadId', $leadId)
             ->setParameter('since', $since)
-            ->setParameter('notDelivered', [MessageLog::STATUS_QUEUED, MessageLog::STATUS_FAILED, MessageLog::STATUS_DLQ]);
+            ->setParameter('notDelivered', [MessageLog::STATUS_QUEUED, MessageLog::STATUS_FAILED, MessageLog::STATUS_DLQ, MessageLog::STATUS_INVALID]);
 
         if ($before !== null) {
             $qb->andWhere('dhml.dateSent < :before')
@@ -660,7 +661,7 @@ class MessageLogRepository extends CommonRepository
      *   read_count     = status = 'read'
      *   replied_count  = date_replied IS NOT NULL (exato via context.id ou aproximado por telefone+tempo)
      *
-     * @return array<int, array{template_name: string, campaign_id: int|null, first_date: string, date: string, total: int, sent_plus: int, delivered_plus: int, read_count: int, replied_count: int, failed: int, dlq: int}>
+     * @return array<int, array{template_name: string, campaign_id: int|null, first_date: string, date: string, total: int, sent_plus: int, delivered_plus: int, read_count: int, replied_count: int, failed: int, dlq: int, invalid: int}>
      */
     public function getGroupedDispatches(int $limit = 50, bool $byDate = true): array
     {
@@ -683,7 +684,8 @@ class MessageLogRepository extends CommonRepository
                 SUM(ml.status = 'read')                          AS read_count,
                 SUM(ml.date_replied IS NOT NULL)                  AS replied_count,
                 SUM(ml.status = 'failed')                        AS failed,
-                SUM(ml.status = 'dlq')                           AS dlq
+                SUM(ml.status = 'dlq')                           AS dlq,
+                SUM(ml.status = 'invalid')                       AS invalid
              FROM `{$tableName}` ml
              LEFT JOIN `{$msgTable}` wm ON wm.id = ml.whatsapp_message_id
              GROUP BY ml.template_name, ml.campaign_id, ml.whatsapp_message_id{$dateGroup}

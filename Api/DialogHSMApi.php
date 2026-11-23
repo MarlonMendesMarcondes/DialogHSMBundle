@@ -6,7 +6,9 @@ namespace MauticPlugin\DialogHSMBundle\Api;
 
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\RequestException;
+use MauticPlugin\DialogHSMBundle\Service\PartnerConfigProvider;
 use MauticPlugin\DialogHSMBundle\Service\TemplateCategoryResolver;
+use MauticPlugin\DialogHSMBundle\Service\TemplatePreflightValidator;
 use Psr\Log\LoggerInterface;
 
 class DialogHSMApi
@@ -30,6 +32,15 @@ class DialogHSMApi
     private const ERROR_MARKETING_ONLY    = 131055;
     private const CATEGORY_MARKETING      = 'MARKETING';
 
+    /**
+     * Chave do payloadData com o valor original (com token) de cada variável, gravada por quem
+     * resolve os tokens. buildPayload não a lê; serve só para a mensagem da pré-validação dizer
+     * qual token ficou vazio.
+     */
+    public const TOKENS_KEY = '_tokens';
+
+    public const PREFLIGHT_ERROR_PREFIX = 'Pré-validação: ';
+
     /** @var callable(string): string */
     private $hostnameResolver;
 
@@ -50,6 +61,7 @@ class DialogHSMApi
         private LoggerInterface $logger,
         ?callable $hostnameResolver = null,
         private ?TemplateCategoryResolver $categoryResolver = null,
+        private ?TemplatePreflightValidator $preflightValidator = null,
     ) {
         $this->hostnameResolver = $hostnameResolver ?? static fn (string $h): string => gethostbyname($h);
     }
@@ -59,22 +71,58 @@ class DialogHSMApi
      *
      * @param array<string, string> $payloadData key-value pairs configurados na campanha
      *
-     * @return array{success: bool, response: array|null, error: string|null, http_status: int|null, wamid: string|null, retryable: bool}
+     * invalid=true: a pré-validação (modo enforce) reprovou o envio e a API não foi chamada.
+     *
+     * @return array{success: bool, response: array|null, error: string|null, http_status: int|null, wamid: string|null, retryable: bool, invalid?: bool}
      */
     public function sendMessage(string $apiKey, string $baseUrl, string $mobile, array $payloadData): array
     {
-        $url         = rtrim($baseUrl, '/');
+        $url = rtrim($baseUrl, '/');
+
+        // Montado uma vez, antes de tudo: a pré-validação precisa do payload final, e o mesmo
+        // payload serve às duas tentativas da rota de Marketing Messages. Dado inválido no
+        // payload (ex.: data de limited_time_offer) é erro permanente — antes ficava dentro do
+        // try da requisição e virava retry.
+        try {
+            $payload = $this->buildPayload($mobile, $payloadData);
+        } catch (\Throwable $e) {
+            $this->logger->error('DialogHSM: payload inválido', ['error' => $e->getMessage()]);
+
+            return [
+                'success'     => false,
+                'response'    => null,
+                'error'       => 'Payload inválido: '.$e->getMessage(),
+                'http_status' => null,
+                'wamid'       => null,
+                'retryable'   => false,
+            ];
+        }
+
+        $preflight = $this->preflight($apiKey, $url, $payload, $payloadData);
+        if (is_string($preflight)) {
+            return [
+                'success'     => false,
+                'response'    => null,
+                'error'       => $preflight,
+                'http_status' => null,
+                'wamid'       => null,
+                'retryable'   => false,
+                'invalid'     => true,
+            ];
+        }
+        $payload = $preflight;
+
         $fallbackUrl = $this->messagesUrlFor($url);
 
         if (null === $fallbackUrl) {
-            return $this->send($apiKey, $url, $mobile, $payloadData);
+            return $this->send($apiKey, $url, $payload);
         }
 
         $templateName = (string) ($payloadData['content'] ?? '');
         $memoKey      = $url."\n".$templateName;
 
         if (isset($this->rejectedByMarketingEndpoint[$memoKey])) {
-            return $this->send($apiKey, $fallbackUrl, $mobile, $payloadData);
+            return $this->send($apiKey, $fallbackUrl, $payload);
         }
 
         // O endpoint de Marketing Messages só aceita template de categoria MARKETING. Com a
@@ -83,10 +131,10 @@ class DialogHSMApi
         $category = $this->categoryResolver?->getCategory($apiKey, $url, $templateName);
 
         if (null !== $category && self::CATEGORY_MARKETING !== $category) {
-            return $this->send($apiKey, $fallbackUrl, $mobile, $payloadData);
+            return $this->send($apiKey, $fallbackUrl, $payload);
         }
 
-        $result = $this->send($apiKey, $url, $mobile, $payloadData);
+        $result = $this->send($apiKey, $url, $payload);
 
         if (self::ERROR_MARKETING_ONLY !== ($result['response']['error']['code'] ?? null)) {
             return $result;
@@ -103,7 +151,67 @@ class DialogHSMApi
             'error'    => $result['error'],
         ]);
 
-        return $this->send($apiKey, $fallbackUrl, $mobile, $payloadData);
+        return $this->send($apiKey, $fallbackUrl, $payload);
+    }
+
+    /**
+     * Pré-validação do template (TemplatePreflightValidator), conforme o modo da configuração:
+     * off não valida; log valida e só registra o que reprovaria, enviando o payload original;
+     * enforce envia o payload normalizado e barra o que reprovar.
+     *
+     * Um erro inesperado na validação libera o envio: ela existe para evitar falhas, nunca
+     * para criar uma.
+     *
+     * @param array<string, mixed> $payload
+     * @param array<string, mixed> $payloadData
+     *
+     * @return array<string, mixed>|string payload a enviar, ou o motivo da reprovação (enforce)
+     */
+    private function preflight(string $apiKey, string $url, array $payload, array $payloadData): array|string
+    {
+        if (null === $this->preflightValidator) {
+            return $payload;
+        }
+
+        try {
+            $mode = $this->preflightValidator->getMode();
+
+            if (PartnerConfigProvider::PREFLIGHT_OFF === $mode) {
+                return $payload;
+            }
+
+            $check = $this->preflightValidator->validate($apiKey, $url, $payload['template'], [
+                'body_labels' => '' !== (string) ($payloadData['vars'] ?? '') ? array_map('trim', explode(',', (string) $payloadData['vars'])) : [],
+                'tokens'      => is_array($payloadData[self::TOKENS_KEY] ?? null) ? $payloadData[self::TOKENS_KEY] : [],
+            ]);
+        } catch (\Throwable $e) {
+            $this->logger->warning('DialogHSM: erro na pré-validação do template — envio liberado', [
+                'template' => $payload['template']['name'] ?? '',
+                'error'    => $e->getMessage(),
+            ]);
+
+            return $payload;
+        }
+
+        if (PartnerConfigProvider::PREFLIGHT_ENFORCE !== $mode) {
+            if (!$check->valid) {
+                $this->logger->warning('DialogHSM: pré-validação (modo log) reprovaria o envio — enviado mesmo assim', [
+                    'template' => $payload['template']['name'] ?? '',
+                    'language' => $payload['template']['language']['code'] ?? '',
+                    'reason'   => $check->reason,
+                ]);
+            }
+
+            return $payload;
+        }
+
+        if (!$check->valid) {
+            return self::PREFLIGHT_ERROR_PREFIX.$check->reason;
+        }
+
+        $payload['template'] = $check->template;
+
+        return $payload;
     }
 
     /**
@@ -119,11 +227,11 @@ class DialogHSMApi
     }
 
     /**
-     * @param array<string, mixed> $payloadData
+     * @param array<string, mixed> $payload payload pronto (buildPayload + pré-validação)
      *
      * @return array{success: bool, response: array|null, error: string|null, http_status: int|null, wamid: string|null, retryable: bool}
      */
-    private function send(string $apiKey, string $url, string $mobile, array $payloadData): array
+    private function send(string $apiKey, string $url, array $payload): array
     {
 
         // DIALOGHSM_DISABLE_SSRF_CHECK=1 desativa a validação SSRF.
@@ -173,23 +281,6 @@ class DialogHSMApi
             $this->logger->warning('DialogHSM: verificação SSRF desabilitada (DIALOGHSM_DISABLE_SSRF_CHECK=1)', [
                 'url' => $url,
             ]);
-        }
-
-        // Fora do try da requisição: dado inválido no payload (ex.: data de limited_time_offer)
-        // é erro permanente — no catch genérico abaixo viraria retry.
-        try {
-            $payload = $this->buildPayload($mobile, $payloadData);
-        } catch (\Throwable $e) {
-            $this->logger->error('DialogHSM: payload inválido', ['error' => $e->getMessage()]);
-
-            return [
-                'success'     => false,
-                'response'    => null,
-                'error'       => 'Payload inválido: '.$e->getMessage(),
-                'http_status' => null,
-                'wamid'       => null,
-                'retryable'   => false,
-            ];
         }
 
         $this->logger->debug('DialogHSM: Enviando mensagem', [

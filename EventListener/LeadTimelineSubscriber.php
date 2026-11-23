@@ -24,6 +24,7 @@ class LeadTimelineSubscriber implements EventSubscriberInterface
         LeadEventLogWriter::ACTION_REPLIED    => ['icon' => 'ri-reply-line',             'color' => '#6f42c1'],
         MessageLog::STATUS_FAILED             => ['icon' => 'ri-close-circle-line',      'color' => '#d9534f'],
         MessageLog::STATUS_DLQ                => ['icon' => 'ri-error-warning-line',     'color' => '#f0ad4e'],
+        MessageLog::STATUS_INVALID            => ['icon' => 'ri-forbid-line',            'color' => '#a94442'],
     ];
 
     public function __construct(

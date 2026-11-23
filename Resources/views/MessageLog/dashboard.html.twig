@@ -54,7 +54,8 @@
         {{ _self.statCard('dialoghsm.dashboard.replied',   replied24h,        'ri-reply-line',          '#7952b3') }}
         {{ _self.statCard('dialoghsm.dashboard.failed',    stats24h.failed,  'ri-close-circle-line',  '#d9534f') }}
         {{ _self.statCard('dialoghsm.dashboard.dlq',       stats24h.dlq,       'ri-error-warning-line',    '#f0ad4e') }}
-        {% set processed24h = stats24h.sent + stats24h.failed + stats24h.dlq %}
+        {{ _self.statCard('dialoghsm.dashboard.invalid',   stats24h.invalid|default(0), 'ri-forbid-line',     '#a94442') }}
+        {% set processed24h = stats24h.sent + stats24h.failed + stats24h.dlq + stats24h.invalid|default(0) %}
         {% set rate = processed24h > 0 ? (stats24h.sent / processed24h * 100)|round(1) : 0 %}
         {{ _self.rateCard('dialoghsm.dashboard.success_rate', rate, rate >= 90 ? '#5cb85c' : (rate >= 70 ? '#f0ad4e' : '#d9534f')) }}
     </div>
@@ -71,7 +72,8 @@
         {{ _self.statCard('dialoghsm.dashboard.replied',   replied7d,         'ri-reply-line',          '#7952b3') }}
         {{ _self.statCard('dialoghsm.dashboard.failed',    stats7d.failed,   'ri-close-circle-line',  '#d9534f') }}
         {{ _self.statCard('dialoghsm.dashboard.dlq',       stats7d.dlq,       'ri-error-warning-line',    '#f0ad4e') }}
-        {% set processed7d = stats7d.sent + stats7d.failed + stats7d.dlq %}
+        {{ _self.statCard('dialoghsm.dashboard.invalid',   stats7d.invalid|default(0), 'ri-forbid-line',     '#a94442') }}
+        {% set processed7d = stats7d.sent + stats7d.failed + stats7d.dlq + stats7d.invalid|default(0) %}
         {% set rate7 = processed7d > 0 ? (stats7d.sent / processed7d * 100)|round(1) : 0 %}
         {{ _self.rateCard('dialoghsm.dashboard.success_rate', rate7, rate7 >= 90 ? '#5cb85c' : (rate7 >= 70 ? '#f0ad4e' : '#d9534f')) }}
     </div>
@@ -152,7 +154,8 @@
         read:      '{{ 'dialoghsm.log.status.read'|trans }}',
         replied:   '{{ 'dialoghsm.log.status.replied'|trans }}',
         failed:    '{{ 'dialoghsm.log.status.failed'|trans }}',
-        dlq:       '{{ 'dialoghsm.log.status.dlq'|trans }}'
+        dlq:       '{{ 'dialoghsm.log.status.dlq'|trans }}',
+        invalid:   '{{ 'dialoghsm.log.status.invalid'|trans }}'
     };
 
     chartData.datasets.forEach(function (ds) {
@@ -242,6 +245,7 @@
                 </th>
                 <th class="text-center"><i class="ri-error-warning-line" style="color:#f0ad4e"></i> {{ 'dialoghsm.dashboard.dlq'|trans }}</th>
                 <th class="text-center"><i class="ri-close-circle-line" style="color:#d9534f"></i> {{ 'dialoghsm.dashboard.failed'|trans }}</th>
+                <th class="text-center"><i class="ri-forbid-line" style="color:#a94442"></i> {{ 'dialoghsm.dashboard.invalid'|trans }}</th>
                 <th class="text-center" title="{{ 'dialoghsm.dashboard.dispatches.funnel_hint'|trans }}">
                     <i class="ri-check-double-line" style="color:#17a2b8"></i> {{ 'dialoghsm.dashboard.delivered'|trans }}
                 </th>
@@ -264,7 +268,8 @@
             {% set repliedCount  = row.replied_count|default(0) %}
             {% set failed        = row.failed|default(0) %}
             {% set dlq           = row.dlq|default(0) %}
-            {% set processed     = sentPlus + failed + dlq %}
+            {% set invalid       = row.invalid|default(0) %}
+            {% set processed     = sentPlus + failed + dlq + invalid %}
             {% set rate          = processed > 0 ? (sentPlus / processed * 100)|round(0) : 0 %}
             {% set rateColor     = rate >= 90 ? '#5cb85c' : (rate >= 70 ? '#f0ad4e' : '#d9534f') %}
             <tr>
@@ -286,6 +291,7 @@
                 <td class="text-center">{{ _self.pill(sentPlus,      '#5cb85c') }}</td>
                 <td class="text-center">{{ _self.pill(dlq,           '#f0ad4e') }}</td>
                 <td class="text-center">{{ _self.pill(failed,        '#d9534f') }}</td>
+                <td class="text-center">{{ _self.pill(invalid,       '#a94442') }}</td>
                 <td class="text-center">{{ _self.pill(deliveredPlus, '#17a2b8') }}</td>
                 <td class="text-center">{{ _self.pill(readCount,     '#0275d8') }}</td>
                 <td class="text-center">{{ _self.pill(repliedCount,  '#7952b3') }}</td>

@@ -1308,6 +1308,26 @@ class MessageLogRepositoryTest extends TestCase
         $this->repository->findMostRecentForLead(1, new \DateTime('-24 hours'));
     }
 
+    /**
+     * A decisão "respondeu" da campanha usa este método para achar o envio ao qual atribuir a
+     * resposta: mensagem barrada na pré-validação nunca saiu e não pode receber a resposta.
+     */
+    public function testFindMostRecentForLeadExcludesMessagesThatNeverLeft(): void
+    {
+        $params = [];
+        $this->mockQueryBuilder->method('setParameter')->willReturnCallback(function (string $name, mixed $value) use (&$params) {
+            $params[$name] = $value;
+
+            return $this->mockQueryBuilder;
+        });
+        $this->mockQuery->method('getResult')->willReturn([]);
+
+        $this->repository->findMostRecentForLead(1, new \DateTime('-24 hours'));
+
+        $this->assertContains(MessageLog::STATUS_INVALID, $params['notDelivered']);
+        $this->assertContains(MessageLog::STATUS_FAILED, $params['notDelivered']);
+    }
+
     public function testFindMostRecentForLeadLimitsToOneResult(): void
     {
         $this->mockQueryBuilder

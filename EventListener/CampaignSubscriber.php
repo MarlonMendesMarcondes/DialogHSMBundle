@@ -13,6 +13,7 @@ use Mautic\CampaignBundle\Event\PendingEvent;
 use Mautic\IntegrationsBundle\Helper\IntegrationsHelper;
 use Mautic\LeadBundle\Helper\TokenHelper;
 use MauticPlugin\DialogHSMBundle\DialogHSMEvents;
+use MauticPlugin\DialogHSMBundle\Api\DialogHSMApi;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumber;
 use MauticPlugin\DialogHSMBundle\Exception\CampaignActionBuildException;
@@ -742,6 +743,14 @@ class CampaignSubscriber implements EventSubscriberInterface
             return;
         }
 
+        // Barrada na pré-validação: a mensagem nunca saiu. Encerra como erro do envio, nunca
+        // como sucesso — senão a campanha seguiria como se o contato tivesse recebido.
+        if (MessageLog::STATUS_INVALID === $status) {
+            $event->passWithError($campaignLog, 'dialoghsm.campaign.error.preflight_invalid');
+
+            return;
+        }
+
         if (MessageLog::STATUS_FAILED === $status || MessageLog::STATUS_DLQ === $status) {
             if (in_array($log->getWebhookErrorCode(), self::META_RESTRICTION_CODES, true)) {
                 $event->passWithError($campaignLog, 'dialoghsm.campaign.error.meta_restricted');
@@ -885,7 +894,7 @@ class CampaignSubscriber implements EventSubscriberInterface
      * @param array<string, mixed>|null $profileFields null = não substitui tokens
      *                                                 (usado na checagem prévia)
      *
-     * @return array<int|string, string>
+     * @return array<int|string, mixed> valores string; DialogHSMApi::TOKENS_KEY guarda os originais com token
      */
     private function buildPayloadFromConfig(array $config, ?array $profileFields): array
     {
@@ -897,6 +906,7 @@ class CampaignSubscriber implements EventSubscriberInterface
 
         $list   = $payloadData['list'] ?? $payloadData;
         $result = [];
+        $tokens = [];
 
         foreach ($list as $item) {
             if (!is_array($item) || !isset($item['label'], $item['value'])
@@ -912,10 +922,22 @@ class CampaignSubscriber implements EventSubscriberInterface
             }
 
             if (null !== $profileFields) {
-                $value = TokenHelper::findLeadTokens($value, $profileFields, true);
+                $resolved = TokenHelper::findLeadTokens($value, $profileFields, true);
+
+                // Guarda o valor original de quem tinha token, só para a pré-validação dizer
+                // qual token ficou vazio ("token {contactfield=firstname}").
+                if ($resolved !== $value) {
+                    $tokens[$key] = $value;
+                }
+
+                $value = $resolved;
             }
 
             $result[$key] = $value;
+        }
+
+        if ([] !== $tokens) {
+            $result[DialogHSMApi::TOKENS_KEY] = $tokens;
         }
 
         return $result;

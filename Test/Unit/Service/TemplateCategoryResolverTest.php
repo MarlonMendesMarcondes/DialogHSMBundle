@@ -38,7 +38,7 @@ class TemplateCategoryResolverTest extends TestCase
     {
         $this->client->expects($this->once())->method('request')
             ->with('GET', 'https://waba-v2.360dialog.io/message_templates', $this->callback(
-                fn (array $o): bool => 'KEY' === $o['headers']['D360-API-KEY'] && 'name,category' === $o['query']['fields']
+                fn (array $o): bool => 'KEY' === $o['headers']['D360-API-KEY'] && 'name,category,language,status,components' === $o['query']['fields']
             ))
             ->willReturn(self::page([
                 ['name' => 'cs_ativacao_disc1', 'category' => 'UTILITY'],
@@ -131,7 +131,7 @@ class TemplateCategoryResolverTest extends TestCase
 
         $this->assertNull($this->resolver->getCategory('KEY', self::MM_URL, 'a'));
         $this->assertNull($this->resolver->getCategory('KEY', self::MM_URL, 'a'));
-        $this->assertFalse($this->cache->hasItem('dialoghsm_template_categories_'.hash('sha256', 'KEY')));
+        $this->assertFalse($this->cache->hasItem('dialoghsm_templates_v2_'.hash('sha256', 'KEY')));
     }
 
     public function testNetworkErrorReturnsNull(): void
@@ -147,4 +147,5 @@ class TemplateCategoryResolverTest extends TestCase
 
         $this->assertNull($this->resolver->getCategory('KEY', self::MM_URL, 'a'));
     }
+
 }

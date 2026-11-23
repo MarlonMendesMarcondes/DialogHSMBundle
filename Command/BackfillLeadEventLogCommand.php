@@ -162,7 +162,7 @@ class BackfillLeadEventLogCommand extends Command
         // mesmo com date_sent preenchido (date_sent marca a tentativa, não o sucesso).
         // 'queued' também fica de fora: o wamid dele é o UUID temporário da fila, não da Meta.
         $reallySent = !empty($row['wamid'])
-            && !in_array($row['status'], [MessageLog::STATUS_QUEUED, MessageLog::STATUS_FAILED, MessageLog::STATUS_DLQ], true);
+            && !in_array($row['status'], [MessageLog::STATUS_QUEUED, MessageLog::STATUS_FAILED, MessageLog::STATUS_DLQ, MessageLog::STATUS_INVALID], true);
 
         if ($reallySent && !empty($row['date_sent'])) {
             $events[] = [MessageLog::STATUS_SENT, $row['date_sent']];
@@ -178,6 +178,10 @@ class BackfillLeadEventLogCommand extends Command
 
         if (in_array($row['status'], [MessageLog::STATUS_FAILED, MessageLog::STATUS_DLQ], true) && !empty($row['date_sent'])) {
             $events[] = [MessageLog::STATUS_FAILED, $row['date_sent']];
+        }
+
+        if (MessageLog::STATUS_INVALID === $row['status'] && !empty($row['date_sent'])) {
+            $events[] = [MessageLog::STATUS_INVALID, $row['date_sent']];
         }
 
         return $events;

@@ -9,6 +9,7 @@ use Mautic\CoreBundle\Model\AjaxLookupModelInterface;
 use Mautic\CoreBundle\Model\FormModel;
 use Mautic\LeadBundle\Helper\TokenHelper;
 use Mautic\LeadBundle\Model\LeadModel;
+use MauticPlugin\DialogHSMBundle\Api\DialogHSMApi;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppMessage;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppMessageRepository;
@@ -259,6 +260,7 @@ class WhatsAppMessageModel extends FormModel implements AjaxLookupModelInterface
     {
         $list   = $payloadData['list'] ?? $payloadData;
         $result = [];
+        $tokens = [];
 
         foreach ($list as $item) {
             if (!is_array($item) || !isset($item['label'], $item['value'])) {
@@ -268,7 +270,13 @@ class WhatsAppMessageModel extends FormModel implements AjaxLookupModelInterface
             if ('' === $key) {
                 continue;
             }
-            $result[$key] = TokenHelper::findLeadTokens((string) $item['value'], $profileFields, true);
+            $raw          = (string) $item['value'];
+            $result[$key] = TokenHelper::findLeadTokens($raw, $profileFields, true);
+
+            // Original com token, só para a mensagem da pré-validação (ver DialogHSMApi::TOKENS_KEY)
+            if ($result[$key] !== $raw) {
+                $tokens[$key] = $raw;
+            }
         }
 
         // buildPayload() usa 'vars' como CSV dos nomes dos body parameters.
@@ -279,6 +287,10 @@ class WhatsAppMessageModel extends FormModel implements AjaxLookupModelInterface
             $controlKeys    = ['content', 'url_arquivo', 'buttons', 'buttons_vars', 'limited_time_offer', 'language'];
             $varKeys        = array_diff(array_keys($result), $controlKeys);
             $result['vars'] = implode(',', $varKeys);
+        }
+
+        if ([] !== $tokens) {
+            $result[DialogHSMApi::TOKENS_KEY] = $tokens;
         }
 
         return $result;

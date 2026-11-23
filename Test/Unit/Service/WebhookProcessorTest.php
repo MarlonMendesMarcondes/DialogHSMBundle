@@ -201,6 +201,37 @@ class WebhookProcessorTest extends TestCase
         $this->assertSame(MessageLog::STATUS_FAILED, $log->getStatus());
     }
 
+    /**
+     * Mensagem barrada na pré-validação nunca saiu: um webhook com o mesmo wamid (não deveria
+     * existir — invalid não tem wamid) não muda o status nem dispara decisão de campanha.
+     *
+     * @dataProvider webhookStatusProvider
+     */
+    public function testWebhookForInvalidLogIsNoOpAndTriggersNoDecision(string $webhookStatus): void
+    {
+        $log = $this->makeLog(MessageLog::STATUS_INVALID);
+        $log->setCampaignEventId(7);
+
+        $this->numberRepository->method('findByPhoneNumber')->willReturn(new WhatsAppNumber());
+        $this->logRepository->method('findByWamid')->willReturn($log);
+        $this->em->expects($this->never())->method('flush');
+        $this->realTimeExecutioner->expects($this->never())->method('execute');
+
+        $this->processor->process('+5511999999999', $this->makePayload([
+            $this->makeStatusEntry('wamid.abc', $webhookStatus),
+        ]));
+
+        $this->assertSame(MessageLog::STATUS_INVALID, $log->getStatus());
+    }
+
+    /**
+     * @return array<string, array{string}>
+     */
+    public static function webhookStatusProvider(): array
+    {
+        return ['sent' => ['sent'], 'delivered' => ['delivered'], 'read' => ['read'], 'failed' => ['failed']];
+    }
+
     public function testDeliveredFromDlqIsNoOp(): void
     {
         $log = $this->makeLog(MessageLog::STATUS_DLQ);

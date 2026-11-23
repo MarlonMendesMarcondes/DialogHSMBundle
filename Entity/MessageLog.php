@@ -18,6 +18,13 @@ class MessageLog
     public const STATUS_FAILED           = 'failed';
     public const STATUS_DLQ              = 'dlq';
 
+    /**
+     * Barrada na pré-validação (TemplatePreflightValidator): a API não foi chamada porque a Meta
+     * recusaria o envio (template inexistente, parâmetro vazio ou em número errado...). Nunca
+     * teve wamid, então nenhum webhook chega a ela e nenhuma decisão de campanha dispara.
+     */
+    public const STATUS_INVALID          = 'invalid';
+
     private ?int $id = null;
     private ?string $wamid = null;
     private ?int $leadId = null;

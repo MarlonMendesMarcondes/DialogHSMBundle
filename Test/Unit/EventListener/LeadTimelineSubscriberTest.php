@@ -112,7 +112,7 @@ class LeadTimelineSubscriberTest extends TestCase
     // Registro de tipos de evento
     // =========================================================================
 
-    public function testOnTimelineGenerateRegistersAllSevenEventTypes(): void
+    public function testOnTimelineGenerateRegistersAllEightEventTypes(): void
     {
         $event = $this->makeTimelineEvent(applicable: false);
 
@@ -120,9 +120,10 @@ class LeadTimelineSubscriberTest extends TestCase
             'dialoghsm.dispatched',
             'dialoghsm.sent', 'dialoghsm.delivered', 'dialoghsm.read',
             'dialoghsm.replied', 'dialoghsm.failed', 'dialoghsm.dlq',
+            'dialoghsm.invalid',
         ];
 
-        $event->expects($this->exactly(7))
+        $event->expects($this->exactly(8))
             ->method('addEventType')
             ->with(
                 $this->callback(fn ($key) => in_array($key, $expectedTypes, true)),
@@ -183,7 +184,7 @@ class LeadTimelineSubscriberTest extends TestCase
             ->willReturnCallback(function (string $key) use (&$counterKeys): void {
                 $counterKeys[] = $key;
             });
-        $event->expects($this->exactly(7))->method('addToCounter');
+        $event->expects($this->exactly(8))->method('addToCounter');
 
         $this->subscriber->onTimelineGenerate($event);
 

@@ -6,7 +6,9 @@ namespace MauticPlugin\DialogHSMBundle\Form\Type;
 
 use Mautic\CoreBundle\Form\Type\YesNoButtonGroupType;
 use Mautic\UserBundle\Form\Type\UserListType;
+use MauticPlugin\DialogHSMBundle\Service\PartnerConfigProvider;
 use Symfony\Component\Form\AbstractType;
+use Symfony\Component\Form\Extension\Core\Type\ChoiceType;
 use Symfony\Component\Form\Extension\Core\Type\IntegerType;
 use Symfony\Component\Form\Extension\Core\Type\NumberType;
 use Symfony\Component\Form\Extension\Core\Type\PasswordType;
@@ -198,6 +200,31 @@ class ConfigAuthType extends AbstractType
                 'label' => 'dialoghsm.config.balance_alert_send_email',
                 'data'  => (bool) ($data['balance_alert_send_email'] ?? false),
                 'help'  => 'dialoghsm.config.balance_alert_send_email.help',
+            ]
+        );
+
+        // Feature flag da pré-validação: o padrão "log" só registra o que seria barrado, para
+        // conferir falsos positivos em produção antes de passar para "enforce".
+        $builder->add(
+            'preflight_mode',
+            ChoiceType::class,
+            [
+                'label'      => 'dialoghsm.config.preflight_mode',
+                'label_attr' => ['class' => 'control-label'],
+                'required'   => true,
+                'choices'    => [
+                    'dialoghsm.config.preflight_mode.off'     => PartnerConfigProvider::PREFLIGHT_OFF,
+                    'dialoghsm.config.preflight_mode.log'     => PartnerConfigProvider::PREFLIGHT_LOG,
+                    'dialoghsm.config.preflight_mode.enforce' => PartnerConfigProvider::PREFLIGHT_ENFORCE,
+                ],
+                'attr' => [
+                    'class'   => 'form-control',
+                    'tooltip' => 'dialoghsm.config.preflight_mode.tooltip',
+                ],
+                'data' => in_array($data['preflight_mode'] ?? null, [PartnerConfigProvider::PREFLIGHT_OFF, PartnerConfigProvider::PREFLIGHT_LOG, PartnerConfigProvider::PREFLIGHT_ENFORCE], true)
+                    ? $data['preflight_mode']
+                    : PartnerConfigProvider::PREFLIGHT_LOG,
+                'help' => 'dialoghsm.config.preflight_mode.help',
             ]
         );
 
