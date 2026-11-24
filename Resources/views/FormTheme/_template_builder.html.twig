@@ -6,7 +6,8 @@
   Variáveis: builderId, numberField, nameField, languageField, paramsField (FormViews).
 
   Os valores vão para paramsField em JSON; quem guarda e converte no payload é o servidor
-  (ver Service\TemplatePayload). O script roda inline: no construtor de campanha o formulário
+  (ver Service\TemplatePayload). Cada variável do body tem origem — valor fixo, campo do contato ou
+  campo de Custom Object (só com o fork do CustomObjectsBundle) — e cálculo para data e número. O script roda inline: no construtor de campanha o formulário
   chega por AJAX no modal e o jQuery executa scripts do conteúdo inserido.
 #}
         {% set config = {
@@ -17,6 +18,7 @@
             language: languageField.vars.id,
             params: paramsField.vars.id,
         },
+        sources: dialoghsm_variable_sources(),
         i18n: {
             chooseNumber: 'dialoghsm.campaign.template.js.choose_number'|trans,
             loading: 'dialoghsm.campaign.template.js.loading'|trans,
@@ -41,6 +43,15 @@
             remove: 'dialoghsm.campaign.template.js.remove'|trans,
             preview: 'dialoghsm.campaign.template.js.preview'|trans,
             refresh: 'dialoghsm.campaign.template.js.refresh'|trans,
+            sourceStatic: 'dialoghsm.campaign.template.js.source.static'|trans,
+            sourceField: 'dialoghsm.campaign.template.js.source.field'|trans,
+            sourceCustomObject: 'dialoghsm.campaign.template.js.source.custom_object'|trans,
+            chooseField: 'dialoghsm.campaign.template.js.choose_field'|trans,
+            chooseObject: 'dialoghsm.campaign.template.js.choose_object'|trans,
+            calculation: 'dialoghsm.campaign.template.js.calculation'|trans,
+            calculationDate: 'dialoghsm.campaign.template.js.calculation_date'|trans,
+            calculationNumber: 'dialoghsm.campaign.template.js.calculation_number'|trans,
+            customObjectUnavailable: 'dialoghsm.campaign.template.js.custom_object_unavailable'|trans,
         },
     } %}
 
@@ -224,6 +235,176 @@
             select.addEventListener('change', onTemplateChange);
         }
 
+        // ── variável: origem (valor fixo, campo do contato, Custom Object) + cálculo ──
+        // Mesmo modelo do editor de HSM do N8nDispatchBundle. A variável é guardada como objeto
+        // {source, value | field | customObject + customObjectField, dateOffsetDays}; texto (formato
+        // antigo) é lido como valor fixo. O servidor resolve cada origem no envio.
+        var SOURCES    = cfg.sources || {contactFields: [], customObjects: null};
+        var CALC_TYPES = {date: 'date', datetime: 'date', number: 'number', int: 'number', decimal: 'number'};
+
+        function normalizeVariable(value) {
+            if (value && typeof value === 'object') { return value; }
+            return {source: 'static', value: null === value || undefined === value ? '' : String(value)};
+        }
+
+        function findBy(list, alias) {
+            for (var i = 0; i < (list || []).length; i++) {
+                if (list[i].alias === alias) { return list[i]; }
+            }
+            return null;
+        }
+
+        function selectBox(options, value, placeholder) {
+            var node = el('select', {'class': 'form-control'});
+            if (placeholder) { node.appendChild(el('option', {value: ''}, placeholder)); }
+            options.forEach(function (o) {
+                var opt = el('option', {value: o.value}, o.label);
+                if (o.value === value) { opt.selected = true; }
+                node.appendChild(opt);
+            });
+            if (undefined !== value && null !== value) { node.value = value; }
+            return node;
+        }
+
+        function fieldOptions(fields) {
+            return (fields || []).map(function (f) { return {value: f.alias, label: f.label + ' (' + f.alias + ')'}; });
+        }
+
+        function calculationBox(variable, type) {
+            var kind = CALC_TYPES[type];
+            if (!kind) {
+                delete variable.dateOffsetDays;
+                return null;
+            }
+            var wrap  = el('div', {style: 'margin-top:6px;'});
+            var group = el('div', {'class': 'input-group'});
+            group.appendChild(el('span', {'class': 'input-group-addon'}, t.calculation));
+            var field = el('input', {type: 'text', 'class': 'form-control', placeholder: '0', inputmode: 'decimal'});
+            field.value = variable.dateOffsetDays || '';
+            field.addEventListener('input', function () { variable.dateOffsetDays = field.value; sync(); });
+            group.appendChild(field);
+            wrap.appendChild(group);
+            wrap.appendChild(el('span', {'class': 'help-block'}, 'date' === kind ? t.calculationDate : t.calculationNumber));
+            return wrap;
+        }
+
+        function variableEditor(idx, help, extra) {
+            params.body[idx] = normalizeVariable(params.body[idx]);
+
+            var group = el('div', {'class': 'form-group'});
+            group.appendChild(el('label', {'class': 'control-label'}, fmt(t.variable, {n: idx + 1})));
+            var row   = el('div', {'class': 'row'});
+            var left  = el('div', {'class': 'col-sm-4'});
+            var right = el('div', {'class': 'col-sm-8'});
+            row.appendChild(left);
+            row.appendChild(right);
+            group.appendChild(row);
+
+            var saved   = params.body[idx];
+            var choices = [{value: 'static', label: t.sourceStatic}, {value: 'field', label: t.sourceField}];
+            if (SOURCES.customObjects || 'custom_object' === saved.source) {
+                choices.push({value: 'custom_object', label: t.sourceCustomObject});
+            }
+            var source = selectBox(choices, saved.source || 'static');
+            left.appendChild(source);
+            source.addEventListener('change', function () {
+                params.body[idx] = 'static' === source.value ? {source: 'static', value: ''} : {source: source.value};
+                drawRight();
+                sync();
+            });
+
+            function drawRight() {
+                var variable = params.body[idx];
+                right.innerHTML = '';
+
+                if ('field' === variable.source) {
+                    var fieldSel = selectBox(fieldOptions(SOURCES.contactFields), variable.field || '', t.chooseField);
+                    var calcSlot = el('div');
+                    var drawCalc = function () {
+                        calcSlot.innerHTML = '';
+                        var f   = findBy(SOURCES.contactFields, variable.field);
+                        var box = calculationBox(variable, f ? f.type : '');
+                        if (box) { calcSlot.appendChild(box); }
+                    };
+                    fieldSel.addEventListener('change', function () { variable.field = fieldSel.value; drawCalc(); sync(); });
+                    right.appendChild(fieldSel);
+                    right.appendChild(calcSlot);
+                    drawCalc();
+                    return;
+                }
+
+                if ('custom_object' === variable.source) {
+                    if (!SOURCES.customObjects) {
+                        right.appendChild(warning(t.customObjectUnavailable));
+                        return;
+                    }
+                    var objects   = SOURCES.customObjects.map(function (o) { return {value: o.alias, label: o.label}; });
+                    var objectSel = selectBox(objects, variable.customObject || '', t.chooseObject);
+                    var fieldSlot = el('div', {style: 'margin-top:6px;'});
+                    var calcSlot2 = el('div');
+                    var drawFields = function () {
+                        fieldSlot.innerHTML = '';
+                        calcSlot2.innerHTML = '';
+                        var object = findBy(SOURCES.customObjects, variable.customObject);
+                        if (!object) { return; }
+                        var coFieldSel = selectBox(fieldOptions(object.fields), variable.customObjectField || '', t.chooseField);
+                        var drawCalc2 = function () {
+                            calcSlot2.innerHTML = '';
+                            var f   = findBy(object.fields, variable.customObjectField);
+                            var box = calculationBox(variable, f ? f.type : '');
+                            if (box) { calcSlot2.appendChild(box); }
+                        };
+                        coFieldSel.addEventListener('change', function () { variable.customObjectField = coFieldSel.value; drawCalc2(); sync(); });
+                        fieldSlot.appendChild(coFieldSel);
+                        drawCalc2();
+                    };
+                    objectSel.addEventListener('change', function () {
+                        variable.customObject = objectSel.value;
+                        delete variable.customObjectField;
+                        drawFields();
+                        sync();
+                    });
+                    right.appendChild(objectSel);
+                    right.appendChild(fieldSlot);
+                    right.appendChild(calcSlot2);
+                    drawFields();
+                    return;
+                }
+
+                var text = el('input', {type: 'text', 'class': 'form-control', placeholder: '{contactfield=firstname}'});
+                text.value = variable.value || '';
+                text.addEventListener('input', function () { variable.value = text.value; sync(); });
+                right.appendChild(text);
+            }
+
+            drawRight();
+            if (help) { group.appendChild(el('span', {'class': 'help-block'}, help)); }
+            if (extra) { group.appendChild(extra); }
+
+            return group;
+        }
+
+        // Valor mostrado na prévia: a origem vira um selo (o valor real só existe no envio).
+        function previewValue(value) {
+            var variable = normalizeVariable(value);
+            var amount   = parseFloat(String(variable.dateOffsetDays || '0').replace(',', '.')) || 0;
+            var suffix   = 0 !== amount ? ' ' + (amount > 0 ? '+' : '') + amount : '';
+
+            if ('field' === variable.source) {
+                var f = findBy(SOURCES.contactFields, variable.field);
+                return variable.field ? '{contactfield=' + (f ? f.label : variable.field) + suffix + '}' : '';
+            }
+            if ('custom_object' === variable.source) {
+                var o  = findBy(SOURCES.customObjects, variable.customObject);
+                var cf = o ? findBy(o.fields, variable.customObjectField) : null;
+                return variable.customObject && variable.customObjectField
+                    ? '{contactfield=' + (o ? o.label : variable.customObject) + '.' + (cf ? cf.label : variable.customObjectField) + suffix + '}'
+                    : '';
+            }
+
+            return variable.value || '';
+        }
+
         function renderTemplate(tpl) {
             fields.innerHTML = '';
             if (!tpl) {
@@ -252,15 +433,7 @@
             } else {
                 params.body = params.body.slice(0, tpl.body.vars);
                 for (var i = 0; i < tpl.body.vars; i++) {
-                    (function (idx) {
-                        fields.appendChild(input(
-                            fmt(t.variable, {n: idx + 1}),
-                            params.body[idx],
-                            idx === 0 ? t.variableHelp : '',
-                            function (v) { params.body[idx] = v; },
-                            '{contactfield=firstname}'
-                        ));
-                    })(i);
+                    fields.appendChild(variableEditor(i, i === 0 ? t.variableHelp : ''));
                 }
                 if (tpl.body.vars === 0 && !MEDIA[fmtHeader]) { fields.appendChild(el('p', {'class': 'text-muted'}, t.noVariables)); }
             }
@@ -293,7 +466,8 @@
         // ── prévia (componente DialogHsmPreview, de _wa_preview) ────────────
         function renderPreview() {
             if (window.DialogHsmPreview) {
-                window.DialogHsmPreview.render(prevPane, current(), params, {title: t.preview});
+                var shown = {header: params.header, buttons: params.buttons, body: params.body.map(previewValue)};
+                window.DialogHsmPreview.render(prevPane, current(), shown, {title: t.preview});
             }
         }
 
@@ -312,15 +486,13 @@
             fields.appendChild(input(fmt(t.headerMedia, {format: ''}).trim(), params.header, fmt(t.headerMediaHelp, {ext: '.jpg, .png, .mp4, .pdf'}), function (v) { params.header = v; }, 'https://'));
 
             params.body.forEach(function (value, idx) {
-                var group = input(fmt(t.variable, {n: idx + 1}), value, '', function (v) { params.body[idx] = v; }, '{contactfield=firstname}');
                 var remove = el('button', {type: 'button', 'class': 'btn btn-ghost btn-xs'}, t.remove);
                 remove.addEventListener('click', function () { params.body.splice(idx, 1); renderManual(); sync(); });
-                group.appendChild(remove);
-                fields.appendChild(group);
+                fields.appendChild(variableEditor(idx, '', remove));
             });
 
             var add = el('button', {type: 'button', 'class': 'btn btn-ghost btn-sm'}, t.addVariable);
-            add.addEventListener('click', function () { params.body.push(''); renderManual(); sync(); });
+            add.addEventListener('click', function () { params.body.push({source: 'static', value: ''}); renderManual(); sync(); });
             fields.appendChild(add);
             sync();
         }
