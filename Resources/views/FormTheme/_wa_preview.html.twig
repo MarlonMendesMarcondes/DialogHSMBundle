@@ -35,8 +35,8 @@
   mautic:assets:generate no deploy.
 #}
 <style>
-    /* Vertical, como a tela de um smartphone: largura fixa de 360px (nunca encolhe com o conteúdo) e altura mínima de retrato. */
-    .dialoghsm-wa-preview { background: #efeae2; border-radius: 8px; padding: 16px; margin-bottom: 15px; width: 360px; max-width: 100%; min-height: 640px; box-sizing: border-box; }
+    /* Vertical, como a tela de um smartphone: largura mínima de 360px (cresce com o conteúdo, até 100% do espaço) e altura mínima de retrato. */
+    .dialoghsm-wa-preview { background: #efeae2; border-radius: 8px; padding: 16px; margin-bottom: 15px; width: fit-content; min-width: min(360px, 100%); max-width: 100%; min-height: 640px; box-sizing: border-box; }
     .dialoghsm-wa-preview__title { font-size: 12px; color: #667781; margin-bottom: 8px; }
     .dialoghsm-wa-bubble { background: #fff; color: #111b21; border-radius: 8px; max-width: 420px; box-shadow: 0 1px 0.5px rgba(11, 20, 26, .13); overflow: hidden; }
     .dialoghsm-wa-bubble__media { background: #d1d7db; color: #54656f; height: 140px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 12px; gap: 4px; }
