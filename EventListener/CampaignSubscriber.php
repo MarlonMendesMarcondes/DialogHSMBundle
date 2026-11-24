@@ -11,6 +11,7 @@ use Mautic\CampaignBundle\Event\CampaignBuilderEvent;
 use Mautic\CampaignBundle\Event\CampaignExecutionEvent;
 use Mautic\CampaignBundle\Event\PendingEvent;
 use Mautic\IntegrationsBundle\Helper\IntegrationsHelper;
+use Mautic\LeadBundle\Entity\Lead;
 use Mautic\LeadBundle\Helper\TokenHelper;
 use MauticPlugin\DialogHSMBundle\DialogHSMEvents;
 use MauticPlugin\DialogHSMBundle\Api\DialogHSMApi;
@@ -32,6 +33,7 @@ use MauticPlugin\DialogHSMBundle\Model\WhatsAppNumberModel;
 use MauticPlugin\DialogHSMBundle\Service\LeadEventLogWriter;
 use MauticPlugin\DialogHSMBundle\Service\PaymentBlockPauseService;
 use MauticPlugin\DialogHSMBundle\Service\TemplatePayload;
+use MauticPlugin\DialogHSMBundle\Service\Variable\TemplateVariableResolver;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\Messenger\Bridge\Amqp\Transport\AmqpStamp;
@@ -113,6 +115,7 @@ class CampaignSubscriber implements EventSubscriberInterface
         private LeadEventLogWriter $leadEventLogWriter,
         private string $directTransportDsn = 'null://null',
         private ?PaymentBlockPauseService $paymentPause = null,
+        private ?TemplateVariableResolver $variableResolver = null,
     ) {
     }
 
@@ -570,7 +573,7 @@ class CampaignSubscriber implements EventSubscriberInterface
             }
 
             $phone        = $this->normalizePhone((string) ($contact->getLeadPhoneNumber() ?? ''));
-            $payloadData  = $this->buildPayloadFromConfig($config, $contact->getProfileFields());
+            $payloadData  = $this->buildPayloadFromConfig($config, $contact->getProfileFields(), $contact, TemplateVariableResolver::segmentsOf($campaignEvent->getCampaign()));
             $templateName = $this->templateNameFrom($payloadData);
 
             if ('' === $templateName) {
@@ -936,18 +939,22 @@ class CampaignSubscriber implements EventSubscriberInterface
      *
      * @param array<string, mixed>|null $profileFields null = não substitui tokens
      *                                                 (usado na checagem prévia)
+     * @param iterable<mixed>           $segments      segmentos de origem da campanha: dizem quais
+     *                                                 itens de Custom Object contam
      *
      * @return array<int|string, mixed> valores string; DialogHSMApi::TOKENS_KEY guarda os originais com token
      */
-    private function buildPayloadFromConfig(array $config, ?array $profileFields): array
+    private function buildPayloadFromConfig(array $config, ?array $profileFields, ?Lead $contact = null, iterable $segments = []): array
     {
         $payloadData = $config['payload_data'] ?? [];
-        // Formulário guiado (ações novas): campos hsm_* nas propriedades do evento.
-        $structured  = TemplatePayload::toList(
-            (string) ($config['hsm_template'] ?? ''),
-            (string) ($config['hsm_language'] ?? ''),
-            is_scalar($config['hsm_params'] ?? null) ? (string) $config['hsm_params'] : null
-        );
+        $language    = (string) ($config['hsm_language'] ?? '');
+        $params      = is_scalar($config['hsm_params'] ?? null) ? (string) $config['hsm_params'] : null;
+
+        // Formulário guiado (ações novas): campos hsm_* nas propriedades do evento. Variável com
+        // origem (campo do contato, Custom Object) vira texto aqui, com o contato e os segmentos.
+        $resolveVariable = null === $this->variableResolver ? null
+            : fn (mixed $variable, string $locale): string => $this->variableResolver->resolve($variable, $contact, $segments, $locale);
+        $structured  = TemplatePayload::toList((string) ($config['hsm_template'] ?? ''), $language, $params, $resolveVariable);
 
         if (empty($payloadData) && [] === $structured) {
             return [];
@@ -987,7 +994,11 @@ class CampaignSubscriber implements EventSubscriberInterface
             $result[$key] = $value;
         }
 
-        if ([] !== $tokens) {
+        // Variável de campo/Custom Object já chega resolvida: a origem entra como "token" só para a
+        // pré-validação dizer qual campo ficou vazio.
+        $tokens += TemplatePayload::variableHints($params);
+
+        if ([] !== $tokens && null !== $profileFields) {
             $result[DialogHSMApi::TOKENS_KEY] = $tokens;
         }
 

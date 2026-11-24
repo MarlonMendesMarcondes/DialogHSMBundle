@@ -130,4 +130,55 @@ class TemplatePayloadTest extends TestCase
         $this->assertSame(['{contactfield=firstname}', 'Direito'], [$expanded['{{1}}'], $expanded['{{2}}']]);
         $this->assertSame('2026-12-31', $expanded['limited_time_offer']);
     }
+
+    // ── variáveis com origem ─────────────────────────────────────────────────
+
+    public function testVariablesWithSourceAreResolvedWithTheTemplateLanguage(): void
+    {
+        $seen  = [];
+        $pairs = self::pairs(TemplatePayload::toList('promo', 'en', json_encode(['body' => [
+            ['source' => 'field', 'field' => 'firstname'],
+            ['source' => 'static', 'value' => 'Direito'],
+            'texto antigo',
+        ]]), static function (mixed $variable, string $locale) use (&$seen): string {
+            $seen[] = $locale;
+
+            return is_array($variable) && 'field' === $variable['source'] ? 'Maria' : (is_array($variable) ? $variable['value'] : $variable);
+        }));
+
+        $this->assertSame(['Maria', 'Direito', 'texto antigo'], [$pairs['{{1}}'], $pairs['{{2}}'], $pairs['{{3}}']]);
+        $this->assertSame(['en', 'en', 'en'], $seen);
+    }
+
+    public function testWithoutResolverOnlyStaticValuesAreKept(): void
+    {
+        $pairs = self::pairs(TemplatePayload::toList('promo', '', ['body' => [
+            ['source' => 'field', 'field' => 'firstname'],
+            ['source' => 'static', 'value' => 'Direito'],
+        ]]));
+
+        $this->assertSame(['', 'Direito'], [$pairs['{{1}}'], $pairs['{{2}}']]);
+    }
+
+    public function testHintsDescribeTheSourceOfEachVariable(): void
+    {
+        $this->assertSame([
+            '{{1}}' => '{contactfield=firstname}',
+            '{{3}}' => '{customobject=curso.inicio}',
+        ], TemplatePayload::variableHints(json_encode(['body' => [
+            ['source' => 'field', 'field' => 'firstname'],
+            'fixo',
+            ['source' => 'custom_object', 'customObject' => 'curso', 'customObjectField' => 'inicio'],
+        ]])));
+    }
+
+    public function testStoredMessagePassesTheResolverAlong(): void
+    {
+        $expanded = TemplatePayload::expandStored('promo', [
+            'list' => [],
+            'hsm'  => ['language' => 'pt_BR', 'params' => ['body' => [['source' => 'field', 'field' => 'firstname']]]],
+        ], static fn (mixed $variable, string $locale): string => 'Ana/'.$locale);
+
+        $this->assertSame('Ana/pt_BR', self::pairs($expanded['list'])['{{1}}']);
+    }
 }

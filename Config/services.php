@@ -5,6 +5,8 @@ declare(strict_types=1);
 use Mautic\CoreBundle\DependencyInjection\MauticCoreExtension;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 
+use function Symfony\Component\DependencyInjection\Loader\Configurator\service;
+
 return function (ContainerConfigurator $configurator): void {
     $services = $configurator->services()
         ->defaults()
@@ -12,7 +14,9 @@ return function (ContainerConfigurator $configurator): void {
         ->autoconfigure()
         ->public();
 
-    $excludes   = array_merge(MauticCoreExtension::DEFAULT_EXCLUDES, ['Message']);
+    // CustomObjectVariableSource depende de classes que só existem no fork do CustomObjectsBundle:
+    // carregada pelo glob, quebraria o container numa instalação sem ele (registro condicional abaixo).
+    $excludes   = array_merge(MauticCoreExtension::DEFAULT_EXCLUDES, ['Message', 'Service/Variable/CustomObjectVariableSource.php']);
     $services->load('MauticPlugin\\DialogHSMBundle\\', '../')
         ->exclude('../{'.implode(',', $excludes).'}');
 
@@ -45,6 +49,16 @@ return function (ContainerConfigurator $configurator): void {
     // Substitui o serviço buggy do core (ver CampaignAuditServiceFix::addWarningForUnpublishedEmails).
     $services->set(\Mautic\CampaignBundle\Service\CampaignAuditService::class, \MauticPlugin\DialogHSMBundle\Service\CampaignAuditServiceFix::class)
         ->autowire();
+
+    // Origem "Campo de Custom Object" das variáveis: só com o fork do CustomObjectsBundle instalado.
+    if (class_exists(\MauticPlugin\CustomObjectsBundle\Segment\SegmentItemResolver::class)) {
+        $services->set(\MauticPlugin\DialogHSMBundle\Service\Variable\CustomObjectVariableSource::class)
+            ->autowire();
+    }
+
+    $services->set(\MauticPlugin\DialogHSMBundle\Service\Variable\TemplateVariableResolver::class)
+        ->autowire()
+        ->arg('$customObjects', service(\MauticPlugin\DialogHSMBundle\Service\Variable\CustomObjectVariableSource::class)->nullOnInvalid());
 
     $services->set(\MauticPlugin\DialogHSMBundle\EventListener\ApiKeyEncryptionSubscriber::class)
         ->autowire()

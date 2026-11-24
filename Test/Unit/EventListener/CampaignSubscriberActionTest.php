@@ -19,6 +19,7 @@ use MauticPlugin\DialogHSMBundle\Service\LeadEventLogWriter;
 use MauticPlugin\DialogHSMBundle\Service\BalanceAlertService;
 use MauticPlugin\DialogHSMBundle\Service\PartnerConfigProvider;
 use MauticPlugin\DialogHSMBundle\Service\PaymentBlockPauseService;
+use MauticPlugin\DialogHSMBundle\Service\Variable\TemplateVariableResolver;
 use Psr\Log\NullLogger;
 use Symfony\Component\Cache\Adapter\ArrayAdapter;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppDirectBatchMessage;
@@ -1985,6 +1986,64 @@ class CampaignSubscriberActionTest extends TestCase
         $this->assertSame('pt_BR', $payload['language']);
         $this->assertSame('2026-12-31 23:59:00', $payload['limited_time_offer']);
         $this->assertSame('', $payload['vars'], 'vars vazio explícito: rótulo avançado não vira variável do body.');
+    }
+
+    /**
+     * Variável com origem "Campo do contato": resolvida por contato no envio, com o formato de
+     * data do idioma do template e o cálculo em dias; a origem entra como dica da pré-validação.
+     */
+    public function testGuidedVariableFromContactFieldIsResolvedPerContact(): void
+    {
+        $this->enableIntegration();
+        $this->mockNumberModel->method('getEntity')->willReturn($this->buildWhatsAppNumber());
+
+        $contact = $this->createMock(Lead::class);
+        $contact->method('getLeadPhoneNumber')->willReturn('+5511999999999');
+        $contact->method('getId')->willReturn(1);
+        $contact->method('getProfileFields')->willReturn(['prova_data' => '2026-12-25']);
+        $contact->method('getFields')->willReturn(['core' => ['prova_data' => ['value' => '2026-12-25']]]);
+        $contact->method('getFieldValue')->willReturnCallback(static fn (string $alias) => 'prova_data' === $alias ? '2026-12-25' : null);
+        $contact->method('getField')->willReturnCallback(static fn (string $alias) => 'prova_data' === $alias ? ['type' => 'date'] : false);
+
+        $captured = null;
+        $this->mockDirectBatchHandler->method('__invoke')
+            ->willReturnCallback(function (SendWhatsAppDirectBatchMessage $batch) use (&$captured): array {
+                $captured = $batch->items[0];
+
+                return [['success' => true]];
+            });
+
+        $subscriber = new CampaignSubscriber(
+            $this->mockIntegrationsHelper,
+            $this->mockBus,
+            $this->mockLogger,
+            $this->mockNumberModel,
+            $this->mockHandler,
+            $this->mockEntityManager,
+            $this->mockDirectBatchHandler,
+            $this->mockMessageLogRepository,
+            $this->createMock(LeadEventLogWriter::class),
+            'null://null',
+            null,
+            new TemplateVariableResolver($this->createMock(\Mautic\LeadBundle\Model\LeadModel::class)),
+        );
+
+        $event = $this->buildPendingEvent(CampaignSubscriber::ACTION_SEND, [1 => $contact], [
+            'payload_data' => [],
+            'hsm_template' => 'lembrete_prova',
+            'hsm_language' => 'pt_BR',
+            'hsm_params'   => json_encode(['body' => [
+                ['source' => 'field', 'field' => 'prova_data', 'dateOffsetDays' => '-1'],
+                ['source' => 'static', 'value' => 'Sala 3'],
+            ]]),
+        ]);
+        $event->expects($this->once())->method('pass');
+
+        $subscriber->onCampaignTriggerAction($event);
+
+        $this->assertSame('24/12/2026', $captured->payloadData['{{1}}']);
+        $this->assertSame('Sala 3', $captured->payloadData['{{2}}']);
+        $this->assertSame(['{{1}}' => '{contactfield=prova_data}'], $captured->payloadData['_tokens']);
     }
 
     public function testGuidedActionWithoutTemplateIsABuildErrorNotASend(): void

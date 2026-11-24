@@ -21,6 +21,7 @@ use Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException;
 use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppDirectBatchMessage;
 use MauticPlugin\DialogHSMBundle\Service\BulkRateLimiter;
 use MauticPlugin\DialogHSMBundle\Service\TemplatePayload;
+use MauticPlugin\DialogHSMBundle\Service\Variable\TemplateVariableResolver;
 use Symfony\Component\Messenger\MessageBusInterface;
 use Symfony\Contracts\Service\Attribute\Required;
 
@@ -36,6 +37,7 @@ class WhatsAppMessageModel extends FormModel implements AjaxLookupModelInterface
     private LeadModel $leadModel;
     private MessageBusInterface $bus;
     private BulkRateLimiter $rateLimiter;
+    private ?TemplateVariableResolver $variableResolver = null;
 
     #[Required]
     public function setLeadModel(LeadModel $leadModel): void
@@ -53,6 +55,12 @@ class WhatsAppMessageModel extends FormModel implements AjaxLookupModelInterface
     public function setRateLimiter(BulkRateLimiter $rateLimiter): void
     {
         $this->rateLimiter = $rateLimiter;
+    }
+
+    #[Required]
+    public function setVariableResolver(TemplateVariableResolver $variableResolver): void
+    {
+        $this->variableResolver = $variableResolver;
     }
 
     public function getRepository(): WhatsAppMessageRepository
@@ -172,7 +180,11 @@ class WhatsAppMessageModel extends FormModel implements AjaxLookupModelInterface
 
                 $profileFields = $lead->getProfileFields();
                 // Mensagem salva pelo formulário guiado guarda os campos em "hsm": vira a lista de pares.
-                $payloadData   = $this->resolveTokens(TemplatePayload::expandStored($message->getTemplateName(), $message->getPayloadData()), $profileFields);
+                // Variável com origem (campo do contato, Custom Object): os segmentos da mensagem dizem quais
+                // itens de Custom Object contam.
+                $resolveVariable = null === $this->variableResolver ? null
+                    : fn (mixed $variable, string $locale): string => $this->variableResolver->resolve($variable, $lead, TemplateVariableResolver::segmentsOf($message), $locale);
+                $payloadData   = $this->resolveTokens(TemplatePayload::expandStored($message->getTemplateName(), $message->getPayloadData(), $resolveVariable), $profileFields);
                 $templateName  = $message->getTemplateName();
 
                 $log = new MessageLog();

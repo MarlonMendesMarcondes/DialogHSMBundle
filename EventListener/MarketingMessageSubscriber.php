@@ -8,6 +8,7 @@ use Doctrine\ORM\EntityManagerInterface;
 use Mautic\CampaignBundle\Event\PendingEvent;
 use Mautic\ChannelBundle\ChannelEvents;
 use Mautic\ChannelBundle\Event\MessageQueueBatchProcessEvent;
+use Mautic\LeadBundle\Entity\Lead;
 use Mautic\LeadBundle\Helper\TokenHelper;
 use MauticPlugin\DialogHSMBundle\DialogHSMEvents;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLog;
@@ -15,6 +16,7 @@ use MauticPlugin\DialogHSMBundle\Message\SendWhatsAppMessage;
 use MauticPlugin\DialogHSMBundle\Model\WhatsAppMessageModel;
 use MauticPlugin\DialogHSMBundle\Service\LeadEventLogWriter;
 use MauticPlugin\DialogHSMBundle\Service\TemplatePayload;
+use MauticPlugin\DialogHSMBundle\Service\Variable\TemplateVariableResolver;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\Messenger\Bridge\Amqp\Transport\AmqpStamp;
@@ -29,7 +31,25 @@ class MarketingMessageSubscriber implements EventSubscriberInterface
         private readonly EntityManagerInterface $em,
         private readonly LoggerInterface $logger,
         private readonly LeadEventLogWriter $eventLogWriter,
+        private readonly ?TemplateVariableResolver $variableResolver = null,
     ) {
+    }
+
+    /**
+     * Variáveis com origem (campo do contato, Custom Object) da Mensagem WhatsApp viram texto com o
+     * contato e os segmentos que dizem quais itens de Custom Object contam.
+     *
+     * @param iterable<mixed> $segments
+     *
+     * @return (callable(mixed, string): string)|null
+     */
+    private function variableResolverFor(Lead $contact, iterable $segments): ?callable
+    {
+        if (null === $this->variableResolver) {
+            return null;
+        }
+
+        return fn (mixed $variable, string $locale): string => $this->variableResolver->resolve($variable, $contact, $segments, $locale);
     }
 
     public static function getSubscribedEvents(): array
@@ -104,7 +124,7 @@ class MarketingMessageSubscriber implements EventSubscriberInterface
 
             $profileFields = $contact->getProfileFields();
             // Mensagem salva pelo formulário guiado guarda os campos em "hsm": vira a lista de pares.
-            $payloadData   = $this->resolveTokens(TemplatePayload::expandStored($message->getTemplateName(), $message->getPayloadData()), $profileFields);
+            $payloadData   = $this->resolveTokens(TemplatePayload::expandStored($message->getTemplateName(), $message->getPayloadData(), $this->variableResolverFor($contact, TemplateVariableResolver::segmentsOf($campaignEvent->getCampaign()))), $profileFields);
 
             $msgLog = new MessageLog();
             $msgLog->setLeadId((int) $contact->getId());
@@ -206,7 +226,11 @@ class MarketingMessageSubscriber implements EventSubscriberInterface
 
             $profileFields = $contact->getProfileFields();
             // Mensagem salva pelo formulário guiado guarda os campos em "hsm": vira a lista de pares.
-            $payloadData   = $this->resolveTokens(TemplatePayload::expandStored($message->getTemplateName(), $message->getPayloadData()), $profileFields);
+            $payloadData   = $this->resolveTokens(TemplatePayload::expandStored($message->getTemplateName(), $message->getPayloadData(), $this->variableResolverFor(
+                $contact,
+                // Fila do canal Marketing Messages: segmentos da campanha que agendou, ou os da própria mensagem.
+                TemplateVariableResolver::segmentsOf($queuedMessage->getEvent()?->getCampaign() ?? $message)
+            )), $profileFields);
 
             $msgLog = new MessageLog();
             $msgLog->setLeadId((int) $contact->getId());

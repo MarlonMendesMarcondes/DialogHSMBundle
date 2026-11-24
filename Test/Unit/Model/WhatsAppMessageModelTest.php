@@ -653,4 +653,44 @@ class WhatsAppMessageModelTest extends TestCase
         $this->assertSame('Direito', $data['{{2}}']);
         $this->assertFalse($captured->items[0]->legacy, 'Broadcast da Mensagem WhatsApp usa as proteções novas.');
     }
+
+    public function testSendToListsResolvesVariableSourcesWithTheMessageSegments(): void
+    {
+        $payload = ['list' => [], 'hsm' => ['language' => 'en', 'params' => ['body' => [['source' => 'field', 'field' => 'firstname']]]]];
+
+        [$em, $repo] = $this->makeEmWithRepo();
+        $repo->method('getPendingContacts')->willReturnOnConsecutiveCalls([['id' => 5, 'phone' => '5511966665555']], []);
+
+        $lead = $this->createMock(Lead::class);
+        $lead->method('getProfileFields')->willReturn([]);
+        $leadModel = $this->createMock(LeadModel::class);
+        $leadModel->method('getEntity')->with(5)->willReturn($lead);
+
+        $captured = null;
+        $bus      = $this->createMock(MessageBusInterface::class);
+        $bus->method('dispatch')->willReturnCallback(function (object $msg) use (&$captured): Envelope {
+            $captured = $msg;
+
+            return new Envelope($msg);
+        });
+
+        $segments = new \Doctrine\Common\Collections\ArrayCollection(['segmento']);
+        $message  = $this->createMock(WhatsAppMessage::class);
+        $message->method('getId')->willReturn(42);
+        $message->method('getWhatsAppNumber')->willReturn($this->makeNumberMock());
+        $message->method('getTemplateName')->willReturn('template_x');
+        $message->method('getPayloadData')->willReturn($payload);
+        $message->method('getLists')->willReturn($segments);
+
+        $resolver = $this->createMock(\MauticPlugin\DialogHSMBundle\Service\Variable\TemplateVariableResolver::class);
+        $resolver->expects($this->once())->method('resolve')
+            ->with(['source' => 'field', 'field' => 'firstname'], $lead, $segments, 'en')
+            ->willReturn('Joan');
+
+        $model = $this->makeModel($leadModel, $bus, $em);
+        $model->setVariableResolver($resolver);
+        $model->sendToLists($message, $this->createMock(ChannelBroadcastEvent::class));
+
+        $this->assertSame('Joan', $captured->items[0]->payloadData['{{1}}']);
+    }
 }

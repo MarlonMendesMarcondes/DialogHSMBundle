@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MauticPlugin\DialogHSMBundle\Service;
 
+use MauticPlugin\DialogHSMBundle\Service\Variable\TemplateVariableResolver;
+
 /**
  * Conversão entre o formulário guiado de template (template, idioma, um valor por variável) e
  * os pares rótulo/valor do Payload Data que DialogHSMApi::buildPayload() entende.
@@ -13,7 +15,11 @@ namespace MauticPlugin\DialogHSMBundle\Service;
  * tudo vira a mesma lista de pares antes de resolver os tokens do contato.
  *
  * Formato dos valores guiados (params):
- *   {"header": "https://...", "body": ["...", "..."], "buttons": {"1": {"type": "url", "value": "..."}}}
+ *   {"header": "https://...", "body": [<variável>, ...], "buttons": {"1": {"type": "url", "value": "..."}}}
+ *
+ * Cada variável do body é texto (valor fixo, formato antigo) ou um objeto com a origem — valor fixo,
+ * campo do contato ou campo de Custom Object (ver Variable\TemplateVariableResolver). Quem envia
+ * passa $resolveVariable, com o contato e os segmentos, para virar texto.
  */
 final class TemplatePayload
 {
@@ -36,22 +42,20 @@ final class TemplatePayload
      * vars sai sempre, mesmo vazio: sem ele, a Mensagem WhatsApp transformaria qualquer rótulo
      * avançado em variável do body.
      *
-     * @param array<string, mixed>|string|null $params array ou o JSON guardado no formulário
+     * @param array<string, mixed>|string|null $params          array ou o JSON guardado no formulário
+     * @param (callable(mixed, string): string)|null $resolveVariable (variável do body, idioma) → texto;
+     *                                                                sem ele, só o valor fixo é aproveitado
      *
      * @return list<array{label: string, value: string}> vazio quando não há template
      */
-    public static function toList(string $template, string $language, array|string|null $params): array
+    public static function toList(string $template, string $language, array|string|null $params, ?callable $resolveVariable = null): array
     {
         $template = trim($template);
         if ('' === $template) {
             return [];
         }
 
-        if (!is_array($params)) {
-            $params = json_decode((string) $params, true);
-            $params = is_array($params) ? $params : [];
-        }
-
+        $params   = self::decodeParams($params);
         $language = trim($language);
         $list     = [
             ['label' => 'content', 'value' => $template],
@@ -62,7 +66,7 @@ final class TemplatePayload
         foreach (array_values(is_array($params['body'] ?? null) ? $params['body'] : []) as $i => $value) {
             $label    = '{{'.($i + 1).'}}';
             $labels[] = $label;
-            $list[]   = ['label' => $label, 'value' => is_scalar($value) ? (string) $value : ''];
+            $list[]   = ['label' => $label, 'value' => null !== $resolveVariable ? $resolveVariable($value, '' !== $language ? $language : 'pt_BR') : self::staticValue($value)];
         }
         $list[] = ['label' => 'vars', 'value' => implode(',', $labels)];
 
@@ -93,6 +97,61 @@ final class TemplatePayload
     }
 
     /**
+     * Origem de cada variável que não é valor fixo, no formato de token, para a mensagem da
+     * pré-validação dizer qual campo ficou vazio (ver DialogHSMApi::TOKENS_KEY).
+     *
+     * @param array<string, mixed>|string|null $params
+     *
+     * @return array<string, string> rótulo ({{n}}) → descrição
+     */
+    public static function variableHints(array|string|null $params): array
+    {
+        $hints = [];
+
+        foreach (array_values(self::decodeParams($params)['body'] ?? []) as $i => $value) {
+            $hint = TemplateVariableResolver::describe($value);
+            if (null !== $hint) {
+                $hints['{{'.($i + 1).'}}'] = $hint;
+            }
+        }
+
+        return $hints;
+    }
+
+    /**
+     * @param array<string, mixed>|string|null $params
+     *
+     * @return array<string, mixed>
+     */
+    private static function decodeParams(array|string|null $params): array
+    {
+        if (!is_array($params)) {
+            $params = json_decode((string) $params, true);
+        }
+
+        if (!is_array($params)) {
+            return [];
+        }
+
+        if (isset($params['body']) && !is_array($params['body'])) {
+            $params['body'] = [];
+        }
+
+        return $params;
+    }
+
+    private static function staticValue(mixed $value): string
+    {
+        if (is_array($value)) {
+            return TemplateVariableResolver::SOURCE_STATIC === ($value['source'] ?? TemplateVariableResolver::SOURCE_STATIC)
+                ? (string) ($value['value'] ?? '')
+                : '';
+        }
+
+        return is_scalar($value) ? (string) $value : '';
+    }
+
+    /**
      * Campos guiados primeiro; um rótulo repetido nos pares avançados é ignorado.
      *
      * @param list<array{label: string, value: string}> $guided
@@ -120,11 +179,12 @@ final class TemplatePayload
      * payloadData da Mensagem WhatsApp no formato que o envio lê (['list' => pares]). Mensagem
      * gravada antes do formulário guiado (sem a chave "hsm") passa sem mudança.
      *
-     * @param array<mixed> $payloadData
+     * @param array<mixed>                   $payloadData
+     * @param (callable(mixed, string): string)|null $resolveVariable ver toList()
      *
      * @return array<mixed>
      */
-    public static function expandStored(string $templateName, array $payloadData): array
+    public static function expandStored(string $templateName, array $payloadData, ?callable $resolveVariable = null): array
     {
         $stored = $payloadData[self::STORED_KEY] ?? null;
         if (!is_array($stored)) {
@@ -134,7 +194,7 @@ final class TemplatePayload
         $advanced = $payloadData['list'] ?? [];
 
         return ['list' => self::merge(
-            self::toList($templateName, (string) ($stored['language'] ?? ''), $stored['params'] ?? []),
+            self::toList($templateName, (string) ($stored['language'] ?? ''), $stored['params'] ?? [], $resolveVariable),
             is_array($advanced) ? $advanced : []
         )];
     }
