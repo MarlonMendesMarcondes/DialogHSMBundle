@@ -35,28 +35,92 @@
   mautic:assets:generate no deploy.
 #}
 <style>
+    /*
+     * Cores em variáveis: claro por padrão (WhatsApp claro) e escuro quando o tema do Mautic é escuro
+     * (Conta > Aparência: dark ou solarized-dark) — os mesmos tons do WhatsApp Web usados pelo
+     * editor de HSM do N8nDispatchBundle. O atributo theme do <html> é posto pelo JS do Mautic a
+     * partir da preferência salva no navegador; sem ele, fica o claro, que é o padrão do Mautic.
+     * Quem inclui o componente pode sobrescrever as variáveis (ou as regras) no próprio CSS.
+     */
+    .dialoghsm-wa-preview {
+        /* color-scheme: barra de rolagem do carrossel (desenhada pelo navegador) no mesmo tema. */
+        color-scheme: light;
+        --dialoghsm-wa-bg: #efeae2;
+        --dialoghsm-wa-lines: #d6d2ce;
+        --dialoghsm-wa-bubble: #fff;
+        --dialoghsm-wa-text: #111b21;
+        --dialoghsm-wa-muted: #667781;
+        --dialoghsm-wa-link: #027eb5;
+        --dialoghsm-wa-divider: #e9edef;
+        --dialoghsm-wa-media: #d1d7db;
+        --dialoghsm-wa-media-text: #54656f;
+        --dialoghsm-wa-shadow: rgba(11, 20, 26, .13);
+        --dialoghsm-wa-var-bg: #e7f3ff;
+        --dialoghsm-wa-var-text: #0b5394;
+        --dialoghsm-wa-var-empty-bg: #fff3cd;
+        --dialoghsm-wa-var-empty-text: #856404;
+        --dialoghsm-wa-var-token-bg: #e8e1f5;
+        --dialoghsm-wa-var-token-text: #5b3e96;
+    }
+    :root[theme="dark"] .dialoghsm-wa-preview,
+    :root[theme="solarized-dark"] .dialoghsm-wa-preview {
+        color-scheme: dark;
+        --dialoghsm-wa-bg: #0b1b23;
+        --dialoghsm-wa-lines: #15262e;
+        --dialoghsm-wa-bubble: #1f2d36;
+        --dialoghsm-wa-text: #e9edef;
+        --dialoghsm-wa-muted: #8696a0;
+        --dialoghsm-wa-link: #53bdeb;
+        --dialoghsm-wa-divider: #313d45;
+        --dialoghsm-wa-media: #2a3942;
+        --dialoghsm-wa-media-text: #aebac1;
+        --dialoghsm-wa-shadow: rgba(0, 0, 0, .4);
+        --dialoghsm-wa-var-bg: #12354d;
+        --dialoghsm-wa-var-text: #9ad0f5;
+        --dialoghsm-wa-var-empty-bg: #4d3d0f;
+        --dialoghsm-wa-var-empty-text: #ffd970;
+        --dialoghsm-wa-var-token-bg: #3a2f5e;
+        --dialoghsm-wa-var-token-text: #cdbcff;
+    }
+
     /* Vertical, como a tela de um smartphone: largura mínima de 360px (cresce com o conteúdo, até 100% do espaço) e altura mínima de retrato. */
-    .dialoghsm-wa-preview { background: #efeae2; border-radius: 8px; padding: 16px; margin-bottom: 15px; width: fit-content; min-width: min(360px, 100%); max-width: 100%; min-height: 640px; box-sizing: border-box; }
-    .dialoghsm-wa-preview__title { font-size: 12px; color: #667781; margin-bottom: 8px; }
-    .dialoghsm-wa-bubble { background: #fff; color: #111b21; border-radius: 8px; max-width: 420px; box-shadow: 0 1px 0.5px rgba(11, 20, 26, .13); overflow: hidden; }
-    .dialoghsm-wa-bubble__media { background: #d1d7db; color: #54656f; height: 140px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 12px; gap: 4px; }
+    .dialoghsm-wa-preview { position: relative; isolation: isolate; background: var(--dialoghsm-wa-bg); border-radius: 8px; padding: 16px; margin-bottom: 15px; width: fit-content; min-width: min(360px, 100%); max-width: 100%; min-height: 640px; box-sizing: border-box; }
+    /*
+     * Papel de parede do chat: o desenho (só o alfa, Assets/img/wa-chat-bg.png — o mesmo do editor de
+     * HSM do N8nDispatchBundle) é máscara sobre uma camada da cor das linhas, então um arquivo serve
+     * para o claro e o escuro. Fica atrás do conteúdo (z-index -1 dentro do isolate acima).
+     */
+    .dialoghsm-wa-preview::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        z-index: -1;
+        border-radius: inherit;
+        background: var(--dialoghsm-wa-lines);
+        -webkit-mask: url('{{ asset('plugins/DialogHSMBundle/Assets/img/wa-chat-bg.png') }}') repeat 0 0 / 412.5px auto;
+        mask: url('{{ asset('plugins/DialogHSMBundle/Assets/img/wa-chat-bg.png') }}') repeat 0 0 / 412.5px auto;
+        pointer-events: none;
+    }
+    .dialoghsm-wa-preview__title { font-size: 12px; color: var(--dialoghsm-wa-muted); margin-bottom: 8px; }
+    .dialoghsm-wa-bubble { background: var(--dialoghsm-wa-bubble); color: var(--dialoghsm-wa-text); border-radius: 8px; max-width: 420px; box-shadow: 0 1px 0.5px var(--dialoghsm-wa-shadow); overflow: hidden; }
+    .dialoghsm-wa-bubble__media { background: var(--dialoghsm-wa-media); color: var(--dialoghsm-wa-media-text); height: 140px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 12px; gap: 4px; }
     .dialoghsm-wa-bubble__media i { font-size: 32px; }
     .dialoghsm-wa-bubble__media img { width: 100%; height: 100%; object-fit: cover; }
     .dialoghsm-wa-bubble__header { font-weight: 600; padding: 8px 10px 0; }
     .dialoghsm-wa-bubble__body { padding: 8px 10px; white-space: pre-wrap; word-wrap: break-word; font-size: 14px; line-height: 1.4; }
-    .dialoghsm-wa-bubble__footer { padding: 0 10px 8px; color: #667781; font-size: 12px; }
-    .dialoghsm-wa-bubble__button { border-top: 1px solid #e9edef; color: #027eb5; text-align: center; padding: 9px 10px; font-size: 14px; }
+    .dialoghsm-wa-bubble__footer { padding: 0 10px 8px; color: var(--dialoghsm-wa-muted); font-size: 12px; }
+    .dialoghsm-wa-bubble__button { border-top: 1px solid var(--dialoghsm-wa-divider); color: var(--dialoghsm-wa-link); text-align: center; padding: 9px 10px; font-size: 14px; }
     .dialoghsm-wa-carousel { display: flex; gap: 4px; overflow-x: auto; margin-top: 4px; max-width: 100%; padding-bottom: 16px; }
-    .dialoghsm-wa-carousel__card { flex: 0 0 220px; background: #fff; color: #111b21; border-radius: 8px; box-shadow: 0 1px 0.5px rgba(11, 20, 26, .13); overflow: hidden; display: flex; flex-direction: column; padding-bottom: 84px; }
-    .dialoghsm-wa-carousel__media { margin: 4px 4px 0; border-radius: 6px; overflow: hidden; background: #d1d7db; color: #54656f; aspect-ratio: 1.7 / 1; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 12px; gap: 4px; }
+    .dialoghsm-wa-carousel__card { flex: 0 0 220px; background: var(--dialoghsm-wa-bubble); color: var(--dialoghsm-wa-text); border-radius: 8px; box-shadow: 0 1px 0.5px var(--dialoghsm-wa-shadow); overflow: hidden; display: flex; flex-direction: column; padding-bottom: 84px; }
+    .dialoghsm-wa-carousel__media { margin: 4px 4px 0; border-radius: 6px; overflow: hidden; background: var(--dialoghsm-wa-media); color: var(--dialoghsm-wa-media-text); aspect-ratio: 1.7 / 1; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 12px; gap: 4px; }
     .dialoghsm-wa-carousel__media i { font-size: 28px; }
     .dialoghsm-wa-carousel__media img { width: 100%; height: 100%; object-fit: cover; }
     .dialoghsm-wa-carousel__card:has(.dialoghsm-wa-carousel__body), .dialoghsm-wa-carousel__card:has(.dialoghsm-wa-carousel__button) { padding-bottom: 0; }
     .dialoghsm-wa-carousel__body { padding: 6px 8px; font-size: 13px; line-height: 1.35; white-space: pre-wrap; word-wrap: break-word; flex: 1 1 auto; }
-    .dialoghsm-wa-carousel__button { border-top: 1px solid #e9edef; color: #027eb5; text-align: center; padding: 8px 6px; font-size: 13px; }
-    .dialoghsm-wa-var { background: #e7f3ff; color: #0b5394; border-radius: 4px; padding: 0 3px; }
-    .dialoghsm-wa-var--empty { background: #fff3cd; color: #856404; }
-    .dialoghsm-wa-var--token { background: #e8e1f5; color: #5b3e96; }
+    .dialoghsm-wa-carousel__button { border-top: 1px solid var(--dialoghsm-wa-divider); color: var(--dialoghsm-wa-link); text-align: center; padding: 8px 6px; font-size: 13px; }
+    .dialoghsm-wa-var { background: var(--dialoghsm-wa-var-bg); color: var(--dialoghsm-wa-var-text); border-radius: 4px; padding: 0 3px; }
+    .dialoghsm-wa-var--empty { background: var(--dialoghsm-wa-var-empty-bg); color: var(--dialoghsm-wa-var-empty-text); }
+    .dialoghsm-wa-var--token { background: var(--dialoghsm-wa-var-token-bg); color: var(--dialoghsm-wa-var-token-text); }
     .dialoghsm-wa-bubble code { font-family: monospace; background: none; color: inherit; padding: 0; }
 </style>
 <script>
