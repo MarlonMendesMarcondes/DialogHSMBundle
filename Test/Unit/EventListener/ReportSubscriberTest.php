@@ -165,6 +165,43 @@ class ReportSubscriberTest extends TestCase
         $this->assertSame('datetime', $filters['ml.date_replied']['type']);
     }
 
+    public function testOnReportBuilderExposesButtonClickColumnsAndMetrics(): void
+    {
+        $captured = null;
+        $event    = $this->makeBuilderEvent(contextMatches: true);
+        $event->method('addTable')
+            ->willReturnCallback(function (string $ctx, array $data) use (&$captured) {
+                $captured = $data;
+                return null;
+            });
+
+        $this->subscriber->onReportBuilder($event);
+
+        $columns = $captured['columns'];
+        $this->assertSame('string', $columns['ml.button_payload']['type']);
+        $this->assertSame('datetime', $columns['ml.date_button_clicked']['type']);
+        $this->assertStringContainsString('date_button_clicked IS NOT NULL', $columns['button_clicked_count']['formula']);
+        $this->assertStringContainsString('date_button_clicked IS NOT NULL', $columns['button_click_rate']['formula']);
+        $this->assertStringContainsString('NULLIF', $columns['button_click_rate']['formula']);
+    }
+
+    public function testOnReportBuilderFiltersContainButtonClick(): void
+    {
+        $captured = null;
+        $event    = $this->makeBuilderEvent(contextMatches: true);
+        $event->method('addTable')
+            ->willReturnCallback(function (string $ctx, array $data) use (&$captured) {
+                $captured = $data;
+                return null;
+            });
+
+        $this->subscriber->onReportBuilder($event);
+
+        $filters = $captured['filters'];
+        $this->assertSame('text', $filters['ml.button_payload']['type']);
+        $this->assertSame('datetime', $filters['ml.date_button_clicked']['type']);
+    }
+
     public function testOnReportBuilderDeliveryRateFormulaCoversDeliveredAndRead(): void
     {
         $captured = null;

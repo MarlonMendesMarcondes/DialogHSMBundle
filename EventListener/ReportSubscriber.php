@@ -75,6 +75,15 @@ class ReportSubscriber implements EventSubscriberInterface
                 'label' => 'dialoghsm.report.column.date_replied',
                 'type'  => 'datetime',
             ],
+            // Só o primeiro clique por mensagem é gravado (WebhookProcessor::processButtonClick)
+            self::ML.'.button_payload' => [
+                'label' => 'dialoghsm.report.column.button_clicked',
+                'type'  => 'string',
+            ],
+            self::ML.'.date_button_clicked' => [
+                'label' => 'dialoghsm.report.column.date_button_clicked',
+                'type'  => 'datetime',
+            ],
             self::ML.'.lead_id' => [
                 'label' => 'dialoghsm.report.column.lead_id',
                 'type'  => 'int',
@@ -135,6 +144,18 @@ class ReportSubscriber implements EventSubscriberInterface
                 'type'    => 'string',
                 'formula' => 'CONCAT(IFNULL(ROUND(SUM('.self::ML.'.date_replied IS NOT NULL) / NULLIF(SUM('.self::ML.'.status IN (\'sent\', \'delivered\', \'read\')), 0) * 100, 1), 0), \'%\')',
             ],
+            'button_clicked_count' => [
+                'alias'   => 'button_clicked_count',
+                'label'   => 'dialoghsm.report.column.button_clicked_count',
+                'type'    => 'int',
+                'formula' => 'SUM('.self::ML.'.date_button_clicked IS NOT NULL)',
+            ],
+            'button_click_rate' => [
+                'alias'   => 'button_click_rate',
+                'label'   => 'dialoghsm.report.column.button_click_rate',
+                'type'    => 'string',
+                'formula' => 'CONCAT(IFNULL(ROUND(SUM('.self::ML.'.date_button_clicked IS NOT NULL) / NULLIF(SUM('.self::ML.'.status IN (\'sent\', \'delivered\', \'read\')), 0) * 100, 1), 0), \'%\')',
+            ],
         ];
 
         $filters = [
@@ -165,6 +186,14 @@ class ReportSubscriber implements EventSubscriberInterface
             ],
             self::ML.'.date_replied' => [
                 'label' => 'dialoghsm.report.column.date_replied',
+                'type'  => 'datetime',
+            ],
+            self::ML.'.button_payload' => [
+                'label' => 'dialoghsm.report.column.button_clicked',
+                'type'  => 'text',
+            ],
+            self::ML.'.date_button_clicked' => [
+                'label' => 'dialoghsm.report.column.date_button_clicked',
                 'type'  => 'datetime',
             ],
             self::ML.'.lead_id' => [
