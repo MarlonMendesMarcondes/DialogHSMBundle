@@ -16,7 +16,8 @@ return function (ContainerConfigurator $configurator): void {
 
     // CustomObjectVariableSource depende de classes que só existem no fork do CustomObjectsBundle:
     // carregada pelo glob, quebraria o container numa instalação sem ele (registro condicional abaixo).
-    $excludes   = array_merge(MauticCoreExtension::DEFAULT_EXCLUDES, ['Message', 'Service/Variable/CustomObjectVariableSource.php']);
+    // Chart/: a chart query that models create with `new`, and the campaign model set by CampaignHourlyChartPass.
+    $excludes   = array_merge(MauticCoreExtension::DEFAULT_EXCLUDES, ['Message', 'Service/Variable/CustomObjectVariableSource.php', 'Chart']);
     $services->load('MauticPlugin\\DialogHSMBundle\\', '../')
         ->exclude('../{'.implode(',', $excludes).'}');
 
