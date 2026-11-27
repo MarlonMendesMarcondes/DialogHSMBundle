@@ -7,6 +7,7 @@ namespace MauticPlugin\DialogHSMBundle\Form\Type;
 use Mautic\CoreBundle\Form\Type\YesNoButtonGroupType;
 use Mautic\UserBundle\Form\Type\UserListType;
 use MauticPlugin\DialogHSMBundle\Pacing\PacedSettings;
+use MauticPlugin\DialogHSMBundle\Service\Changelog;
 use MauticPlugin\DialogHSMBundle\Service\PartnerConfigProvider;
 use Symfony\Component\Form\AbstractType;
 use Symfony\Component\Form\Extension\Core\Type\ChoiceType;
@@ -15,6 +16,8 @@ use Symfony\Component\Form\Extension\Core\Type\NumberType;
 use Symfony\Component\Form\Extension\Core\Type\PasswordType;
 use Symfony\Component\Form\Extension\Core\Type\TextType;
 use Symfony\Component\Form\FormBuilderInterface;
+use Symfony\Component\Form\FormInterface;
+use Symfony\Component\Form\FormView;
 use Symfony\Component\Form\FormEvent;
 use Symfony\Component\Form\FormEvents;
 use Symfony\Component\OptionsResolver\OptionsResolver;
@@ -22,6 +25,20 @@ use Symfony\Contracts\Translation\TranslatorInterface;
 
 class ConfigAuthType extends AbstractType
 {
+    /**
+     * Grupos da tela de configuração (FormTheme/config_auth.html.twig). O primeiro fica na aba do
+     * core, junto com "Ativo"; cada um dos outros vira uma aba própria (Resources/js/config-tabs.js).
+     * Campo fora de todos os grupos aparece no fim do primeiro. "wide" ocupa a linha inteira.
+     */
+    public const GROUPS = [
+        'connection'  => ['fields' => ['base_url', 'partner_id', 'partner_api_key'], 'wide' => ['base_url']],
+        'queues'      => ['fields' => ['consumer_limit', 'batch_consumer_limit', 'bulk_rate_per_minute', 'batch_rate_per_minute'], 'wide' => []],
+        'paced'       => ['fields' => ['paced_enabled', 'paced_rate_per_minute', 'business_hours_start', 'business_hours_end', 'business_hours_days'], 'wide' => ['business_hours_days']],
+        'protections' => ['fields' => ['preflight_mode', 'payment_pause_enabled', 'payment_pause_minutes'], 'wide' => ['preflight_mode']],
+        'balance'     => ['fields' => ['balance_alert_threshold', 'balance_alert_send_email', 'balance_alert_recipients'], 'wide' => ['balance_alert_recipients']],
+        'logs'        => ['fields' => ['log_max_records', 'log_max_days'], 'wide' => []],
+    ];
+
     public function __construct(private TranslatorInterface $translator)
     {
     }
@@ -381,6 +398,12 @@ class ConfigAuthType extends AbstractType
                 $event->setData($submitted);
             }
         });
+    }
+
+    public function buildView(FormView $view, FormInterface $form, array $options): void
+    {
+        $view->vars['dialoghsm_groups']    = self::GROUPS;
+        $view->vars['dialoghsm_changelog'] = Changelog::days();
     }
 
     public function configureOptions(OptionsResolver $resolver): void

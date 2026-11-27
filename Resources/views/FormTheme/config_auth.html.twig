@@ -1,0 +1,46 @@
+{#
+  Configuração do plugin (Configurações > Plugins > DialogHSM): os campos de ConfigAuthType separados
+  pelos grupos de ConfigAuthType::GROUPS, mais o histórico de mudanças (CHANGELOG.md).
+
+  O core desenha este formulário inteiro na aba "Habilitar/Autenticar" e não deixa plugin criar aba.
+  Resources/js/config-tabs.js move cada grupo (menos o primeiro) e o histórico para abas próprias do
+  modal, sem tirá-los do <form>: o que é gravado não muda. Sem o script, tudo fica nesta aba, com títulos.
+#}
+{% block dialoghsm_config_auth_widget %}
+    <div class="dialoghsm-config" data-onload-callback="dialoghsmConfigTabs">
+        {% for key, group in form.vars.dialoghsm_groups %}
+            <div class="dialoghsm-config-group" data-group="{{ key }}" data-tab-label="{{ ('dialoghsm.config.group.' ~ key)|trans }}">
+                <h4 class="dialoghsm-config-group__title">{{ ('dialoghsm.config.group.' ~ key)|trans }}</h4>
+                <p class="text-muted dialoghsm-config-group__help">{{ ('dialoghsm.config.group.' ~ key ~ '.help')|trans }}</p>
+                <div class="row">
+                    {% for name in group.fields %}
+                        {% if form[name] is defined %}
+                            <div class="{{ name in group.wide ? 'col-xs-12' : 'col-sm-6' }}">{{ form_row(form[name]) }}</div>
+                        {% endif %}
+                    {% endfor %}
+                </div>
+            </div>
+        {% endfor %}
+
+        {% if form.vars.dialoghsm_changelog %}
+            <div class="dialoghsm-config-group dialoghsm-changelog-block" data-group="changelog" data-tab-label="{{ 'dialoghsm.config.group.changelog'|trans }}">
+                <h4 class="dialoghsm-config-group__title">{{ 'dialoghsm.config.group.changelog'|trans }}</h4>
+                <div class="dialoghsm-changelog">
+                    {% for day in form.vars.dialoghsm_changelog %}
+                        <div class="dialoghsm-changelog__day">
+                            <strong>{{ day.date|date('d/m/Y') }}</strong>
+                            <ul>
+                                {% for item in day.items %}
+                                    <li>{{ item }}</li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+        {% endif %}
+
+        {# Campo novo que ainda não entrou em ConfigAuthType::GROUPS: fica na primeira aba #}
+        {{ form_rest(form) }}
+    </div>
+{% endblock %}

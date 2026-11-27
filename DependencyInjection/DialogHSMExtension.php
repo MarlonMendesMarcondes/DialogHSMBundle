@@ -21,6 +21,12 @@ class DialogHSMExtension extends Extension implements PrependExtensionInterface
         $container->setParameter('env(MAUTIC_MESSENGER_DSN_WHATSAPP_DIRECT)', 'null://null');
         $container->setParameter('env(MAUTIC_MESSENGER_DSN_WHATSAPP_FAILED)', 'null://null');
 
+        // Tema da tela de configuração do plugin (abas por assunto e histórico de mudanças). Só
+        // define o bloco dialoghsm_config_auth_widget: nenhum outro formulário é afetado.
+        $container->prependExtensionConfig('twig', [
+            'form_themes' => ['@DialogHSM/FormTheme/config_auth.html.twig'],
+        ]);
+
         $container->prependExtensionConfig('framework', [
             'messenger' => [
                 'transports' => [
