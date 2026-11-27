@@ -8,6 +8,7 @@ use Mautic\IntegrationsBundle\Helper\IntegrationsHelper;
 use MauticPlugin\DialogHSMBundle\Entity\WhatsAppNumberRepository;
 use MauticPlugin\DialogHSMBundle\EventListener\WorkerQueueSubscriber;
 use MauticPlugin\DialogHSMBundle\Integration\DialogHSMIntegration;
+use MauticPlugin\DialogHSMBundle\Pacing\PacedWorker;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\ArrayInput;
@@ -23,6 +24,9 @@ use Symfony\Component\Process\Process;
 )]
 class ConsumeWhatsAppCommand extends Command
 {
+    /** Nome do worker dos lotes programados na saída do comando (não é fila do RabbitMQ). */
+    private const PACED_WORKER = 'lotes-programados';
+
     /** @var callable(string[]): Process */
     private $processFactory;
 
@@ -30,6 +34,7 @@ class ConsumeWhatsAppCommand extends Command
         private IntegrationsHelper $integrationsHelper,
         private WhatsAppNumberRepository $whatsAppNumberRepository,
         ?callable $processFactory = null,
+        private ?PacedWorker $pacedWorker = null,
     ) {
         parent::__construct();
         $this->processFactory = $processFactory ?? static fn (array $args): Process => new Process($args);
@@ -55,7 +60,7 @@ class ConsumeWhatsAppCommand extends Command
             'mode',
             null,
             InputOption::VALUE_OPTIONAL,
-            'Consume queues by type: "bulk" (queue_name of each number) or "batch" (batch_queue_name of each number). Overridden by --queue if both are set.'
+            'Consume queues by type: "bulk" (queue_name of each number), "batch" (batch_queue_name of each number) or "paced" (scheduled lots, from MySQL). "bulk" also starts the "paced" worker when scheduled lots are enabled. Overridden by --queue if both are set.'
         );
 
         $this->addOption(
@@ -68,6 +73,21 @@ class ConsumeWhatsAppCommand extends Command
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        // Lotes programados: trilha própria, fora do RabbitMQ. Normalmente sobe como processo
+        // filho do --mode=bulk; também pode rodar sozinho (cron ou supervisord).
+        if ('paced' === $input->getOption('mode') && null === $input->getOption('queue')) {
+            if (null === $this->pacedWorker) {
+                $output->writeln('<error>DialogHSM: worker dos lotes programados indisponível.</error>');
+
+                return Command::FAILURE;
+            }
+
+            return $this->pacedWorker->run(
+                $input->getOption('time-limit') !== null ? max(0, (int) $input->getOption('time-limit')) : 60,
+                $output
+            );
+        }
+
         $limit = $input->getOption('limit') !== null
             ? max(1, (int) $input->getOption('limit'))
             : $this->getConsumerLimit();
@@ -91,7 +111,12 @@ class ConsumeWhatsAppCommand extends Command
 
         // Modo bulk/batch sem filas cadastradas: nenhum WhatsApp Number configurado
         $mode = $input->getOption('mode');
-        if (in_array($mode, ['bulk', 'batch'], true) && count($queues) === 0) {
+
+        // O bulk sobe também o worker dos lotes programados, em processo separado
+        $withPaced = 'bulk' === $mode && null === $input->getOption('queue')
+            && null !== $this->pacedWorker && $this->pacedWorker->shouldRun();
+
+        if (in_array($mode, ['bulk', 'batch'], true) && count($queues) === 0 && !$withPaced) {
             $output->writeln(sprintf(
                 '<comment>DialogHSM: nenhuma fila configurada para o modo "%s". Verifique os WhatsApp Numbers.</comment>',
                 $mode
@@ -103,15 +128,15 @@ class ConsumeWhatsAppCommand extends Command
         // Qualquer fila resolvida (1 ou N): cada fila roda em processo OS isolado
         // Garante que --mode=bulk e --mode=batch nunca compartilhem worker,
         // mesmo quando há apenas 1 fila cadastrada.
-        if (count($queues) >= 1) {
+        if (count($queues) >= 1 || $withPaced) {
             $output->writeln(sprintf(
                 '<info>DialogHSM: starting %d worker(s) (limit=%d): [%s]</info>',
-                count($queues),
+                count($queues) + ($withPaced ? 1 : 0),
                 $limit,
-                implode(', ', $queues)
+                implode(', ', $withPaced ? [...$queues, self::PACED_WORKER] : $queues)
             ));
 
-            return $this->runParallel($output, $queues, $limit, $timeLimit);
+            return $this->runParallel($output, $queues, $limit, $timeLimit, $withPaced);
         }
 
         // Sem modo e sem --queue: comportamento legado — consume sem filtro de fila
@@ -133,7 +158,7 @@ class ConsumeWhatsAppCommand extends Command
      *
      * @param string[] $queues
      */
-    private function runParallel(OutputInterface $output, array $queues, int $limit, int $timeLimit): int
+    private function runParallel(OutputInterface $output, array $queues, int $limit, int $timeLimit, bool $withPaced = false): int
     {
         $phpBinary   = (new PhpExecutableFinder())->find(false) ?: PHP_BINARY;
         $consolePath = $_SERVER['argv'][0] ?? 'bin/console';
@@ -171,6 +196,27 @@ class ConsumeWhatsAppCommand extends Command
             $output->writeln(sprintf(
                 '<info>DialogHSM: worker started for queue "%s" (PID: %d)</info>',
                 $queue,
+                $process->getPid() ?? 0
+            ));
+        }
+
+        if ($withPaced) {
+            $args = [$phpBinary, $consolePath, 'dialoghsm:consume', '--mode=paced', '--time-limit='.$timeLimit];
+
+            $process = ($this->processFactory)($args);
+            $process->setTimeout($timeLimit > 0 ? $timeLimit + 30 : null);
+            $process->start(function (string $type, string $buffer) use ($output): void {
+                foreach (explode("\n", rtrim($buffer)) as $line) {
+                    if ('' !== $line) {
+                        $output->writeln(sprintf('[%s] %s', self::PACED_WORKER, $line));
+                    }
+                }
+            });
+
+            $processes[self::PACED_WORKER] = $process;
+            $output->writeln(sprintf(
+                '<info>DialogHSM: worker started for "%s" (PID: %d)</info>',
+                self::PACED_WORKER,
                 $process->getPid() ?? 0
             ));
         }

@@ -6,6 +6,7 @@ namespace MauticPlugin\DialogHSMBundle\Form\Type;
 
 use Mautic\CoreBundle\Form\Type\YesNoButtonGroupType;
 use Mautic\UserBundle\Form\Type\UserListType;
+use MauticPlugin\DialogHSMBundle\Pacing\PacedSettings;
 use MauticPlugin\DialogHSMBundle\Service\PartnerConfigProvider;
 use Symfony\Component\Form\AbstractType;
 use Symfony\Component\Form\Extension\Core\Type\ChoiceType;
@@ -117,6 +118,78 @@ class ConfigAuthType extends AbstractType
                 ],
                 'data' => (int) ($data['batch_rate_per_minute'] ?? 0),
                 'help' => 'dialoghsm.config.batch_rate_per_minute.help',
+            ]
+        );
+
+        // Lotes programados ("Batch — lotes programados" na ação de campanha)
+        $builder->add(
+            'paced_enabled',
+            YesNoButtonGroupType::class,
+            [
+                'label' => 'dialoghsm.config.paced_enabled',
+                'data'  => (bool) ($data['paced_enabled'] ?? false),
+                'help'  => 'dialoghsm.config.paced_enabled.help',
+            ]
+        );
+
+        $builder->add(
+            'paced_rate_per_minute',
+            IntegerType::class,
+            [
+                'label'      => 'dialoghsm.config.paced_rate_per_minute',
+                'label_attr' => ['class' => 'control-label'],
+                'required'   => false,
+                'attr'       => [
+                    'class' => 'form-control',
+                    'min'   => 0,
+                    'max'   => 100000,
+                ],
+                'data' => (int) ($data['paced_rate_per_minute'] ?? PacedSettings::DEFAULT_RATE_PER_MINUTE),
+                'help' => 'dialoghsm.config.paced_rate_per_minute.help',
+            ]
+        );
+
+        foreach (['business_hours_start' => PacedSettings::DEFAULT_HOURS_START, 'business_hours_end' => PacedSettings::DEFAULT_HOURS_END] as $field => $default) {
+            $builder->add(
+                $field,
+                TextType::class,
+                [
+                    'label'       => 'dialoghsm.config.'.$field,
+                    'label_attr'  => ['class' => 'control-label'],
+                    'required'    => false,
+                    // Validação no navegador: valor inválido que chegue ao servidor cai no padrão
+                    // (BusinessHoursCalendar::parseTime)
+                    'attr'        => [
+                        'class'       => 'form-control',
+                        'placeholder' => $default,
+                        'maxlength'   => 5,
+                        'pattern'     => '([01]?[0-9]|2[0-3]):[0-5][0-9]|24:00',
+                    ],
+                    'data'        => $data[$field] ?? $default,
+                    'help'        => 'dialoghsm.config.business_hours.help',
+                ]
+            );
+        }
+
+        $builder->add(
+            'business_hours_days',
+            ChoiceType::class,
+            [
+                'label'      => 'dialoghsm.config.business_hours_days',
+                'label_attr' => ['class' => 'control-label'],
+                'required'   => false,
+                'multiple'   => true,
+                'expanded'   => true,
+                'choices'    => [
+                    'mautic.core.date.monday'    => 1,
+                    'mautic.core.date.tuesday'   => 2,
+                    'mautic.core.date.wednesday' => 3,
+                    'mautic.core.date.thursday'  => 4,
+                    'mautic.core.date.friday'    => 5,
+                    'mautic.core.date.saturday'  => 6,
+                    'mautic.core.date.sunday'    => 7,
+                ],
+                'data' => array_map('intval', is_array($data['business_hours_days'] ?? null) ? $data['business_hours_days'] : PacedSettings::DEFAULT_DAYS),
             ]
         );
 

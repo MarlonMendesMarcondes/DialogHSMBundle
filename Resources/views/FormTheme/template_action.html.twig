@@ -16,6 +16,14 @@
     } %}
 
     {% if form.queue_override is defined %}{{ form_row(form.queue_override) }}{% endif %}
+    {# Lotes programados: cada campo em sua coluna, porque o data-show-on do core oculta o
+       [class*="col-"] mais próximo — sem ela sumiria o formulário inteiro #}
+    {% if form.paced_lot_size is defined %}
+        <div class="row">
+            <div class="col-xs-6">{{ form_row(form.paced_lot_size) }}</div>
+            <div class="col-xs-6">{{ form_row(form.paced_lot_interval) }}</div>
+        </div>
+    {% endif %}
     {% if form.send_delay is defined %}{{ form_row(form.send_delay) }}{% endif %}
     {% if form.batch_limit is defined %}{{ form_row(form.batch_limit) }}{% endif %}
 

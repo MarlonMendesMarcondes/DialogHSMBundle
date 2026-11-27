@@ -30,6 +30,8 @@ use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppDirectBatchMessageHa
 use MauticPlugin\DialogHSMBundle\MessageHandler\SendWhatsAppMessageHandler;
 use MauticPlugin\DialogHSMBundle\Entity\MessageLogRepository;
 use MauticPlugin\DialogHSMBundle\Model\WhatsAppNumberModel;
+use MauticPlugin\DialogHSMBundle\Pacing\PacedScheduler;
+use MauticPlugin\DialogHSMBundle\Pacing\PacedSettings;
 use MauticPlugin\DialogHSMBundle\Service\LeadEventLogWriter;
 use MauticPlugin\DialogHSMBundle\Service\PaymentBlockPauseService;
 use MauticPlugin\DialogHSMBundle\Service\TemplatePayload;
@@ -116,6 +118,7 @@ class CampaignSubscriber implements EventSubscriberInterface
         private string $directTransportDsn = 'null://null',
         private ?PaymentBlockPauseService $paymentPause = null,
         private ?TemplateVariableResolver $variableResolver = null,
+        private ?PacedScheduler $pacedScheduler = null,
     ) {
     }
 
@@ -431,6 +434,17 @@ class CampaignSubscriber implements EventSubscriberInterface
         $config = $event->getEvent()->getProperties();
         $mode   = trim((string) ($config['queue_override'] ?? ''));
 
+        // "Batch — lotes programados": com a chave geral desligada, a ação cai no batch comum
+        if (PacedSettings::QUEUE_MODE === $mode && !$this->isPacedEnabled()) {
+            $mode = 'batch';
+        }
+
+        if (PacedSettings::QUEUE_MODE === $mode) {
+            $this->onCampaignTriggerActionPaced($event, $config, $legacy);
+
+            return;
+        }
+
         $checkNumber = function (WhatsAppNumber $number) use ($mode): void {
             if (null === $this->resolveQueueName($number, $mode)) {
                 throw new CampaignActionBuildException(sprintf(
@@ -478,6 +492,60 @@ class CampaignSubscriber implements EventSubscriberInterface
 
             return true;
         }, applyBatchSleep: false, checkNumber: $checkNumber, legacy: $legacy);
+    }
+
+    private function isPacedEnabled(): bool
+    {
+        try {
+            return null !== $this->pacedScheduler && $this->pacedScheduler->isEnabled();
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
+    /**
+     * "Batch — lotes programados": em vez de publicar no RabbitMQ, grava o log 'queued' e agenda a
+     * mensagem no lote sorteado (dialog_hsm_paced_message). O envio é do PacedWorker. Não usa as
+     * filas do número: o lote sai no horário mesmo com o bulk/batch do número ocupado.
+     *
+     * @param array<string, mixed> $config
+     */
+    private function onCampaignTriggerActionPaced(PendingEvent $event, array $config, bool $legacy): void
+    {
+        $lotSize  = (int) ($config['paced_lot_size'] ?? 0);
+        $interval = (int) ($config['paced_lot_interval'] ?? 0);
+
+        $checkConfig = function (WhatsAppNumber $number) use ($lotSize, $interval): void {
+            if ($lotSize < 1 || $interval < PacedSettings::MIN_INTERVAL_MINUTES) {
+                throw new CampaignActionBuildException(sprintf(
+                    'Lotes programados: informe o tamanho do lote (mínimo 1) e o intervalo entre lotes (mínimo %d minutos).',
+                    PacedSettings::MIN_INTERVAL_MINUTES
+                ));
+            }
+        };
+
+        $this->processContacts($event, function (SendWhatsAppMessage $message, WhatsAppNumber $number) use ($lotSize, $interval): bool {
+            $uuid      = bin2hex(random_bytes(16));
+            $queuedLog = $this->persistQueuedLog($message, $uuid);
+
+            if (null === $queuedLog) {
+                return false;
+            }
+
+            try {
+                $this->pacedScheduler->schedule($message->withQueueLogId($uuid), (int) $number->getId(), $lotSize, $interval);
+            } catch (\Throwable $e) {
+                $this->logger->error('DialogHSM: Falha ao agendar mensagem em lote programado', [
+                    'lead_id' => $message->leadId,
+                    'error'   => $e->getMessage(),
+                ]);
+                $this->markQueuedLogFailed($queuedLog, 'Falha ao agendar envio: '.$e->getMessage());
+
+                return false;
+            }
+
+            return true;
+        }, applyBatchSleep: false, checkNumber: $checkConfig, legacy: $legacy);
     }
 
     private function resolveQueueName(WhatsAppNumber $number, string $mode): ?string

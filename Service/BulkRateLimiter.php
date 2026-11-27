@@ -72,6 +72,15 @@ class BulkRateLimiter
     }
 
     /**
+     * Throttle da trilha dos lotes programados (dialoghsm:consume --mode=paced).
+     * Namespace Redis "paced": não divide contador com o bulk nem com o batch do mesmo número.
+     */
+    public function throttlePaced(string $numberKey, int $ratePerMinute): void
+    {
+        $this->applyThrottle('paced', $ratePerMinute, $numberKey);
+    }
+
+    /**
      * Retorna o delay em segundos entre cada mensagem para respeitar bulk_rate_per_minute.
      * Retorna 0.0 quando rate não está configurado (sem throttle).
      */
